@@ -2,6 +2,8 @@
 #
 # chkconfig: - 86 16
 #
+# (C) 2011 - Ping Identity Corporation, Hans Zandbelt <hzandbelt@pingidentity.com>
+#
 ### BEGIN INIT INFO
 # Provides:        pingfederate
 # Required-Start:  $network $syslog
