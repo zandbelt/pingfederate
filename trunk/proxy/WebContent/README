@@ -1,99 +1,88 @@
-/***************************************************************************
- * Copyright (C) 2011 Ping Identity Corporation
- * All rights reserved.
- *
- * The contents of this file are the property of Ping Identity Corporation.
- * For further information please contact:
- *
- *      Ping Identity Corporation
- *      1099 18th St Suite 2950
- *      Denver, CO 80202
- *      303.468.2900
- *      http://www.pingidentity.com
- *
- * DISCLAIMER OF WARRANTIES:
- *
- * THE SOFTWARE PROVIDED HEREUNDER IS PROVIDED ON AN "AS IS" BASIS, WITHOUT
- * ANY WARRANTIES OR REPRESENTATIONS EXPRESS, IMPLIED OR STATUTORY; INCLUDING,
- * WITHOUT LIMITATION, WARRANTIES OF QUALITY, PERFORMANCE, NONINFRINGEMENT,
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.  NOR ARE THERE ANY
- * WARRANTIES CREATED BY A COURSE OR DEALING, COURSE OF PERFORMANCE OR TRADE
- * USAGE.  FURTHERMORE, THERE ARE NO WARRANTIES THAT THE SOFTWARE WILL MEET
- * YOUR NEEDS OR BE FREE FROM ERRORS, OR THAT THE OPERATION OF THE SOFTWARE
- * WILL BE UNINTERRUPTED.  IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * This is sample code that enables PingFederate to bridge between federation
- * protocols, such as SAML 2.0 to WS-Federate, or SAML 2.0 to SAML 2.0 using
- * the Reference ID adapter, aka. Agentless Integration Kit.
- *
- * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
- */
+This code can be use in conjunction with the Quickstart Sample apps
+but the proxy JSP and properties file will work a generic proxy setup as well.
 
+Steps to produce a working setup:
+
+ 1) download PingFederate 6.5.x and deploy it together with a license file
+
+ 2) download the quickstart sample apps and deploy according to the documentation
+    but without deploying the included data.zip file
+
+ 3) copy the proxy.war directory in server/default/deploy (using cp -r)
+
+ 4) drop the data.zip from this distribution in server/default/data/drop-in-deployer
+    instead of the one that comes with the Quickstart sample apps
+
+ 5) modify your /etc/hosts file so that "proxy" resolves to "127.0.0.1" just
+    like "localhost"
+
+ 6) run the demo by accessing https://localhost:9031/quickstart-app-sp and selecting "Proxy IDP"
+    and then PF-DEMO from the subsequent IDP Discovery screen
+ 
 Below is an overview of the settings for the Reference ID IDP and SP adapters
 that need to configured to support this configuration.
 
 SP Proxy Adapter Settings
 =========================
-Type	
-Instance Name				Proxy SP Adapter
-Instance Id					ProxySpAdapter
-Type						ReferenceID Adapter 1.0
-Class Name					com.pingidentity.pf.adapters.referenceid.SpBackchannelReferenceAuthnAdapter
 
+Type	
+Instance Name	Proxy SP Adapter
+Instance Id	ProxySpAdapter
+Type	ReferenceID Adapter 1.0
+Class Name	com.pingidentity.pf.adapters.referenceid.SpBackchannelReferenceAuthnAdapter
 Instance Configuration	
-User Name					ref
+User Name	ref
 Allowed Subject DN	
 Allowed Issuer DN	
-Logout Service Endpoint		https://localhost:9031/proxy
-Account Linking Authentication Endpoint	https://localhost:9031/proxy
-Reference Duration			3
-Reference Length			30
-Require SSL/TLS				true
+Logout Service Endpoint	https://proxy:9031/proxy/?cmd=sp-slo
+Account Linking Authentication Endpoint	
+Reference Duration	3
+Reference Length	30
+Require SSL/TLS	true
 Outgoing Attribute Format	JSON
 Incoming Attribute Format	JSON
 Logout Mode	Front Channel
 Skip Host Name Validation	false
-
 Actions	
-Show Pass Phrase			Shows the clear text value of the pass phrase for copying to applications.
-
+Show Pass Phrase	Shows the clear text value of the pass phrase for copying to applications.
 Extended Contract	
-Attribute					subject
-
+Attribute	email address
+Attribute	member status
+Attribute	name
+Attribute	subject
+Attribute	userid
 
 IDP Proxy Adapter Settings
 ==========================
-Type
-Instance Name				Proxy IDP Adapter
-Instance Id					ProxyIDPAdapter
-Type						ReferenceID Adapter 1.0
-Class Name					com.pingidentity.pf.adapters.referenceid.IdpBackchannelReferenceAuthnAdapter
 
+Type	
+Instance Name	Proxy IDP Adapter
+Instance Id	ProxyIDPAdapter
+Type	ReferenceID Adapter 1.0
+Class Name	com.pingidentity.pf.adapters.referenceid.IdpBackchannelReferenceAuthnAdapter
 IdP Adapter	
-Authentication Endpoint		https://localhost:9031/proxy
-User Name					ref
+Authentication Endpoint	https://proxy:9031/proxy/?cmd=idp-sso
+User Name	ref
 Allowed Subject DN	
 Allowed Issuer DN	
-Logout Service Endpoint		https://localhost:9031/proxy
-Reference Duration			3
-Reference Length			30
-Require SSL/TLS				true
+Logout Service Endpoint	https://proxy:9031/proxy/?cmd=idp-slo
+Reference Duration	3
+Reference Length	30
+Require SSL/TLS	true
 Outgoing Attribute Format	JSON
 Incoming Attribute Format	JSON
-Logout Mode					Front Channel
+Logout Mode	Front Channel
 Skip Host Name Validation	false
-
 Actions	
-Show Pass Phrase			Shows the clear text value of the pass phrase for copying to applications.
-
+Show Pass Phrase	Shows the clear text value of the pass phrase for copying to applications.
 Extended Contract	
-Attribute					subject
-
+Attribute	email
+Attribute	fname
+Attribute	lname
+Attribute	salary
+Attribute	sessionId
+Attribute	subject
+Attribute	username
 Adapter Attributes	
 Mask all OGNL expression log values	false
-Pseudonym					subject
+Pseudonym	subject
