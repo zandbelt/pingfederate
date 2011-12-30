@@ -50,7 +50,11 @@ XML;
 		$xpath->registerNamespace('wsse', 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd');
 		$token = $xpath->query('/s:Envelope/s:Body/wst:RequestSecurityTokenResponseCollection/wst:RequestSecurityTokenResponse/wst:RequestedSecurityToken', $doc);
 		$proofKey = $xpath->query('/s:Envelope/s:Body/wst:RequestSecurityTokenResponseCollection/wst:RequestSecurityTokenResponse/wst:RequestedProofToken/wst:BinarySecret', $doc);
-		$proofKey = base64_decode($proofKey->item(0)->textContent);
+		if ($proofKey->length > 0) {
+			$proofKey = base64_decode($proofKey->item(0)->textContent);
+		} else {
+			$proofKey = NULL;
+		}
 		return array ($dom, $xpath, $token->item(0), $proofKey);
 	}
 	
@@ -86,6 +90,39 @@ XML;
   </wsse:Security>
   <wsa:To xmlns:wsa="http://www.w3.org/2005/08/addressing">$to</wsa:To>
   <wsa:Action xmlns:wsa="http://www.w3.org/2005/08/addressing">$action</wsa:Action>
+XML;
+	}
+
+	static function getSigned($data, $proofKey, $samlID, $refURI) {
+		$dom = new DOMDocument();
+		$dom->loadXML($data);
+		$canonicalXML = $dom->documentElement->C14N(TRUE, FALSE);
+		$digestValue = base64_encode(hash('sha1', $canonicalXML, TRUE));
+		$signedInfo = <<<XML
+<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+  <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+  <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#hmac-sha1"/>
+  <Reference URI="#$refURI">
+    <Transforms><Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"></Transform></Transforms>
+    <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+    <DigestValue>$digestValue</DigestValue>
+  </Reference>
+</SignedInfo>
+XML;
+		$d = new DOMDocument();
+		$d->loadXML($signedInfo);	
+		$canonicalXml = $d->documentElement->C14N(TRUE, FALSE);
+		$signatureValue = base64_encode(hash_hmac('sha1', $canonicalXml , $proofKey, TRUE));
+		return <<<XML
+<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+  $signedInfo
+  <SignatureValue>$signatureValue</SignatureValue>
+  <KeyInfo>
+    <wsse:SecurityTokenReference xmlns:b="http://docs.oasis-open.org/wss/oasis-wss-wssecurity-secext-1.1.xsd" b:TokenType="http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLV2.0">
+      <wsse:KeyIdentifier ValueType="http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLID">$samlID</wsse:KeyIdentifier>
+    </wsse:SecurityTokenReference>
+  </KeyInfo>
+</Signature>
 XML;
 	}
 
