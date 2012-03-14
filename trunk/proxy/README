@@ -1,0 +1,41 @@
+Steps to produce a working setup:
+
+ 1) download PingFederate 6.x.x and deploy it together with a license file
+
+ 2) copy the proxy.war directory in server/default/deploy (using cp -r)
+
+ 3) configure one IDP and one SP Reference ID adapter (1.0, from the Agentless Integration Kit) with the settings below
+
+ 4) review proxy.war/proxy.properties and edit as needed; typically only the hostname (if settings below are copied)
+
+SP Proxy Adapter Settings
+=========================
+
+Instance Name	Proxy SP Adapter
+Instance Id	ProxySpAdapter
+User Name	ref
+Password ref1234
+Logout Service Endpoint	https://<hostname>:9031/proxy/?cmd=sp-slo
+Require SSL/TLS	true
+Outgoing Attribute Format	JSON
+Incoming Attribute Format	JSON
+Logout Mode	Front Channel
+Skip Host Name Validation	false
+<and an attribute contract for all attributes you want to pass over the bridge>
+
+IDP Proxy Adapter Settings
+==========================
+
+Instance Name	Proxy IDP Adapter
+Instance Id	ProxyIDPAdapter
+Authentication Endpoint	https://<hostname>:9031/proxy/?cmd=idp-sso
+User Name	ref
+Password ref1234
+Logout Service Endpoint	https://<hostname>:9031/proxy/?cmd=idp-slo
+Require SSL/TLS	true
+Outgoing Attribute Format	JSON
+Incoming Attribute Format	JSON
+Logout Mode	Front Channel
+Skip Host Name Validation	false
+<and an attribute contract for all attributes you want to pass over the bridge>
+
