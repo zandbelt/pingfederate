@@ -87,7 +87,7 @@
 	AuthnRequestDocument authnRequestDocument = AuthnRequestDocument.Factory.parse(samlRequest);
 	AuthnRequestType authnRequestType = authnRequestDocument.getAuthnRequest();
 	
-	String propsFilename = "default";
+	String propsFilename = "file:///default.properties";
 	if (authnRequestType.isSetRequestedAuthnContext()) {
 		try {
 			propsFilename = authnRequestType.getRequestedAuthnContext().getAuthnContextClassRefArray(0);
@@ -103,12 +103,15 @@
 	Properties p = new Properties();
 	p.load(stream);
 
+	String q = u.getQuery();
 	// override with properties from query
-	for (String param : u.getQuery().split("&")) {
-		String pair[] = param.split("=");
-		p.setProperty(URLDecoder.decode(pair[0], "UTF-8"), URLDecoder.decode(pair[1], "UTF-8"));
-    }
-	
+	if (q != null) {
+		for (String param : q.split("&")) {
+			String pair[] = param.split("=");
+			p.setProperty(URLDecoder.decode(pair[0], "UTF-8"), URLDecoder.decode(pair[1], "UTF-8"));
+	    }
+	}
+
 	// this URL can be hard-configured because this script is specific for an IDP
 	// it now points to the local PF IDP instance for testing purposes
 	String ssoUrl = p.getProperty("sso.url");
