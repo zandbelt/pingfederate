@@ -57,7 +57,6 @@
   TODO:
 	- it would be more elegant to use TargetResource if that could be passed transparently into
 	  RelayState and disable checks on that; that may be possible with PF >= 6.6 (?)
-    - check signature on incoming request if available (actual requirement to do so may vary...)
     - support POST binding (ie. without XML signatures..?)
 	
 --%>
@@ -74,6 +73,7 @@
 <%@page import="org.sourceid.saml20.xmlbinding.protocol.AuthnRequestType"%>
 <%@page import="org.sourceid.saml20.xmlbinding.protocol.AuthnRequestDocument"%>
 <%@page import="org.sourceid.saml20.xmlbinding.protocol.RequestedAuthnContextType"%>
+<%@page import="org.sourceid.common.dsig.SignatureStatus"%>
 <%@page import="org.sourceid.common.dsig.QueryStringSignatureUtil"%>
 <%@page import="com.pingidentity.crypto.PkCert"%>
 <%
@@ -151,9 +151,15 @@
 	// for this IDP connection
 	String keyAlias = p.getProperty("signing.key.alias");
 	String signingAlgorithm = p.getProperty("signing.key.algorithm", "http://www.w3.org/2000/09/xmldsig#rsa-sha1");
+		
 	if (keyAlias != null) {
         PkCertAndConnectionCertManager dsigPkCertManager = (PkCertAndConnectionCertManager)MgmtFactory.getDsigPkCertManager();
         PkCert pkCert = dsigPkCertManager.getPkCert(keyAlias);
+		
+        // if we are going to sign, the incoming request must be signed too, so verify this (because of AssertionConsumerURL etc..)
+		SignatureStatus signatureStatus = QueryStringSignatureUtil.verifyQuerySignature(request.getQueryString(), pkCert.getX509Certificate().getPublicKey());
+		if (signatureStatus != SignatureStatus.VALID) throw new Exception("signature invalid");
+		
         QueryStringSignatureUtil.SignedQuery signedQuery = QueryStringSignatureUtil.signQuery(sb.toString(), pkCert.getPrivateKey(), signingAlgorithm);
 	    sb = new StringBuilder(signedQuery.getSignedQueryString());
 	}
