@@ -49,6 +49,9 @@
 
 <%!
 
+// TODO: - use regular JSP session object+cookie instead of our own cookie
+//       - support SSO session on the proxy through this object too, configurable (yes/no, timeout) by property settings
+     
 public JSONObject execRESTcall(String url, Properties p, String type, JSONObject jsonRespObj) throws Exception {
 	URL u = new URL(url);
 	HttpsURLConnection con = (HttpsURLConnection)u.openConnection();
@@ -72,9 +75,9 @@ public JSONObject execRESTcall(String url, Properties p, String type, JSONObject
 	return (JSONObject)parser.parse(isr);
 }
 
-public boolean doCookieStuff(HttpServletRequest request, HttpServletResponse response) throws Exception {
-	boolean hasCookie = false;
-	String cookieName = "proxy-slo";
+public String doCookieStuff(HttpServletRequest request, HttpServletResponse response, String value) throws Exception {
+	String result = null;
+	String cookieName = "proxy-state";
 	Cookie cookies [] = request.getCookies ();
 	Cookie myCookie = null;
 	if (cookies != null) {
@@ -86,15 +89,15 @@ public boolean doCookieStuff(HttpServletRequest request, HttpServletResponse res
 		}
 	}
 	if (myCookie == null) {
-		myCookie = new Cookie (cookieName, "dummy");
-		hasCookie = false;
+		result = null;
+		myCookie = new Cookie (cookieName, value);
 	} else {
-		myCookie = new Cookie(cookieName, "");
+		result = myCookie.getValue();
+		myCookie = new Cookie(cookieName,value);
 		myCookie.setMaxAge(0);
-		hasCookie = true;
 	}
 	response.addCookie(myCookie);
-	return hasCookie;
+	return result;
 }
 
 %>
@@ -106,16 +109,49 @@ public boolean doCookieStuff(HttpServletRequest request, HttpServletResponse res
 	Properties p = new Properties();
 	p.load(stream);
 	
-	if (cmdValue.equals("idp-sso")) {
-		// this is an SP request that we forward to the IDP Discovery page
+	if (cmdValue == null) {
+		
+		// IDP-initiated-SSO
+		
+		doCookieStuff(request, response, request.getParameter("REF"));
 
-		// assemble the URL to CDC endpoint and send the browser off
-		String startCDCUrl = p.getProperty("pf.base.url");
-		startCDCUrl += "/sp/cdcstartSSO.ping?SpSessionAuthnAdapterId=" +  URLEncoder.encode(p.getProperty("sp.adapter.id"), "UTF-8");
-		String targetResource = p.getProperty("pf.base.url") + p.getProperty("proxy.path");
-		targetResource += "?cmd=idp-sso-resume&resumePath=" + URLEncoder.encode(request.getParameter("resumePath"), "UTF-8");
-		startCDCUrl += "&TargetResource=" + URLEncoder.encode(targetResource, "UTF-8");
-		response.sendRedirect(startCDCUrl);
+		String strReturnUrl = p.getProperty("pf.base.url");
+		strReturnUrl += "/idp/startSSO.ping?IdpAdapterId=" +  URLEncoder.encode(p.getProperty("idp.adapter.id"), "UTF-8");
+		if (request.getParameter("PartnerSpId") != null) strReturnUrl += "&PartnerSpId=" + URLEncoder.encode(request.getParameter("PartnerSpId"), "UTF-8");
+		if (request.getParameter("TargetResource") != null) strReturnUrl += "&TargetResource=" + URLEncoder.encode(request.getParameter("TargetResource"), "UTF-8");
+
+		response.sendRedirect(strReturnUrl);
+		
+	} else if (cmdValue.equals("idp-sso")) {
+
+		String cookie = doCookieStuff(request, response, "dummy");
+		if (cookie != null) {
+			// continue IDP init
+
+			// pickup the attributes from the IDP using the Agentless protocol
+			String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(cookie, "UTF-8");
+			JSONObject jsonRespObj = execRESTcall(pickupUrl, p, "sp", null);
+
+			// dropoff the attributes encoded in the JSON object for SP application retrieval
+			String dropoffUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/dropoff";
+			jsonRespObj = execRESTcall(dropoffUrl, p, "idp", jsonRespObj);
+		
+			// send off the browser to the resumePath, ie. to the SP application
+			String strReturnUrl = p.getProperty("pf.base.url") + request.getParameter("resumePath") + "?REF=" + URLEncoder.encode((String)jsonRespObj.get("REF"), "UTF-8") + "&IdpAdapterId=" + URLEncoder.encode(p.getProperty("idp.adapter.id"), "UTF-8");
+			response.sendRedirect(strReturnUrl);
+			
+		} else {
+			// this is an SP request that we forward to the IDP Discovery page
+			
+			// assemble the URL to CDC endpoint and send the browser off
+			String startCDCUrl = p.getProperty("pf.base.url");
+			startCDCUrl += "/sp/cdcstartSSO.ping?SpSessionAuthnAdapterId=" +  URLEncoder.encode(p.getProperty("sp.adapter.id"), "UTF-8");
+			String targetResource = p.getProperty("pf.base.url") + p.getProperty("proxy.path");
+			targetResource += "?cmd=idp-sso-resume&resumePath=" + URLEncoder.encode(request.getParameter("resumePath"), "UTF-8");
+			startCDCUrl += "&TargetResource=" + URLEncoder.encode(targetResource, "UTF-8");
+			response.sendRedirect(startCDCUrl);
+			
+		}
 
 	} else if (cmdValue.equals("idp-sso-resume")) {
 		// this is a response from the IDP that we forward to the SP
@@ -139,7 +175,7 @@ public boolean doCookieStuff(HttpServletRequest request, HttpServletResponse res
 		String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 		JSONObject jsonRespObj = execRESTcall(pickupUrl, p, "sp", null);
 		
-		if (doCookieStuff(request, response)) {
+		if (doCookieStuff(request, response, "dummy") != null) {
 			// send off the browser to the resumePath, ie. to the IDP
 			String strReturnUrl = p.getProperty("pf.base.url") + (String)jsonRespObj.get("resumePath") + "?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 			response.sendRedirect(strReturnUrl);
@@ -160,7 +196,7 @@ public boolean doCookieStuff(HttpServletRequest request, HttpServletResponse res
 		String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 		JSONObject jsonRespObj = execRESTcall(pickupUrl, p, "idp", null);
 		
-		if (doCookieStuff(request, response)) {
+		if (doCookieStuff(request, response, "dummy") != null) {
 			// send off the browser to the resumePath, ie. to the SP
 			String strReturnUrl = p.getProperty("pf.base.url") + (String)jsonRespObj.get("resumePath") + "?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 			response.sendRedirect(strReturnUrl);
