@@ -1,6 +1,6 @@
 <%
 /***************************************************************************
- * Copyright (C) 2011 Ping Identity Corporation
+ * Copyright (C) 2011-2012 Ping Identity Corporation
  * All rights reserved.
  *
  * The contents of this file are the property of Ping Identity Corporation.
@@ -49,10 +49,10 @@
 
 <%!
 
-// TODO: - use regular JSP session object+cookie instead of our own cookie
-//       - support SSO session on the proxy through this object too, configurable (yes/no, timeout) by property settings
-     
-public JSONObject execRESTcall(String url, Properties p, String type, JSONObject jsonRespObj) throws Exception {
+/**
+ * Execute a REST call to the Reference ID adapter.
+ */
+public JSONObject doREST(String url, Properties p, String type, JSONObject jsonRespObj) throws Exception {
 	URL u = new URL(url);
 	HttpsURLConnection con = (HttpsURLConnection)u.openConnection();
 	
@@ -75,29 +75,32 @@ public JSONObject execRESTcall(String url, Properties p, String type, JSONObject
 	return (JSONObject)parser.parse(isr);
 }
 
-public String doCookieStuff(HttpServletRequest request, HttpServletResponse response, String value) throws Exception {
-	String result = null;
-	String cookieName = "proxy-state";
-	Cookie cookies [] = request.getCookies ();
-	Cookie myCookie = null;
-	if (cookies != null) {
-		for (int i = 0; i < cookies.length; i++) {
-			if (cookies [i].getName().equals (cookieName)) {
-				myCookie = cookies[i];
-				break;
-			}
-		}
-	}
-	if (myCookie == null) {
-		result = null;
-		myCookie = new Cookie (cookieName, value);
-	} else {
-		result = myCookie.getValue();
-		myCookie = new Cookie(cookieName,value);
-		myCookie.setMaxAge(0);
-	}
-	response.addCookie(myCookie);
-	return result;
+/**
+ * Pickup attributes from PingFederate using the Agentless protocol.
+ */ 
+public JSONObject doPickup(Properties p, String role, HttpServletRequest request, HttpSession session) throws Exception {
+	String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
+	JSONObject jsonObject = doREST(pickupUrl, p, role, null);
+	session.setAttribute("json", jsonObject);
+	return jsonObject;
+}
+
+/**
+ * Drop-off attributes to PingFederate using the Agentless protocol.
+ */ 
+public String doDropoff(Properties p, String role, HttpSession session)  throws Exception {
+	String dropoffUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/dropoff";
+	JSONObject jsonObject = (JSONObject)session.getAttribute("json");
+	jsonObject = doREST(dropoffUrl, p, role, jsonObject);	
+	return (String)jsonObject.get("REF");
+}
+
+/**
+ * send off the browser to the resumePath to PingFederate
+ */
+public void doResume(Properties p, String resumePath, HttpServletResponse response, String ref)  throws Exception {
+	String strReturnUrl = p.getProperty("pf.base.url") + resumePath + "?REF=" + URLEncoder.encode(ref, "UTF-8");
+	response.sendRedirect(strReturnUrl);	
 }
 
 %>
@@ -108,12 +111,15 @@ public String doCookieStuff(HttpServletRequest request, HttpServletResponse resp
 	InputStream stream = application.getResourceAsStream("/proxy.properties");
 	Properties p = new Properties();
 	p.load(stream);
+
+	if (p.getProperty("session.max.inactive.interval") != null) {
+		session.setMaxInactiveInterval(Integer.parseInt(p.getProperty("session.max.inactive.interval"));
+	}
 	
 	if (cmdValue == null) {
-		
-		// IDP-initiated-SSO
-		
-		doCookieStuff(request, response, request.getParameter("REF"));
+
+		// start IDP-initiated-SSO
+		doPickup(p, "sp", request, session);
 
 		String strReturnUrl = p.getProperty("pf.base.url");
 		strReturnUrl += "/idp/startSSO.ping?IdpAdapterId=" +  URLEncoder.encode(p.getProperty("idp.adapter.id"), "UTF-8");
@@ -121,28 +127,17 @@ public String doCookieStuff(HttpServletRequest request, HttpServletResponse resp
 		if (request.getParameter("TargetResource") != null) strReturnUrl += "&TargetResource=" + URLEncoder.encode(request.getParameter("TargetResource"), "UTF-8");
 
 		response.sendRedirect(strReturnUrl);
-		
+
 	} else if (cmdValue.equals("idp-sso")) {
 
-		String cookie = doCookieStuff(request, response, "dummy");
-		if (cookie != null) {
-			// continue IDP init
+		if (session.getAttribute("json") != null) {
 
-			// pickup the attributes from the IDP using the Agentless protocol
-			String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(cookie, "UTF-8");
-			JSONObject jsonRespObj = execRESTcall(pickupUrl, p, "sp", null);
+			// continue IDP initiated SSO
+			doResume(p, request.getParameter("resumePath"), response, doDropoff(p, "idp", session));
 
-			// dropoff the attributes encoded in the JSON object for SP application retrieval
-			String dropoffUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/dropoff";
-			jsonRespObj = execRESTcall(dropoffUrl, p, "idp", jsonRespObj);
-		
-			// send off the browser to the resumePath, ie. to the SP application
-			String strReturnUrl = p.getProperty("pf.base.url") + request.getParameter("resumePath") + "?REF=" + URLEncoder.encode((String)jsonRespObj.get("REF"), "UTF-8") + "&IdpAdapterId=" + URLEncoder.encode(p.getProperty("idp.adapter.id"), "UTF-8");
-			response.sendRedirect(strReturnUrl);
-			
 		} else {
-			// this is an SP request that we forward to the IDP Discovery page
-			
+			// this is an SP request to the IDP adapter that we forward to the IDP Discovery page for the SP adapter
+
 			// assemble the URL to CDC endpoint and send the browser off
 			String startCDCUrl = p.getProperty("pf.base.url");
 			startCDCUrl += "/sp/cdcstartSSO.ping?SpSessionAuthnAdapterId=" +  URLEncoder.encode(p.getProperty("sp.adapter.id"), "UTF-8");
@@ -150,73 +145,72 @@ public String doCookieStuff(HttpServletRequest request, HttpServletResponse resp
 			targetResource += "?cmd=idp-sso-resume&resumePath=" + URLEncoder.encode(request.getParameter("resumePath"), "UTF-8");
 			startCDCUrl += "&TargetResource=" + URLEncoder.encode(targetResource, "UTF-8");
 			response.sendRedirect(startCDCUrl);
-			
+
 		}
 
 	} else if (cmdValue.equals("idp-sso-resume")) {
-		// this is a response from the IDP that we forward to the SP
+		// this is a response from the IDP to the SP adapter that we forward to the SP through the IDP adapter
 
-		// pickup the attributes from the IDP using the Agentless protocol
-		String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
-		JSONObject jsonRespObj = execRESTcall(pickupUrl, p, "sp", null);
-
-		// dropoff the attributes encoded in the JSON object for SP application retrieval
-		String dropoffUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/dropoff";
-		jsonRespObj = execRESTcall(dropoffUrl, p, "idp", jsonRespObj);
-	
-		// send off the browser to the resumePath, ie. to the SP application
-		String strReturnUrl = p.getProperty("pf.base.url") + request.getParameter("resumePath") + "?REF=" + URLEncoder.encode((String)jsonRespObj.get("REF"), "UTF-8") + "&IdpAdapterId=" + URLEncoder.encode(p.getProperty("idp.adapter.id"), "UTF-8");
-		response.sendRedirect(strReturnUrl);
+		doPickup(p, "sp", request, session);
+		doResume(p, request.getParameter("resumePath"), response, doDropoff(p, "idp", session));
 
 	} else if (cmdValue.equals("sp-slo")) {
-		// this is a logout request from the IDP
 
-		// pickup the attributes including the resumePath from the IDP using the Agentless protocol
-		String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
-		JSONObject jsonRespObj = execRESTcall(pickupUrl, p, "sp", null);
-		
-		if (doCookieStuff(request, response, "dummy") != null) {
-			// send off the browser to the resumePath, ie. to the IDP
-			String strReturnUrl = p.getProperty("pf.base.url") + (String)jsonRespObj.get("resumePath") + "?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
-			response.sendRedirect(strReturnUrl);
+		// this is a logout request from the IDP through the SP adapter
+		JSONObject jsonObj = doPickup(p, "sp", request, session);
+
+		if (session.getAttribute("dummy") != null) {
+
+			// SLO was already initiated by peer leg so just resume
+			session.removeAttribute("dummy");
+			// send off the browser to the resumePath, ie. to the IDP			
+			doResume(p, (String)jsonObj.get("resumePath"), response, request.getParameter("REF"));
+
 		} else {
-			// assemble the URL to SLO endpoint and send the browser off to the IDP
+
+			session.setAttribute("dummy", "");
+			// assemble the URL to SLO endpoint and send the browser off to the SP through the IDP adapter
 			String startSLOUrl = p.getProperty("pf.base.url") + "/idp/startSLO.ping";
 			String targetResource = p.getProperty("pf.base.url") + p.getProperty("proxy.path");
-			targetResource += "?cmd=slo-resume&resumePath=" + URLEncoder.encode((String)jsonRespObj.get("resumePath"), "UTF-8");
+			targetResource += "?cmd=slo-resume&resumePath=" + URLEncoder.encode((String)jsonObj.get("resumePath"), "UTF-8");
 			targetResource += "&REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 			startSLOUrl += "?TargetResource=" + URLEncoder.encode(targetResource, "UTF-8");
 			response.sendRedirect(startSLOUrl);
-		}
-		
-	} else if (cmdValue.equals("idp-slo")) {
-		// this is a logout request from the SP
 
-		// pickup the attributes including the resumePath from the SP using the Agentless protocol
-		String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
-		JSONObject jsonRespObj = execRESTcall(pickupUrl, p, "idp", null);
-		
-		if (doCookieStuff(request, response, "dummy") != null) {
+		}
+
+	} else if (cmdValue.equals("idp-slo")) {
+
+		// this is a logout request from the SP through the IDP adapter
+		JSONObject jsonObj = doPickup(p, "idp", request, session);
+
+		if (session.getAttribute("dummy") != null) {
+
+			// SLO was already initiated by peer leg so just resume
+			session.removeAttribute("dummy");
 			// send off the browser to the resumePath, ie. to the SP
-			String strReturnUrl = p.getProperty("pf.base.url") + (String)jsonRespObj.get("resumePath") + "?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
-			response.sendRedirect(strReturnUrl);
+			doResume(p, (String)jsonObj.get("resumePath"), response, request.getParameter("REF"));
+
 		} else {
-			// assemble the URL to SLO endpoint and send the browser off to the SP
+
+			session.setAttribute("dummy", "");
+			// assemble the URL to SLO endpoint and send the browser off to the IDP through the SP adapter
 			String startSLOUrl = p.getProperty("pf.base.url");
 			startSLOUrl += "/sp/startSLO.ping?SpSessionAuthnAdapterId=" +  URLEncoder.encode(p.getProperty("sp.adapter.id"), "UTF-8");
 			String targetResource = p.getProperty("pf.base.url") + p.getProperty("proxy.path");
-			targetResource += "?cmd=slo-resume&resumePath=" + URLEncoder.encode((String)jsonRespObj.get("resumePath"), "UTF-8");
+			targetResource += "?cmd=slo-resume&resumePath=" + URLEncoder.encode((String)jsonObj.get("resumePath"), "UTF-8");
 			targetResource += "&REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 			startSLOUrl += "&TargetResource=" + URLEncoder.encode(targetResource, "UTF-8");
 			response.sendRedirect(startSLOUrl);
+
 		}
-	
+
 	} else if (cmdValue.equals("slo-resume")) {
 
-		// send off the browser to the resumePath, ie. to the IDP/SP
-		String strReturnUrl = p.getProperty("pf.base.url") + request.getParameter("resumePath") + "?REF=" + request.getParameter("REF");
-		response.sendRedirect(strReturnUrl);
-		
+		// kill the session and send off the browser to the resumePath, ie. to the IDP/SP
+		session.removeAttribute("json");
+		doResume(p, request.getParameter("resumePath"), response, request.getParameter("REF"));
+
 	} else {
 
 		response.getWriter().print("Invalid request: \"" + cmdValue + "\"");

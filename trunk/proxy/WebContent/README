@@ -1,9 +1,11 @@
 This code can be use in conjunction with the Quickstart Sample apps
 but the proxy JSP and properties file will work a generic proxy setup as well.
 
+The proxy supports SSO sessions with a configurable timeout, see proxy.properties (session.max.inactive.interval).
+
 Steps to produce a working setup:
 
- 1) download PingFederate 6.5.x and deploy it together with a license file
+ 1) download PingFederate 6.x.x and deploy it together with a license file
 
  2) download the quickstart sample apps and deploy according to the documentation
     but without deploying the included data.zip file
@@ -21,72 +23,38 @@ Steps to produce a working setup:
     
     or, for IDP-initiated-SSO ("2-hop-spanning-target-resource"):
     
-    https://localhost:9031/idp/startSSO.ping?PartnerSpId=urn%3Aproxy%3Asp&TargetResource=https%3A%2F%2Fproxy%3A9031%2Fproxy%2F%3FPartnerSpId%3DPF-DEMO%26TargetResource%3Dhttps%3A%2F%2Flocalhost%3A9031%2Fquickstart-app-sp%2Fgo%3Fhans%3Dja 
-    
+    https://localhost:9031/idp/startSSO.ping?PartnerSpId=urn%3Aproxy%3Asp&TargetResource=https%3A%2F%2Fproxy%3A9031%2Fproxy%2F%3FPartnerSpId%3DPF-DEMO%26TargetResource%3Dhttps%3A%2F%2Flocalhost%3A9031%2Fquickstart-app-sp%2Fgo%3Fhans%3Dja
+
 Below is an overview of the settings for the Reference ID IDP and SP adapters
 that need to configured to support this configuration.
 
 SP Proxy Adapter Settings
 =========================
 
-Type	
 Instance Name	Proxy SP Adapter
 Instance Id	ProxySpAdapter
-Type	ReferenceID Adapter 1.0
-Class Name	com.pingidentity.pf.adapters.referenceid.SpBackchannelReferenceAuthnAdapter
-Instance Configuration	
 User Name	ref
-Allowed Subject DN	
-Allowed Issuer DN	
+Password ref1234
 Logout Service Endpoint	https://proxy:9031/proxy/?cmd=sp-slo
-Account Linking Authentication Endpoint	
-Reference Duration	3
-Reference Length	30
 Require SSL/TLS	true
 Outgoing Attribute Format	JSON
 Incoming Attribute Format	JSON
 Logout Mode	Front Channel
 Skip Host Name Validation	false
-Actions	
-Show Pass Phrase	Shows the clear text value of the pass phrase for copying to applications.
-Extended Contract	
-Attribute	email address
-Attribute	member status
-Attribute	name
-Attribute	subject
-Attribute	userid
+<and an attribute contract for all attributes you want to pass over the bridge>
 
 IDP Proxy Adapter Settings
 ==========================
 
-Type	
 Instance Name	Proxy IDP Adapter
 Instance Id	ProxyIDPAdapter
-Type	ReferenceID Adapter 1.0
-Class Name	com.pingidentity.pf.adapters.referenceid.IdpBackchannelReferenceAuthnAdapter
-IdP Adapter	
 Authentication Endpoint	https://proxy:9031/proxy/?cmd=idp-sso
 User Name	ref
-Allowed Subject DN	
-Allowed Issuer DN	
+Password ref1234
 Logout Service Endpoint	https://proxy:9031/proxy/?cmd=idp-slo
-Reference Duration	3
-Reference Length	30
 Require SSL/TLS	true
 Outgoing Attribute Format	JSON
 Incoming Attribute Format	JSON
 Logout Mode	Front Channel
 Skip Host Name Validation	false
-Actions	
-Show Pass Phrase	Shows the clear text value of the pass phrase for copying to applications.
-Extended Contract	
-Attribute	email
-Attribute	fname
-Attribute	lname
-Attribute	salary
-Attribute	sessionId
-Attribute	subject
-Attribute	username
-Adapter Attributes	
-Mask all OGNL expression log values	false
-Pseudonym	subject
+<and an attribute contract for all attributes you want to pass over the bridge>
