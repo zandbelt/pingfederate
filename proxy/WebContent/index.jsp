@@ -45,6 +45,15 @@
 <%@page import="org.json.simple.JSONObject" %>
 <%@page import="org.json.simple.parser.JSONParser" %>
 
+<%@page import="javax.net.ssl.X509TrustManager"%>
+<%@page import="java.security.cert.CertificateException"%>
+<%@page import="java.security.cert.X509Certificate"%>
+<%@page import="javax.net.ssl.SSLSocketFactory"%>
+<%@page import="javax.net.ssl.TrustManager"%>
+<%@page import="javax.net.ssl.SSLContext"%>
+<%@page import="javax.net.ssl.SSLSession"%>
+<%@page import="javax.net.ssl.HostnameVerifier"%>
+
 <%@page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 
 <%!
@@ -53,9 +62,36 @@
  * Execute a REST call to the Reference ID adapter.
  */
 public JSONObject doREST(String url, Properties p, String type, JSONObject jsonRespObj) throws Exception {
+
+	X509TrustManager tm = null;
+	HostnameVerifier hv = null;
+	SSLSocketFactory socketFactory = null;
+		
+	if (Boolean.parseBoolean(p.getProperty("ssl.server.certificate.validation", "true")) != true) {
+		tm = new X509TrustManager() {
+			public void checkClientTrusted(X509Certificate[] x509Certs, String s) throws CertificateException {}
+			public void checkServerTrusted(X509Certificate[] x509Certs, String s) throws CertificateException {}
+			public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+		};
+		SSLContext sslContext = SSLContext.getInstance("TLS");
+		sslContext.init(null, new TrustManager[] {tm}, null);
+		socketFactory = sslContext.getSocketFactory();
+	}
+	
 	URL u = new URL(url);
 	HttpsURLConnection con = (HttpsURLConnection)u.openConnection();
+
+	if (Boolean.parseBoolean(p.getProperty("ssl.server.certificate.validation", "true")) != true) {
+		con.setSSLSocketFactory(socketFactory);
+	}
 	
+	if (Boolean.parseBoolean(p.getProperty("ssl.hostname.verification", "true")) != true) {
+		hv = new HostnameVerifier() {
+			public boolean verify(String urlHostName, SSLSession session) { return true; }
+		};
+		con.setHostnameVerifier(hv);
+	}
+
 	con.setRequestProperty("ping.uname", p.getProperty(type + ".adapter.username"));
 	con.setRequestProperty("ping.pwd", p.getProperty(type + ".adapter.password"));
 	con.setRequestProperty("ping.instanceId", p.getProperty(type + ".adapter.id"));
@@ -79,7 +115,7 @@ public JSONObject doREST(String url, Properties p, String type, JSONObject jsonR
  * Pickup attributes from PingFederate using the Agentless protocol.
  */ 
 public JSONObject doPickup(Properties p, String role, HttpServletRequest request, HttpSession session) throws Exception {
-	String pickupUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
+	String pickupUrl = p.getProperty("pf.base.url") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 	JSONObject jsonObject = doREST(pickupUrl, p, role, null);
 	session.setAttribute("json", jsonObject);
 	return jsonObject;
@@ -89,7 +125,7 @@ public JSONObject doPickup(Properties p, String role, HttpServletRequest request
  * Drop-off attributes to PingFederate using the Agentless protocol.
  */ 
 public String doDropoff(Properties p, String role, HttpSession session)  throws Exception {
-	String dropoffUrl = p.getProperty("pf.base.url.backchannel") + "/ext/ref/dropoff";
+	String dropoffUrl = p.getProperty("pf.base.url") + "/ext/ref/dropoff";
 	JSONObject jsonObject = (JSONObject)session.getAttribute("json");
 	jsonObject = doREST(dropoffUrl, p, role, jsonObject);	
 	return (String)jsonObject.get("REF");
@@ -113,7 +149,7 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 	p.load(stream);
 
 	if (p.getProperty("session.max.inactive.interval") != null) {
-		session.setMaxInactiveInterval(Integer.parseInt(p.getProperty("session.max.inactive.interval"));
+		session.setMaxInactiveInterval(Integer.parseInt(p.getProperty("session.max.inactive.interval")));
 	}
 	
 	if (cmdValue == null) {
