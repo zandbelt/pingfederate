@@ -175,12 +175,14 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 			// this is an SP request to the IDP adapter that we forward to the IDP Discovery page for the SP adapter
 
 			// assemble the URL to CDC endpoint and send the browser off
-			String startCDCUrl = p.getProperty("pf.base.url");
-			startCDCUrl += "/sp/cdcstartSSO.ping?SpSessionAuthnAdapterId=" +  URLEncoder.encode(p.getProperty("sp.adapter.id"), "UTF-8");
+			String startSSOUrl = p.getProperty("pf.base.url");
+			startSSOUrl += p.getProperty("pf.start.sso.path", "/sp/cdcstartSSO.ping");
+			startSSOUrl += (startSSOUrl.indexOf("?") > -1) ? "&" : "?";
+			startSSOUrl += "SpSessionAuthnAdapterId=" +  URLEncoder.encode(p.getProperty("sp.adapter.id"), "UTF-8");
 			String targetResource = p.getProperty("pf.base.url") + p.getProperty("proxy.path");
 			targetResource += "?cmd=idp-sso-resume&resumePath=" + URLEncoder.encode(request.getParameter("resumePath"), "UTF-8");
-			startCDCUrl += "&TargetResource=" + URLEncoder.encode(targetResource, "UTF-8");
-			response.sendRedirect(startCDCUrl);
+			startSSOUrl += "&TargetResource=" + URLEncoder.encode(targetResource, "UTF-8");
+			response.sendRedirect(startSSOUrl);
 
 		}
 
