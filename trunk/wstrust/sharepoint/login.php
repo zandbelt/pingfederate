@@ -23,7 +23,7 @@ include_once dirname(dirname(__FILE__)) . '/http.php';
 include_once dirname(dirname(__FILE__)) . '/wstrust.php';
 
 // username/password for authenticating the user to the IP-STS
-$username = 'jan';
+$username = 'john';
 $password = 'jan';
 
 // Sharepoint 2010 Claims Based Site
@@ -65,9 +65,10 @@ $target = $sharepoint . '_trust/';
 
 $cookiefile = '/tmp/sharepoint-cookies.txt';
 $result = HTTP::doPost($target, array('wa' => 'wsignin1.0', 'wctx' => $wctx, 'wresult' => $wresult), $cookiefile);
-$result = HTTP::doGet($wctx, $cookiefile);
+#do not do this call ?!
+#$result = HTTP::doGet($wctx, $cookiefile);
 $result = HTTP::doGet($sharepoint . 'sites/test/SitePages/Home.aspx', $cookiefile);
-#unlink($cookiefile);
+unlink($cookiefile);
 
 print_r($result);
 ?>
