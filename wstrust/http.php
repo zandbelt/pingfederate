@@ -42,10 +42,14 @@ class HTTP {
 		curl_setopt($this->ch, CURLOPT_URL, $url);
 	}
 	
-	private function doExec($url, $post = NULL) {
+	private function doExec($url, $post = NULL, $cookies = NULL) {
 		if ($post != NULL) {
 			curl_setopt($this->ch, CURLOPT_POSTFIELDS, $post);
-		}		
+		}
+		if ($cookies != NULL) {
+			curl_setopt($this->ch, CURLOPT_COOKIEJAR, $cookies);
+			curl_setopt($this->ch, CURLOPT_COOKIEFILE, $cookies);			
+		}
 		$result = curl_exec($this->ch);
 		print_r(curl_error($this->ch));
 		curl_close($this->ch);
@@ -65,7 +69,17 @@ class HTTP {
 		return new HTTP($url, $username, $password);
 	}
 
-	static public function doPost($url, $parms) {
+	static public function doGet($url, $cookies = NULL) {
+		$o = HTTP::getInstance($url);
+		if (HTTP::$HTTP_DEBUG) {
+			print "\n # GET Request to $url: #\n\n";
+			print $url;
+			print "\n\n";
+		}		
+		return $o->doExec($url, NULL, $cookies);
+	}
+
+	static public function doPost($url, $parms, $cookies = NULL) {
 		$o = HTTP::getInstance($url);
 		$content = '';
 		foreach ($parms as $key => $value) {
@@ -77,7 +91,7 @@ class HTTP {
 			print $content;
 			print "\n\n";
 		}		
-		return $o->doExec($url, $content);
+		return $o->doExec($url, $content, $cookies);
 	}
 	
 	static public function doSoap($url,  $header, $body, $user = NULL, $password = NULL) {
