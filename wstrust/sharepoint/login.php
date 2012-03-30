@@ -23,8 +23,8 @@ include_once dirname(dirname(__FILE__)) . '/http.php';
 include_once dirname(dirname(__FILE__)) . '/wstrust.php';
 
 // username/password for authenticating the user to the IP-STS
-$username = 'john';
-$password = 'jan';
+$username = 'joe@pingidentity.org';
+$password = '********';
 
 // Sharepoint 2010 Claims Based Site
 $sharepoint = 'https://ad:16001/';
@@ -55,7 +55,7 @@ if ($token != NULL) {
 	print "\n\n";
 }
 
-// !! make sure the assertion contains a subject claim with the right format, ie. a valid formatted e-mail adress !!
+// !! make sure CommonName and subject are correctly formatted (ie. "short" name and syntactically correct e-mail address !!
 // !! modify the sharepoint site web.config so that it accepts the fedauth cookies !!
 $rstr = $xpath->query('/s:Envelope/s:Body/wst:RequestSecurityTokenResponseCollection', $rdom->documentElement);
 
@@ -65,8 +65,10 @@ $target = $sharepoint . '_trust/';
 
 $cookiefile = '/tmp/sharepoint-cookies.txt';
 $result = HTTP::doPost($target, array('wa' => 'wsignin1.0', 'wctx' => $wctx, 'wresult' => $wresult), $cookiefile);
-#do not do this call ?!
+
+# !! do not do this call ?!
 #$result = HTTP::doGet($wctx, $cookiefile);
+
 $result = HTTP::doGet($sharepoint . 'sites/test/SitePages/Home.aspx', $cookiefile);
 unlink($cookiefile);
 
