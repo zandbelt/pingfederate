@@ -21,7 +21,7 @@
 
 class HTTP {
 	
-	static $HTTP_DEBUG = 0;
+	static $HTTP_DEBUG = 1;
 	// don't use this in production!
 	static $HTTP_SSL_VERIFY_PEER = 0;
 	static $HTTP_SSL_VERIFYHOST = 0;
@@ -94,14 +94,10 @@ class HTTP {
 		return $o->doExec($url, $content, $cookies);
 	}
 	
-	static public function doSoap($url,  $header, $body, $user = NULL, $password = NULL) {
+	static public function doSoap($url,  $header, $body, $user = NULL, $password = NULL, $version = 'http://www.w3.org/2003/05/soap-envelope', $ctype = 'application/soap+xml') {
 		$o = HTTP::getInstance($url, $user, $password);
-		curl_setopt($o->getHandle(), CURLOPT_HTTPHEADER, array(
-			'soapAction: ' . $url,
-			)
-		);
 		$request = <<<XML
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Envelope xmlns:s="$version">
   <s:Header>$header</s:Header>
   <s:Body>$body</s:Body>
 </s:Envelope>	
@@ -115,7 +111,8 @@ XML;
 		curl_setopt($o->getHandle(), CURLOPT_POST, 1);
 		curl_setopt($o->getHandle(), CURLOPT_POSTFIELDS, $request);
 		curl_setopt($o->getHandle(), CURLOPT_HTTPHEADER, array(
-					'Content-Type: application/soap+xml; charset=utf-8',
+					'soapAction: ' . $url,
+					'Content-Type: ' . $ctype . '; charset=utf-8',
 		)
 		);
 		return $o->doExec($url);
