@@ -182,8 +182,12 @@ EOF
 
 	echo " [${NAME}] launch PingFederate ... "
 
-	open -a Terminal export PS1=${NAME} && ${NAME}/pingfederate/bin/run.sh
+	# avoid Mac OS X warning about files downloaded from the Internet
+	xattr -d -r com.apple.quarantine ${NAME}/pingfederate/bin/run.sh
+	# start PingFederate in a new Terminal
+	open -a Terminal ${NAME}/pingfederate/bin/run.sh
 	#xterm -T ${NAME} -e ${NAME}/pingfederate/bin/run.sh &
+	# wait until PingFederate has been started
 	while [ ! -r ${NAME}/pingfederate/log/server.log ] ; do sleep 1 ; done
 	while [ `tail -n 10 ${NAME}/pingfederate/log/server.log | grep "JBoss (MX MicroKernel)" | grep "Started in"  | wc -l` == 0 ] ; do sleep 1 ; done
 
@@ -233,7 +237,7 @@ for N1 in ${NAMES} ; do
 		if [ "$N1" != "$N2" ] ; then
 			BPORT=`expr 9999 - $j`
 			echo " [${N1}] upload IDP connection metadata to ${N2} on port ${BPORT} ... "
-			conn_api_put "127.0.0.1" ${BPORT} - $j` "$IDP"
+			conn_api_put "127.0.0.1" ${BPORT} "$IDP"
 			echo " [${N1}] upload SP connection metadata to ${N2} on port ${BPORT} ... "
 			conn_api_put "127.0.0.1" ${BPORT} "$SP"
 		fi
