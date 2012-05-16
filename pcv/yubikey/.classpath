@@ -4,5 +4,6 @@
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
 	<classpathentry kind="lib" path="/Users/zandbelt/pingfederate/pingfederate-6.6.0/pingfederate/server/default/lib/commons-codec.jar"/>
 	<classpathentry kind="lib" path="/Users/zandbelt/pingfederate/pingfederate-6.6.0/pingfederate/server/default/lib/pf-protocolengine.jar"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/PingFederate"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
