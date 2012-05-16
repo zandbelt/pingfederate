@@ -78,7 +78,7 @@ public class YubikeyPasswordCredentialValidator implements
 	    TableDescriptor table = new TableDescriptor("Validation Server URLs", "A table of Yubikey Validation Server URLs (leave empty for defaults).");
 	    FieldDescriptor url = new TextFieldDescriptor("URL", "A URL to a Yubikey Validation Server");
 	    url.addValidator(new RequiredFieldValidator());
-
+	    table.addRowField(url);
 	    gui.addTable(table);
 	    
 		FieldDescriptor clientId = new TextFieldDescriptor("Client ID",
