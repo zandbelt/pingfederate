@@ -38,6 +38,17 @@
  * to filters for other datasources that are subsequently be added to
  * a connection.
  * 
+ * The attribute name that results from the OGNL expression evaluation is
+ * currently fixed to "result". The OGNL expression itself is passed in
+ * through the "filter" settings of the data source, so you can refer to
+ * existing attributes set earlier in the process by using the ${attribute}
+ * syntax.
+ * 
+ * Example OGNL expression that can be configured in the filter:
+ * "${email}".substring(0, "${email}".indexOf("@"))
+ * 
+ * (for stripping the subdomain from the e-mail address and put it in the result)
+ *
  * Author: Hans Zandbelt - hzandbelt@pingidentity.com
  * 
  **************************************************************************/
