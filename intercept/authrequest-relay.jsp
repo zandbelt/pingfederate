@@ -39,7 +39,9 @@
   - ProviderName attribute
   - AttributeConsumingServiceIndex attribute
   - RequestedAuthnCtx value
-  (and the Destination, which needs to be overwritten anyway)
+  - AssertionConsumerServiceURL attribute
+  - Destination attribute
+  - ProtocolBinding attribute
   
   Host this script on your PingFederate SP instance, eg. in quickstart-app-sp.war/
   Modify the IDP SSO URL for the Redirect binding to point to this JSP
@@ -128,9 +130,26 @@
 		authnRequestType.setAttributeConsumingServiceIndex(Integer.parseInt(attrConsumingServiceIndex));
 	}
 
-	// overwrite destination
-	authnRequestType.setDestination(ssoUrl);
+	// optionally set assertionConsumerServiceURL
+	String assertionConsumerServiceURL = p.getProperty("assertion.consumer.service.url");
+	if (assertionConsumerServiceURL != null) {
+		authnRequestType.setAssertionConsumerServiceURL(assertionConsumerServiceURL);
+	}
 
+	// optionally set the Destination attribute to something else than the default (sso.url)
+	String destination = p.getProperty("destination");
+	if (destination != null) {
+		authnRequestType.setDestination(destination);
+	} else {
+		authnRequestType.setDestination(ssoUrl);
+	}
+
+	// optionally set the ProtocolBinding attribute
+	String protocolBinding = p.getProperty("protocol.binding");
+	if (protocolBinding != null) {
+		authnRequestType.setProtocolBinding(protocolBinding);
+	}
+	
 	// set the requested authn context
 	String requestedAuthnContext = p.getProperty("requested.authn.context");
 	if (requestedAuthnContext != null) {
