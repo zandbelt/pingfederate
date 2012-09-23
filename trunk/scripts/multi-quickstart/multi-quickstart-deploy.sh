@@ -80,6 +80,11 @@ for NAME in ${NAMES} ; do
 	unzip -q ${PFZIP}
 	mv ${PFBASE} ${NAME}
 
+cat <<EOF | patch -p0 ${NAME}/pingfederate/bin/run.sh
+9a10,11
+> JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.7.0_07.jdk/Contents/Home
+> 
+EOF
 	APORT=`expr 9999 - $i`
 	gsed -i s/9999/${APORT}/g ${NAME}/pingfederate/bin/run.properties
 	PORT=`expr 9031 + $i`
@@ -189,7 +194,7 @@ EOF
 	#xterm -T ${NAME} -e ${NAME}/pingfederate/bin/run.sh &
 	# wait until PingFederate has been started
 	while [ ! -r ${NAME}/pingfederate/log/server.log ] ; do sleep 1 ; done
-	while [ `tail -n 10 ${NAME}/pingfederate/log/server.log | grep "JBoss (MX MicroKernel)" | grep "Started in"  | wc -l` == 0 ] ; do sleep 1 ; done
+	while [ `tail -n 10 ${NAME}/pingfederate/log/server.log | grep "PingFederate started in"  | wc -l` == 0 ] ; do sleep 1 ; done
 
 	i=`expr $i + 1`
 done
