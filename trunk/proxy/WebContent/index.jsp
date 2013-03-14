@@ -1,6 +1,6 @@
 <%
 /***************************************************************************
- * Copyright (C) 2011-2012 Ping Identity Corporation
+ * Copyright (C) 2011-2013 Ping Identity Corporation
  * All rights reserved.
  *
  * The contents of this file are the property of Ping Identity Corporation.
@@ -28,6 +28,10 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
+ * @Version: 2.0
+ *
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
+ *
  **************************************************************************/
 %>
 <%@page import="java.io.BufferedWriter"%>
@@ -53,6 +57,8 @@
 <%@page import="javax.net.ssl.SSLContext"%>
 <%@page import="javax.net.ssl.SSLSession"%>
 <%@page import="javax.net.ssl.HostnameVerifier"%>
+
+<%@page import="org.sourceid.saml20.adapter.state.SessionStateSupport"%> 
 
 <%@page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 
@@ -114,19 +120,19 @@ public JSONObject doREST(String url, Properties p, String type, JSONObject jsonR
 /**
  * Pickup attributes from PingFederate using the Agentless protocol.
  */ 
-public JSONObject doPickup(Properties p, String role, HttpServletRequest request, HttpSession session) throws Exception {
+public JSONObject doPickup(Properties p, String role, HttpServletRequest request, HttpServletResponse response, SessionStateSupport sessionStateSupport) throws Exception {
 	String pickupUrl = p.getProperty("pf.base.url") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 	JSONObject jsonObject = doREST(pickupUrl, p, role, null);
-	session.setAttribute("json", jsonObject);
+	sessionStateSupport.setAttribute("json", jsonObject, request, response, false);
 	return jsonObject;
 }
 
 /**
  * Drop-off attributes to PingFederate using the Agentless protocol.
  */ 
-public String doDropoff(Properties p, String role, HttpSession session)  throws Exception {
-	String dropoffUrl = p.getProperty("pf.base.url") + "/ext/ref/dropoff";
-	JSONObject jsonObject = (JSONObject)session.getAttribute("json");
+public String doDropoff(Properties p, String role, HttpServletRequest request, HttpServletResponse response, SessionStateSupport sessionStateSupport)  throws Exception {
+	String dropoffUrl = p.getProperty("pf.base.url") + "/ext/ref/dropoff";	
+	JSONObject jsonObject = (JSONObject)sessionStateSupport.removeAttribute("json", request, response);
 	jsonObject = doREST(dropoffUrl, p, role, jsonObject);	
 	return (String)jsonObject.get("REF");
 }
@@ -144,18 +150,17 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 <%
 	String cmdValue = request.getParameter("cmd");
 
+	// for storing stuff in the session information that is shared in a cluster
+	SessionStateSupport sessionStateSupport = new SessionStateSupport();
+
 	InputStream stream = application.getResourceAsStream("/proxy.properties");
 	Properties p = new Properties();
 	p.load(stream);
 
-	if (p.getProperty("session.max.inactive.interval") != null) {
-		session.setMaxInactiveInterval(Integer.parseInt(p.getProperty("session.max.inactive.interval")));
-	}
-	
 	if (cmdValue == null) {
 
 		// start IDP-initiated-SSO
-		doPickup(p, "sp", request, session);
+		doPickup(p, "sp", request, response, sessionStateSupport);
 
 		String strReturnUrl = p.getProperty("pf.base.url");
 		strReturnUrl += "/idp/startSSO.ping?IdpAdapterId=" +  URLEncoder.encode(p.getProperty("idp.adapter.id"), "UTF-8");
@@ -166,10 +171,10 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 
 	} else if (cmdValue.equals("idp-sso")) {
 
-		if (session.getAttribute("json") != null) {
+		if (sessionStateSupport.getAttribute("json", request, response) != null) {
 
 			// continue IDP initiated SSO
-			doResume(p, request.getParameter("resumePath"), response, doDropoff(p, "idp", session));
+			doResume(p, request.getParameter("resumePath"), response, doDropoff(p, "idp", request, response, sessionStateSupport));
 
 		} else {
 			// this is an SP request to the IDP adapter that we forward to the IDP Discovery page for the SP adapter
@@ -189,24 +194,24 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 	} else if (cmdValue.equals("idp-sso-resume")) {
 		// this is a response from the IDP to the SP adapter that we forward to the SP through the IDP adapter
 
-		doPickup(p, "sp", request, session);
-		doResume(p, request.getParameter("resumePath"), response, doDropoff(p, "idp", session));
+		doPickup(p, "sp", request, response, sessionStateSupport);
+		doResume(p, request.getParameter("resumePath"), response, doDropoff(p, "idp", request, response, sessionStateSupport));
 
 	} else if (cmdValue.equals("sp-slo")) {
 
 		// this is a logout request from the IDP through the SP adapter
-		JSONObject jsonObj = doPickup(p, "sp", request, session);
+		JSONObject jsonObj = doPickup(p, "sp", request, response, sessionStateSupport);
 
-		if (session.getAttribute("dummy") != null) {
+		if (sessionStateSupport.getAttribute("dummy", request, response) != null) {
 
 			// SLO was already initiated by peer leg so just resume
-			session.removeAttribute("dummy");
+			sessionStateSupport.removeAttribute("dummy", request, response);
 			// send off the browser to the resumePath, ie. to the IDP			
 			doResume(p, (String)jsonObj.get("resumePath"), response, request.getParameter("REF"));
 
 		} else {
 
-			session.setAttribute("dummy", "");
+			sessionStateSupport.setAttribute("dummy", "", request, response, false);
 			// assemble the URL to SLO endpoint and send the browser off to the SP through the IDP adapter
 			String startSLOUrl = p.getProperty("pf.base.url") + "/idp/startSLO.ping";
 			String targetResource = p.getProperty("pf.base.url") + p.getProperty("proxy.path");
@@ -220,18 +225,18 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 	} else if (cmdValue.equals("idp-slo")) {
 
 		// this is a logout request from the SP through the IDP adapter
-		JSONObject jsonObj = doPickup(p, "idp", request, session);
+		JSONObject jsonObj = doPickup(p, "idp", request, response, sessionStateSupport);
 
-		if (session.getAttribute("dummy") != null) {
+		if (sessionStateSupport.getAttribute("dummy", request, response) != null) {
 
 			// SLO was already initiated by peer leg so just resume
-			session.removeAttribute("dummy");
+			sessionStateSupport.removeAttribute("dummy", request, response);
 			// send off the browser to the resumePath, ie. to the SP
 			doResume(p, (String)jsonObj.get("resumePath"), response, request.getParameter("REF"));
 
 		} else {
 
-			session.setAttribute("dummy", "");
+			sessionStateSupport.setAttribute("dummy", "", request, response, false);
 			// assemble the URL to SLO endpoint and send the browser off to the IDP through the SP adapter
 			String startSLOUrl = p.getProperty("pf.base.url");
 			startSLOUrl += "/sp/startSLO.ping?SpSessionAuthnAdapterId=" +  URLEncoder.encode(p.getProperty("sp.adapter.id"), "UTF-8");
@@ -246,7 +251,7 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 	} else if (cmdValue.equals("slo-resume")) {
 
 		// kill the session and send off the browser to the resumePath, ie. to the IDP/SP
-		session.removeAttribute("json");
+		sessionStateSupport.removeAttribute("json", request, response);
 		doResume(p, request.getParameter("resumePath"), response, request.getParameter("REF"));
 
 	} else {
