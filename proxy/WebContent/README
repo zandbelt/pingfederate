@@ -1,8 +1,6 @@
 This code can be use in conjunction with the Quickstart Sample apps
 but the proxy JSP and properties file will work a generic proxy setup as well.
 
-The proxy supports SSO sessions with a configurable timeout, see proxy.properties (session.max.inactive.interval).
-
 Steps to produce a working setup:
 
  1) download PingFederate 6.x.x and deploy it together with a license file
