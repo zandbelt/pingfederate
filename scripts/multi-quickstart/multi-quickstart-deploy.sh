@@ -1,6 +1,6 @@
 #!/bin/sh
 ###########################################################################
-# Copyright (C) 2012 Ping Identity Corporation
+# Copyright (C) 2012-2013 Ping Identity Corporation
 # All rights reserved.
 #
 # The contents of this file are the property of Ping Identity Corporation.
@@ -211,7 +211,8 @@ conn_api_call() {
 conn_api_get() {
 	local BODY="<getConnection><param0>$3</param0><param1>$4</param1></getConnection>"
 	conn_api_call "$1" "$2" "${BODY}"
-	e=`expr ${#RESULT} - 446 - 81`
+	# set 80 to 81 for PF < 7.0
+	e=`expr ${#RESULT} - 446 - 80`
 	RESULT=${RESULT:446:e}
 	return 0
 }
