@@ -1,7 +1,7 @@
 <?php
 
 /***************************************************************************
- * Copyright (C) 2011-2012 Ping Identity Corporation
+ * Copyright (C) 2011-2013 Ping Identity Corporation
  * All rights reserved.
  *
  * The contents of this file are the property of Ping Identity Corporation.
@@ -14,7 +14,10 @@
  *      Denver, CO 80202
  *      303.468.2900
  *      http://www.pingidentity.com
- *      
+ * 
+ * Implements the non-standard OAuth 2.0 "browser SSO bearer response" flow as documented in:
+ * https://na7.salesforce.com/help/doc/en/remoteaccess_oauth_web_sso_flow.htm#assertion_for_access_token
+ * 
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  *
  **************************************************************************/
@@ -25,12 +28,12 @@ include_once dirname(dirname(__FILE__)) . '/wstrust.php';
 // username/password of a user in the LDAP directory
 // LDAP as configured in the PingFederate Username Token WS-Trust connection settings for Salesforce
 $username = 'joe';
-$password = 'test';
+$password = 'Changeit1';
 
 // RST appliesTo
 $appliesTo = 'https://login.salesforce.com';
 
-// PingFederate 6.x IP-STS endpoint
+// PingFederate 6.x/7.x IP-STS endpoint
 $IPSTS = 'https://localhost:9031/idp/sts.wst?TokenProcessorId=usernametokenldap';
 
 // special token type (needs to be enabled in run.properties)
