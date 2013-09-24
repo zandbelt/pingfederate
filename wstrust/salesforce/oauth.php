@@ -29,6 +29,10 @@
  *   Administration Setup -> Manage Users -> Profiles -> Edit (the right profile for your user) -> Connected App Access
  *   and tick the box for the remote access app you've just created
  *   
+ * - as a PingFed administrator copy the generated Consumer Key from the salesforce app
+ *   in to the Virtual ID field for the SP connection
+ * - as a PingFed administrator use the entityid https://login.salesforce.com (instead of https://saml.salesforce.com for SAML connections...)
+ * 
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  *
  **************************************************************************/
@@ -65,7 +69,6 @@ $token = $dom->saveXML($token->item(0));
 print " # SAML 2.0 Token:\n\n" . $token . "\n";
 
 $endpoint = 'https://login.salesforce.com/services/oauth2/token';
-$grantType = 'assertion';
 $grantType = 'urn:ietf:params:oauth:grant-type:saml2-bearer';
 
 // post the base4-url-encoded SAML Assertion token to Salesforce
