@@ -52,14 +52,14 @@
  * to operate as an OpenID Connect Relying Party, i.e. requires users to authenticate to the
  * Apache hosted content through an external OpenID Connect Provider.
  * 
- * Version 1.0 - merely sets the REMOTE_USER variable to the id_token sub claim, no other 
- * claims are being passed on or processed.
+ * Version 1.1 - sets the REMOTE_USER variable to the id_token sub claim, other claims are
+ * passed in HTTP headers with configurable prefix.
  * 
+ * Todo for version 1.2: allow for authorization rules (based on Requires primitive) that
+ * can do matching against the set of claims provided in the id_token.
+ *
  * Todo for version 2.0: pass on attributes to Apache using mem_cache (or similar,
  * such as the shared filesystem approach that mod_auth_cas uses)
- * 
- * Todo for version 2.1: allow for authorization rules (based on Requires primitive) that
- * can do matching against the set of claims provided in the id_token.
  * 
  * Largely based on mod_auth_cas.c:
  * https://github.com/Jasig/mod_auth_cas
@@ -83,6 +83,7 @@
  * OIDCRedirectURI https://localhost/example
  * OIDCTokenEndpoint https://accounts.google.com/o/oauth2/token
  * OIDCCryptoPassphrase <some-generated-password>
+ * OIDCScope "openid email profile"
  *
  * <Location /example>
  *    Authtype openid-connect
@@ -126,10 +127,13 @@
 #define OIDC_DEFAULT_COOKIE "MOD_OIDC"
 #define OIDC_DEFAULT_AUTHN_HEADER NULL
 #define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS NULL
-#define OIDC_DEFAULT_SCOPE NULL
+#define OIDC_DEFAULT_DIR_SCOPE NULL
 #define OIDC_DEFAULT_COOKIE_DOMAIN NULL
 #define OIDC_DEFAULT_CRYPTO_PASSPHRASE NULL
 #define OIDC_DEFAULT_ISSUER NULL
+#define OIDC_DEFAULT_ATTRIBUTE_DELIMITER ","
+#define OIDC_DEFAULT_ATTRIBUTE_PREFIX "OIDC_ATTR_"
+#define OIDC_DEFAULT_SCOPE "openid"
 
 module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -144,15 +148,18 @@ typedef struct oidc_cfg {
 	apr_uri_t token_endpoint_url;
 	char *cookie_domain;
 	char *crypto_passphrase;
+	char *attribute_delimiter;
+	char *attribute_prefix;
+	char *scope;
 	EVP_CIPHER_CTX e_ctx;
 	EVP_CIPHER_CTX d_ctx;
 } oidc_cfg;
 
 typedef struct oidc_dir_cfg {
-	char *OIDCScope;
-	char *OIDCCookie;
-	char *OIDCAuthNHeader;
-	char *OIDCScrubRequestHeaders;
+	char *dir_scope;
+	char *cookie;
+	char *authn_header;
+	char *scrub_request_headers;
 } oidc_dir_cfg;
 
 int oidc_aes_init(server_rec *s) {
@@ -353,6 +360,9 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	oidc_set_url(pool, &c->authorization_endpoint_url, OIDC_DEFAULT_AUTHORIZATION_ENDPOINT);
 	oidc_set_url(pool, &c->token_endpoint_url, OIDC_DEFAULT_TOKEN_ENDPOINT);
 	oidc_set_url(pool, &c->redirect_uri, OIDC_DEFAULT_REDIRECT_URI);
+	c->attribute_delimiter = OIDC_DEFAULT_ATTRIBUTE_DELIMITER;
+	c->attribute_prefix = OIDC_DEFAULT_ATTRIBUTE_PREFIX;
+	c->scope = OIDC_DEFAULT_SCOPE;
 	return c;
 }
 
@@ -381,15 +391,18 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	else
 		memcpy(&c->redirect_uri, &add->redirect_uri, sizeof(apr_uri_t));
 	c->cookie_domain = (add->cookie_domain != OIDC_DEFAULT_COOKIE_DOMAIN ? add->cookie_domain : base->cookie_domain);
+	c->attribute_delimiter = (apr_strnatcasecmp(add->attribute_delimiter, OIDC_DEFAULT_ATTRIBUTE_DELIMITER) != 0 ? add->attribute_delimiter : base->attribute_delimiter);
+	c->attribute_prefix = (apr_strnatcasecmp(add->attribute_prefix, OIDC_DEFAULT_ATTRIBUTE_PREFIX) != 0 ? add->attribute_prefix : base->attribute_prefix);
+	c->scope = (apr_strnatcasecmp(add->scope, OIDC_DEFAULT_SCOPE) != 0 ? add->scope : base->scope);
 	return c;
 }
 
 void *oidc_create_dir_config(apr_pool_t *pool, char *path) {
 	oidc_dir_cfg *c = apr_pcalloc(pool, sizeof(oidc_dir_cfg));
-	c->OIDCCookie = OIDC_DEFAULT_COOKIE;
-	c->OIDCScope = OIDC_DEFAULT_SCOPE;
-	c->OIDCAuthNHeader = OIDC_DEFAULT_AUTHN_HEADER;
-	c->OIDCScrubRequestHeaders = OIDC_DEFAULT_SCRUB_REQUEST_HEADERS;
+	c->cookie = OIDC_DEFAULT_COOKIE;
+	c->dir_scope = OIDC_DEFAULT_DIR_SCOPE;
+	c->authn_header = OIDC_DEFAULT_AUTHN_HEADER;
+	c->scrub_request_headers = OIDC_DEFAULT_SCRUB_REQUEST_HEADERS;
 	return(c);
 }
 
@@ -397,21 +410,21 @@ void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	oidc_dir_cfg *c = apr_pcalloc(pool, sizeof(oidc_dir_cfg));
 	oidc_dir_cfg *base = BASE;
 	oidc_dir_cfg *add = ADD;
-	c->OIDCCookie = (apr_strnatcasecmp(add->OIDCCookie, OIDC_DEFAULT_COOKIE) != 0 ?
-		add->OIDCCookie : base->OIDCCookie);
-	c->OIDCScope = (add->OIDCScope != OIDC_DEFAULT_SCOPE ?
-		add->OIDCScope : base->OIDCScope);
-	if(add->OIDCScope != NULL && apr_strnatcasecmp(add->OIDCScope, "Off") == 0)
-		c->OIDCScope = NULL;
-	c->OIDCAuthNHeader = (add->OIDCAuthNHeader != OIDC_DEFAULT_AUTHN_HEADER ?
-		add->OIDCAuthNHeader : base->OIDCAuthNHeader);
-	if (add->OIDCAuthNHeader != NULL && apr_strnatcasecmp(add->OIDCAuthNHeader, "Off") == 0)
-		c->OIDCAuthNHeader = NULL;
-	c->OIDCScrubRequestHeaders = (add->OIDCScrubRequestHeaders != OIDC_DEFAULT_SCRUB_REQUEST_HEADERS ?
-		 add->OIDCScrubRequestHeaders :
-		 base->OIDCScrubRequestHeaders);
-	if(add->OIDCScrubRequestHeaders != NULL && apr_strnatcasecmp(add->OIDCScrubRequestHeaders, "Off") == 0)
-		c->OIDCScrubRequestHeaders = NULL;
+	c->cookie = (apr_strnatcasecmp(add->cookie, OIDC_DEFAULT_COOKIE) != 0 ?
+		add->cookie : base->cookie);
+	c->dir_scope = (add->dir_scope != OIDC_DEFAULT_DIR_SCOPE ?
+		add->dir_scope : base->dir_scope);
+	if(add->dir_scope != NULL && apr_strnatcasecmp(add->dir_scope, "Off") == 0)
+		c->dir_scope = NULL;
+	c->authn_header = (add->authn_header != OIDC_DEFAULT_AUTHN_HEADER ?
+		add->authn_header : base->authn_header);
+	if (add->authn_header != NULL && apr_strnatcasecmp(add->authn_header, "Off") == 0)
+		c->authn_header = NULL;
+	c->scrub_request_headers = (add->scrub_request_headers != OIDC_DEFAULT_SCRUB_REQUEST_HEADERS ?
+		 add->scrub_request_headers :
+		 base->scrub_request_headers);
+	if(add->scrub_request_headers != NULL && apr_strnatcasecmp(add->scrub_request_headers, "Off") == 0)
+		c->scrub_request_headers = NULL;
 	return(c);
 }
 
@@ -532,8 +545,8 @@ void oidc_scrub_request_headers(request_rec *r, const oidc_cfg *const c, const o
 	r->headers_in =
 		oidc_scrub_headers(
 			r->pool,
-			NULL, //c->OIDCAttributePrefix :
-			d->OIDCAuthNHeader,
+			c->attribute_prefix,
+			d->authn_header,
 			r->headers_in,
 			&dirty_headers);
 
@@ -702,7 +715,7 @@ char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c) {
 	return url;
 }
 
-char *oidc_get_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *code) {
+char *oidc_get_token_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *code) {
 	char curlError[CURL_ERROR_SIZE];
 	oidc_curl_buffer curlBuffer;
 	CURL *curl;
@@ -710,7 +723,7 @@ char *oidc_get_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *cod
 	struct curl_httppost *formpost=NULL;
 	struct curl_httppost *lastptr=NULL;
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_get_response()");
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_get_token_response()");
 
 	curl = curl_easy_init();
 	if (curl == NULL) {
@@ -718,7 +731,7 @@ char *oidc_get_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *cod
 		return NULL;
 	}
 
-	curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+	curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 	curl_easy_setopt(curl, CURLOPT_HEADER, 0L);
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -772,13 +785,12 @@ char *oidc_get_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *cod
 	               CURLFORM_END);
 
 	curl_easy_setopt(curl, CURLOPT_HTTPPOST, formpost);
-
 	if (curl_easy_perform(curl) != CURLE_OK) {
 		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "MOD_OIDC: curl_easy_perform() failed (%s)", curlError);
 		goto out;
 	}
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Validation response: %s", curlBuffer.buf);
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Code resolve response: %s", curlBuffer.buf);
 
 	rv = apr_pstrndup(r->pool, curlBuffer.buf, strlen(curlBuffer.buf));
 
@@ -789,7 +801,7 @@ out:
 
 // TODO: when encrypted, we don't need to aud/check the cookie anymore
 // TODO: split out checks into separate functions
-int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_json_value_t **attrs) {
+int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_table_t **attrs) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	const char *s = id_token;
@@ -871,8 +883,7 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "\"aud\" is an array, but \"azp\" claim is not present; that is a spec violation...");
 				return FALSE;
 			}
-
-			int i = 0;
+			int i;
 			for (i = 0; i < aud->value.array->nelts; i++) {
 				apr_json_value_t *elem = (apr_json_value_t *)aud->value.array->elts[i];
 				if (elem->type != APR_JSON_STRING) {
@@ -913,17 +924,46 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 	ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "### valid id_token for user \"%s\" (expires in %ld seconds)", username->value.string.p, exp->value.lnumber - apr_time_now() / APR_USEC_PER_SEC);
 
 	*user = apr_pstrdup(r->pool, username->value.string.p);
-	*attrs = payload;
+
+	*attrs = apr_table_make(r->pool, 5);
+	apr_hash_index_t *hi;
+	for (hi = apr_hash_first(r->pool, payload->value.object); hi; hi = apr_hash_next(hi)) {
+		const char *k; apr_json_value_t *v;
+		apr_hash_this(hi, (const void**)&k, NULL, (void**)&v);
+		if (strstr("iss,sub,aud,nonce,exp,iat,azp,at_hash,c_hash,", apr_pstrcat(r->pool, k, ",", NULL))) continue;
+		if (v->type == APR_JSON_STRING) {
+			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "### setting attribute %s=%s", k, v->value.string.p);
+			apr_table_set(*attrs, k, v->value.string.p);
+		} else if (v->type == APR_JSON_ARRAY) {
+			char *csvs = apr_pstrdup(r->pool, "");
+			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "### parsing attribute array %s (#%d)", k, v->value.array->nelts);
+			for (int i = 0; i < v->value.array->nelts; i++) {
+				apr_json_value_t *elem = (apr_json_value_t *)v->value.array->elts[i];
+				if (elem->type != APR_JSON_STRING) {
+					if (apr_strnatcmp(csvs, "") != 0) {
+						csvs = apr_psprintf(r->pool, "%s%s%s", csvs, c->attribute_delimiter, elem->value.string.p);
+					} else {
+						csvs = apr_psprintf(r->pool, "%s", elem->value.string.p);
+					}
+				} else {
+					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Unhandled in-array JSON object type [%d] when parsing attributes", elem->type);
+				}
+			}
+			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "### setting multi-valued attribute %s=%s", k, csvs);
+			apr_table_setn(*attrs, k, csvs);
+		} else {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Unhandled JSON object type [%d] when parsing attributes", v->type);
+		}
+	}
 
 	return 0;
 }
 
-apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *code, char **user, apr_json_value_t **attrs, char **s_id_token) {
-	char *line;
-	const char *response = oidc_get_response(r, c, d, code);
+apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *code, char **user, apr_table_t **attrs, char **s_id_token) {
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_resolve_code()");
 
+	const char *response = oidc_get_token_response(r, c, d, code);
 	if(response == NULL)
 		return FALSE;
 
@@ -969,15 +1009,15 @@ char *oidc_get_path(request_rec *r) {
 	return apr_pstrndup(r->pool, p, i + 1);
 }
 
-char *oidc_get_scope(request_rec *r) {
+char *oidc_get_dir_scope(request_rec *r) {
 	char *rv = NULL, *requestPath = oidc_get_path(r);
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-	if (d->OIDCScope != NULL) {
-		if(strncmp(d->OIDCScope, requestPath, strlen(d->OIDCScope)) == 0)
-			rv = d->OIDCScope;
+	if (d->dir_scope != NULL) {
+		if(strncmp(d->dir_scope, requestPath, strlen(d->dir_scope)) == 0)
+			rv = d->dir_scope;
 		else {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "MOD_OIDC: OIDCScope (%s) not a substring of request path, using request path (%s) for cookie", d->OIDCScope, requestPath);
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "MOD_OIDC: OIDCDirScope (%s) not a substring of request path, using request path (%s) for cookie", d->dir_scope, requestPath);
 			rv = requestPath;
 		}
 	} else {
@@ -990,7 +1030,7 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 	char *headerString, *currentCookies;
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_set_cookie()");
-	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
+	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
 	/* use r->err_headers_out so we always print our headers (even on 302 redirect) - headers_out only prints on 2xx responses */
 	apr_table_add(r->err_headers_out, "Set-Cookie", headerString);
 	if((currentCookies = (char *) apr_table_get(r->headers_in, "Cookie")) == NULL)
@@ -1024,13 +1064,13 @@ void oidc_redirect(request_rec *r, oidc_cfg *c) {
 		return;
 	}
 	oidc_encrypt_base64url_encode_string(r, &state, oidc_get_current_url(r, c));
-	destination = apr_psprintf(r->pool, "%s%sresponse_type=%s&scope=%s&client_id=%s&state=%s&redirect_uri=%s", endpoint, (strchr(endpoint, '?') != NULL ? "&" : "?"), "code", "openid", oidc_escape_string(r, c->client_id), state, oidc_escape_string(r, apr_uri_unparse(r->pool, &c->redirect_uri, 0)));
+	destination = apr_psprintf(r->pool, "%s%sresponse_type=%s&scope=%s&client_id=%s&state=%s&redirect_uri=%s", endpoint, (strchr(endpoint, '?') != NULL ? "&" : "?"), "code", oidc_escape_string(r, c->scope), oidc_escape_string(r, c->client_id), state, oidc_escape_string(r, apr_uri_unparse(r->pool, &c->redirect_uri, 0)));
 	apr_table_add(r->headers_out, "Location", destination);
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Adding outgoing header: Location: %s", destination);
 
 }
 
-apr_byte_t oidc_is_valid_cookie(request_rec *r, oidc_cfg *c, char *cookie, char **user, apr_json_value_t **attrs) {
+apr_byte_t oidc_is_valid_cookie(request_rec *r, oidc_cfg *c, char *cookie, char **user, apr_table_t **attrs) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
 	char *id_token = NULL;
@@ -1040,11 +1080,48 @@ apr_byte_t oidc_is_valid_cookie(request_rec *r, oidc_cfg *c, char *cookie, char 
 	return TRUE;
 }
 
+/* Normalize a string for use as an HTTP Header Name.  Any invalid
+ * characters (per http://tools.ietf.org/html/rfc2616#section-4.2 and
+ * http://tools.ietf.org/html/rfc2616#section-2.2) are replaced with
+ * a dash ('-') character. */
+char *oidc_normalize_header_name(const request_rec *r, const char *str)
+{
+        /* token = 1*<any CHAR except CTLs or separators>
+         * CTL = <any US-ASCII control character
+         *          (octets 0 - 31) and DEL (127)>
+         * separators = "(" | ")" | "<" | ">" | "@"
+         *              | "," | ";" | ":" | "\" | <">
+         *              | "/" | "[" | "]" | "?" | "="
+         *              | "{" | "}" | SP | HT */
+        const char *separators = "()<>@,;:\\\"/[]?={} \t";
+
+        char *ns = apr_pstrdup(r->pool, str);
+        size_t i;
+        for (i = 0; i < strlen(ns); i++) {
+                if (ns[i] < 32 || ns[i] == 127) ns[i] = '-';
+                else if (strchr(separators, ns[i]) != NULL) ns[i] = '-';
+        }
+        return ns;
+}
+
+static int oidc_set_attribute_header(void* rec, const char* key, const char* value) {
+	request_rec* r = (request_rec *)rec;
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+	apr_table_set(r->headers_in, apr_psprintf(r->pool, "%s%s", c->attribute_prefix, oidc_normalize_header_name(r, key)), value);
+	return 1;
+}
+
+static void oidc_set_attribute_headers(request_rec *r, apr_table_t *attrs) {
+	if (attrs != NULL) {
+		apr_table_do(oidc_set_attribute_header, r, attrs, NULL);
+	}
+}
+
 static int oidc_check_user_id(request_rec *r) {
 	char *code = NULL, *state = NULL;
 	char *cookieString = NULL;
 	char *remoteUser = NULL;
-	apr_json_value_t *attrs = NULL;
+	apr_table_t *attrs = NULL;
 
 	oidc_cfg *c;
 	oidc_dir_cfg *d;
@@ -1055,24 +1132,24 @@ static int oidc_check_user_id(request_rec *r) {
 	c = ap_get_module_config(r->server->module_config, &oidc_module);
 	d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
-	if (ap_is_initial_req(r) && d->OIDCScrubRequestHeaders) {
+	if (ap_is_initial_req(r) && d->scrub_request_headers) {
 		oidc_scrub_request_headers(r, c, d);
 	}
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Entering oidc_check_user_id()");
 
 	oidc_get_code_and_state(r, &code, &state);
-	cookieString = oidc_get_cookie(r, d->OIDCCookie);
+	cookieString = oidc_get_cookie(r, d->cookie);
 
 	if (code != NULL) {
 		char *id_token = NULL;
 		if (oidc_resolve_code(r, c, d, code, &remoteUser, &attrs, &id_token)) {
 			char *encrypted_token = NULL;
 			oidc_encrypt_base64url_encode_string(r, &encrypted_token, id_token);
-			oidc_set_cookie(r, d->OIDCCookie, encrypted_token);
+			oidc_set_cookie(r, d->cookie, encrypted_token);
 			r->user = remoteUser;
-			if (d->OIDCAuthNHeader != NULL)
-				apr_table_set(r->headers_in, d->OIDCAuthNHeader, remoteUser);
+			if (d->authn_header != NULL)
+				apr_table_set(r->headers_in, d->authn_header, remoteUser);
 			apr_table_add(r->headers_out, "Location", state);
 			return HTTP_MOVED_TEMPORARILY;
 		} else {
@@ -1103,9 +1180,10 @@ static int oidc_check_user_id(request_rec *r) {
 
 		if (remoteUser) {
 			r->user = remoteUser;
-			if (d->OIDCAuthNHeader != NULL) {
-				apr_table_set(r->headers_in, d->OIDCAuthNHeader, remoteUser);
+			if (d->authn_header != NULL) {
+				apr_table_set(r->headers_in, d->authn_header, remoteUser);
  			}
+			oidc_set_attribute_headers(r, attrs);
 			return OK;
 		} else {
 			/* maybe the cookie expired, have the user re-authenticate */
@@ -1261,11 +1339,14 @@ static const command_rec oidc_cmds[] = {
 		AP_INIT_TAKE1("OIDCTokenEndpoint", oidc_set_uri_slot, (void *)APR_OFFSETOF(oidc_cfg, token_endpoint_url), RSRC_CONF, "Define the OpenID OP Token Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
 		AP_INIT_TAKE1("OIDCCookieDomain", oidc_set_cookie_domain, NULL, RSRC_CONF, "Specify domain element for OIDC session cookie."),
 		AP_INIT_TAKE1("OIDCCryptoPassphrase", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase), RSRC_CONF, "Passphrase used for AES crypto on cookies and state."),
+		AP_INIT_TAKE1("OIDCAttributeDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, attribute_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued attributes in the HTTP headers."),
+		AP_INIT_TAKE1("OIDCAttributePrefix ", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, attribute_prefix), RSRC_CONF, "The prefix to use when setting attributes in the HTTP headers."),
+		AP_INIT_TAKE1("OIDCScope", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, scope), RSRC_CONF, "Define the OpenID Connect scope that is requested from the OP."),
 
-		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, OIDCAuthNHeader), ACCESS_CONF|OR_AUTHCFG, "Specify the HTTP header variable to set with the name of the OIDC authenticated user.  By default no headers are added."),
-		AP_INIT_TAKE1("OIDCScrubRequestHeaders", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, OIDCScrubRequestHeaders), ACCESS_CONF, "Scrub OIDC user name and ID_TOKEN attribute headers from the user's request."),
-		AP_INIT_TAKE1("OIDCScope", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, OIDCScope), ACCESS_CONF|OR_AUTHCFG, "Define the OpenID Connect scope."),
-		AP_INIT_TAKE1("OIDCCookie", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, OIDCCookie), ACCESS_CONF|OR_AUTHCFG, "Define the cookie name for HTTP sessions"),
+		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, authn_header), ACCESS_CONF|OR_AUTHCFG, "Specify the HTTP header variable to set with the name of the OIDC authenticated user.  By default no headers are added."),
+		AP_INIT_TAKE1("OIDCScrubRequestHeaders", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, scrub_request_headers), ACCESS_CONF, "Scrub OIDC user name and ID_TOKEN attribute headers from the user's request."),
+		AP_INIT_TAKE1("OIDCDirScope", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, dir_scope), ACCESS_CONF|OR_AUTHCFG, "Define the OpenID Connect scope."),
+		AP_INIT_TAKE1("OIDCCookie", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, cookie), ACCESS_CONF|OR_AUTHCFG, "Define the cookie name for HTTP sessions"),
 		{ NULL }
 };
 
