@@ -720,8 +720,6 @@ char *oidc_get_token_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, cha
 	oidc_curl_buffer curlBuffer;
 	CURL *curl;
 	char *rv = NULL;
-	struct curl_httppost *formpost=NULL;
-	struct curl_httppost *lastptr=NULL;
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_get_token_response()");
 
@@ -731,7 +729,6 @@ char *oidc_get_token_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, cha
 		return NULL;
 	}
 
-	curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 	curl_easy_setopt(curl, CURLOPT_HEADER, 0L);
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -753,38 +750,20 @@ char *oidc_get_token_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, cha
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, (c->ssl_validate_server != FALSE ? 2L : 0L));
 
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod_oidc 1.0");
-	curl_easy_setopt(curl, CURLOPT_HTTPPOST, 1L);
 
 	// TODO: we do id/secret POST only now, also support HTTP basic auth
 	curl_easy_setopt(curl, CURLOPT_URL, apr_uri_unparse(r->pool, &c->token_endpoint_url, 0));
 
-	curl_formadd(&formpost,
-	               &lastptr,
-	               CURLFORM_COPYNAME, "grant_type",
-	               CURLFORM_COPYCONTENTS, "authorization_code",
-	               CURLFORM_END);
-	curl_formadd(&formpost,
-	               &lastptr,
-	               CURLFORM_COPYNAME, "client_id",
-	               CURLFORM_COPYCONTENTS, c->client_id,
-	               CURLFORM_END);
-	curl_formadd(&formpost,
-	               &lastptr,
-	               CURLFORM_COPYNAME, "client_secret",
-	               CURLFORM_COPYCONTENTS, c->client_secret,
-	               CURLFORM_END);
-	curl_formadd(&formpost,
-	               &lastptr,
-	               CURLFORM_COPYNAME, "code",
-	               CURLFORM_COPYCONTENTS, code,
-	               CURLFORM_END);
-	curl_formadd(&formpost,
-	               &lastptr,
-	               CURLFORM_COPYNAME, "redirect_uri",
-	               CURLFORM_COPYCONTENTS, apr_uri_unparse(r->pool, &c->redirect_uri, 0),
-	               CURLFORM_END);
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, apr_psprintf(r->pool,
+			"grant_type=authorization_code&client_id=%s&client_secret=%s&code=%s&redirect_uri=%s",
+			oidc_escape_string(r, c->client_id),
+			oidc_escape_string(r, c->client_secret),
+			oidc_escape_string(r, code),
+			oidc_escape_string(r, apr_uri_unparse(r->pool, &c->redirect_uri, 0))
+	));
+	// CURLOPT_POST needed at least to set: Content-Type: application/x-www-form-urlencoded
+	curl_easy_setopt(curl, CURLOPT_POST, 1);
 
-	curl_easy_setopt(curl, CURLOPT_HTTPPOST, formpost);
 	if (curl_easy_perform(curl) != CURLE_OK) {
 		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "MOD_OIDC: curl_easy_perform() failed (%s)", curlError);
 		goto out;
