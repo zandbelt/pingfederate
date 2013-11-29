@@ -885,7 +885,7 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_t
 			}
 			int i;
 			for (i = 0; i < aud->value.array->nelts; i++) {
-				apr_json_value_t *elem = (apr_json_value_t *)aud->value.array->elts[i];
+				apr_json_value_t *elem = APR_ARRAY_IDX(aud->value.array, i, apr_json_value_t *);
 				if (elem->type != APR_JSON_STRING) {
 					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Unhandled in-array JSON object type [%d]", elem->type);
 					continue;
@@ -938,7 +938,7 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_t
 			char *csvs = apr_pstrdup(r->pool, "");
 			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "### parsing attribute array %s (#%d)", k, v->value.array->nelts);
 			for (int i = 0; i < v->value.array->nelts; i++) {
-				apr_json_value_t *elem = (apr_json_value_t *)v->value.array->elts[i];
+				apr_json_value_t *elem = APR_ARRAY_IDX(v->value.array, i, apr_json_value_t *);
 				if (elem->type != APR_JSON_STRING) {
 					if (apr_strnatcmp(csvs, "") != 0) {
 						csvs = apr_psprintf(r->pool, "%s%s%s", csvs, c->attribute_delimiter, elem->value.string.p);
@@ -959,36 +959,61 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_t
 	return 0;
 }
 
+apr_byte_t oidc_json_string_print(request_rec *r, apr_json_value_t *result, const char *key, const char *log) {
+	apr_json_value_t *value = apr_hash_get(result->value.object, key, APR_HASH_KEY_STRING);
+	if (value != NULL) {
+		if (value->type == APR_JSON_STRING) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "%s: response contained a \"%s\" key with string value: \"%s\"", log, key, value->value.string.p);
+		} else {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "%s: response contained an \"%s\" key but no string value", log, key);
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+apr_byte_t oidc_json_error_check(request_rec *r, apr_json_value_t *result, const char *log) {
+	if (oidc_json_string_print(r, result, "error", log) == TRUE) {
+		oidc_json_string_print(r, result, "error_description", log);
+		return FALSE;
+	}
+	return TRUE;
+}
+
 apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *code, char **user, apr_table_t **attrs, char **s_id_token) {
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_resolve_code()");
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_resolve_code(): entering");
 
 	const char *response = oidc_get_token_response(r, c, d, code);
 	if(response == NULL)
 		return FALSE;
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "MOD_OIDC: response = %s", response);
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_resolve_code(): response = %s", response);
 
 	apr_json_value_t *result = NULL;
 	apr_status_t status = apr_json_decode(&result, response, strlen(response), r->pool);
 
 	if (status != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "could not decode response successfully");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_resolve_code(): could not decode response successfully");
 		return FALSE;
 	}
 
 	if ( (result ==NULL) || (result->type != APR_JSON_OBJECT) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response did not contain a JSON object");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_resolve_code(): response did not contain a JSON object");
 		return FALSE;
 	}
+
+	// no need to check the expires_in for the access_token here, until we start using this against the user_info endpoint
+
+	if (oidc_json_error_check(r, result, "oidc_resolve_code()") == FALSE) return FALSE;
 
 	apr_json_value_t *id_token = apr_hash_get(result->value.object, "id_token", APR_HASH_KEY_STRING);
 	if ( (id_token == NULL) || (id_token->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON object did not contain an id_token string");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_resolve_code(): response JSON object did not contain an id_token string");
 		return FALSE;
 	}
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "returned id_token: %s", id_token->value.string.p);
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_resolve_code(): returned id_token: %s", id_token->value.string.p);
 
 	*s_id_token = apr_pstrdup(r->pool, id_token->value.string.p);
 
@@ -1032,6 +1057,7 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_set_cookie()");
 	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
 	/* use r->err_headers_out so we always print our headers (even on 302 redirect) - headers_out only prints on 2xx responses */
+	// TODO: warn about lenght > some_rather_arbitrary_max_cookie_length
 	apr_table_add(r->err_headers_out, "Set-Cookie", headerString);
 	if((currentCookies = (char *) apr_table_get(r->headers_in, "Cookie")) == NULL)
 		apr_table_add(r->headers_in, "Cookie", headerString);
