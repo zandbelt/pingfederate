@@ -559,20 +559,21 @@ void oidc_scrub_request_headers(request_rec *r, const oidc_cfg *const c, const o
 	}
 }
 
-void oidc_get_code_and_state(request_rec *r, char **code, char **state) {
+apr_byte_t oidc_get_code_and_state(request_rec *r, char **code, char **state) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_get_code_and_state()");
 
-	// TODO: check that the request path matches the configured redirect URI
-	// (currently a regular URL can't have a code= parameter without it being interpreted as an OIDC callback)
+	*code = NULL;
+	*state = NULL;
+
 	char *tokenizer_ctx, *p, *args, *rv = NULL;
 	const char *k_code_param = "code=";
 	const size_t k_code_param_sz = strlen(k_code_param);
 	const char *k_state_param = "state=";
 	const size_t k_state_param_sz = strlen(k_state_param);
 
-	if (r->args == NULL || strlen(r->args) == 0) return;
+	if (r->args == NULL || strlen(r->args) == 0) return FALSE;
 
 	args = apr_pstrndup(r->pool, r->args, strlen(r->args));
 
@@ -587,6 +588,17 @@ void oidc_get_code_and_state(request_rec *r, char **code, char **state) {
 		}
 		p = apr_strtok(NULL, "&", &tokenizer_ctx);
 	} while (p);
+
+	if ( (*code == NULL) || (*state == NULL) ) {
+		if (*code != NULL) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_code_and_state: \"code\" parameter found at redirect_uri, but no \"state\" parameter...");
+		}
+		if (*state != NULL) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_code_and_state: \"state\" parameter found at redirect_uri, but no \"code\" parameter...");
+		}
+		return FALSE;
+	}
+	return TRUE;
 }
 
 char *oidc_get_cookie(request_rec *r, char *cookieName) {
@@ -1085,6 +1097,13 @@ apr_byte_t oidc_is_valid_cookie(request_rec *r, oidc_cfg *c, char *cookie, char 
 	return TRUE;
 }
 
+apr_byte_t oidc_request_matches_redirect_uri(request_rec *r, oidc_cfg *c) {
+	char *p1 = r->parsed_uri.path;
+	char *p2 = c->redirect_uri.path;
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_request_matches_redirect_uri(): comparing \"%s\"==\"%s\"", p1, p2);
+	return (apr_strnatcmp(p1, p2) == 0) ? TRUE : FALSE;
+}
+
 /* Normalize a string for use as an HTTP Header Name.  Any invalid
  * characters (per http://tools.ietf.org/html/rfc2616#section-4.2 and
  * http://tools.ietf.org/html/rfc2616#section-2.2) are replaced with
@@ -1143,24 +1162,28 @@ static int oidc_check_user_id(request_rec *r) {
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Entering oidc_check_user_id()");
 
-	oidc_get_code_and_state(r, &code, &state);
 	cookieString = oidc_get_cookie(r, d->cookie);
 
-	if (code != NULL) {
-		char *id_token = NULL;
-		if (oidc_resolve_code(r, c, d, code, &remoteUser, &attrs, &id_token)) {
-			char *encrypted_token = NULL;
-			oidc_encrypt_base64url_encode_string(r, &encrypted_token, id_token);
-			oidc_set_cookie(r, d->cookie, encrypted_token);
-			r->user = remoteUser;
-			if (d->authn_header != NULL)
-				apr_table_set(r->headers_in, d->authn_header, remoteUser);
-			apr_table_add(r->headers_out, "Location", state);
-			return HTTP_MOVED_TEMPORARILY;
-		} else {
-			/* sometimes, pages that automatically refresh will re-send the code parameter, so let's check any cookies presented or return an error if none */
-			if(cookieString == NULL)
-				return HTTP_UNAUTHORIZED;
+	// check that the request path matches the configured redirect URI, otherwise a regular
+	// protected URL can't have a code= parameter without it being interpreted as an OIDC callback
+	if (oidc_request_matches_redirect_uri(r, c) == TRUE) {
+		if (oidc_get_code_and_state(r, &code, &state) == TRUE) {
+			char *id_token = NULL;
+			if (oidc_resolve_code(r, c, d, code, &remoteUser, &attrs, &id_token)) {
+				char *encrypted_token = NULL;
+				oidc_encrypt_base64url_encode_string(r, &encrypted_token, id_token);
+				oidc_set_cookie(r, d->cookie, encrypted_token);
+				r->user = remoteUser;
+				if (d->authn_header != NULL)
+					apr_table_set(r->headers_in, d->authn_header, remoteUser);
+				// NB: no oidc_set_attribute_headers(r, attrs) here because of the redirect that follows
+				apr_table_add(r->headers_out, "Location", state);
+				return HTTP_MOVED_TEMPORARILY;
+			} else {
+				/* sometimes, pages that automatically refresh will re-send the code parameter, so let's check any cookies presented or return an error if none */
+				if(cookieString == NULL)
+					return HTTP_UNAUTHORIZED;
+			}
 		}
 	}
 
