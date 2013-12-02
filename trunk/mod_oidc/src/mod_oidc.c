@@ -134,6 +134,7 @@
 #define OIDC_DEFAULT_ATTRIBUTE_DELIMITER ","
 #define OIDC_DEFAULT_ATTRIBUTE_PREFIX "OIDC_ATTR_"
 #define OIDC_DEFAULT_SCOPE "openid"
+#define OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH "client_secret_post"
 
 module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -146,6 +147,7 @@ typedef struct oidc_cfg {
 	char *issuer;
 	apr_uri_t authorization_endpoint_url;
 	apr_uri_t token_endpoint_url;
+	char *token_endpoint_auth;
 	char *cookie_domain;
 	char *crypto_passphrase;
 	char *attribute_delimiter;
@@ -348,6 +350,15 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
 	return NULL;
 }
 
+const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *value) {
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	if ( (apr_strnatcmp(value, "client_auth_post") != 0) && (!apr_strnatcmp(value, "client_auth_basic") != 0) ) {
+		return apr_psprintf(cmd->pool, "MOD_OIDC: Invalid value (%s) for OIDCTokenEndpointAuth: must be \"client_auth_post\" or \"client_auth_basic\".", value);
+	}
+	cfg->token_endpoint_auth = apr_pstrdup(cmd->pool, value);
+	return NULL;
+}
+
 void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
 	c->merged = FALSE;
@@ -359,6 +370,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->issuer = OIDC_DEFAULT_ISSUER;
 	oidc_set_url(pool, &c->authorization_endpoint_url, OIDC_DEFAULT_AUTHORIZATION_ENDPOINT);
 	oidc_set_url(pool, &c->token_endpoint_url, OIDC_DEFAULT_TOKEN_ENDPOINT);
+	c->token_endpoint_auth = OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH;
 	oidc_set_url(pool, &c->redirect_uri, OIDC_DEFAULT_REDIRECT_URI);
 	c->attribute_delimiter = OIDC_DEFAULT_ATTRIBUTE_DELIMITER;
 	c->attribute_prefix = OIDC_DEFAULT_ATTRIBUTE_PREFIX;
@@ -386,6 +398,7 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 		memcpy(&c->token_endpoint_url, &base->token_endpoint_url, sizeof(apr_uri_t));
 	else
 		memcpy(&c->token_endpoint_url, &add->token_endpoint_url, sizeof(apr_uri_t));
+	c->token_endpoint_auth = (apr_strnatcasecmp(add->token_endpoint_auth, OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH) != 0 ? add->token_endpoint_auth : base->token_endpoint_auth);
 	if(memcmp(&add->redirect_uri, &test, sizeof(apr_uri_t)) == 0)
 		memcpy(&c->redirect_uri, &base->redirect_uri, sizeof(apr_uri_t));
 	else
@@ -763,16 +776,26 @@ char *oidc_get_token_response (request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, cha
 
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod_oidc 1.0");
 
-	// TODO: we do id/secret POST only now, also support HTTP basic auth
 	curl_easy_setopt(curl, CURLOPT_URL, apr_uri_unparse(r->pool, &c->token_endpoint_url, 0));
 
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, apr_psprintf(r->pool,
-			"grant_type=authorization_code&client_id=%s&client_secret=%s&code=%s&redirect_uri=%s",
-			oidc_escape_string(r, c->client_id),
-			oidc_escape_string(r, c->client_secret),
+	char *postfields = apr_psprintf(r->pool,
+			"grant_type=authorization_code&code=%s&redirect_uri=%s",
 			oidc_escape_string(r, code),
 			oidc_escape_string(r, apr_uri_unparse(r->pool, &c->redirect_uri, 0))
-	));
+	);
+
+	if (apr_strnatcmp(c->token_endpoint_auth, "client_secret_basic") == 0) {
+		curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+		curl_easy_setopt(curl, CURLOPT_USERPWD, apr_psprintf(r->pool, "%s:%s", c->client_id, c->client_secret));
+	} else if ((apr_strnatcmp(c->token_endpoint_auth, "client_secret_post")) == 0) {
+		postfields = apr_psprintf(r->pool,
+				"%s&client_id=%s&client_secret=%s",
+				postfields,
+				oidc_escape_string(r, c->client_id),
+				oidc_escape_string(r, c->client_secret));
+	} // else should not happen because config check was passed
+
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postfields);
 	// CURLOPT_POST needed at least to set: Content-Type: application/x-www-form-urlencoded
 	curl_easy_setopt(curl, CURLOPT_POST, 1);
 
@@ -1048,7 +1071,7 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_set_cookie()");
 	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
 	/* use r->err_headers_out so we always print our headers (even on 302 redirect) - headers_out only prints on 2xx responses */
-	// TODO: warn about lenght > some_rather_arbitrary_max_cookie_length
+	// TODO: warn about length > some_rather_arbitrary_max_cookie_length
 	apr_table_add(r->err_headers_out, "Set-Cookie", headerString);
 	if((currentCookies = (char *) apr_table_get(r->headers_in, "Cookie")) == NULL)
 		apr_table_add(r->headers_in, "Cookie", headerString);
@@ -1365,6 +1388,7 @@ static const command_rec oidc_cmds[] = {
 		AP_INIT_TAKE1("OIDCIssuer", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, issuer), RSRC_CONF, "OpenID Connect OP issuer identifier."),
 		AP_INIT_TAKE1("OIDCAuthorizationEndpoint", oidc_set_uri_slot, (void *)APR_OFFSETOF(oidc_cfg, authorization_endpoint_url), RSRC_CONF, "Define the OpenID OP Authorization Endpoint URL (e.g.: https://localhost:9031/as/authz.oidc)"),
 		AP_INIT_TAKE1("OIDCTokenEndpoint", oidc_set_uri_slot, (void *)APR_OFFSETOF(oidc_cfg, token_endpoint_url), RSRC_CONF, "Define the OpenID OP Token Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
+		AP_INIT_TAKE1("OIDCTokenEndpointAuth", oidc_set_token_endpoint_auth, NULL, RSRC_CONF, "Specify an authentication method for the OpenID OP Token Endpoint (e.g.: client_auth_basic)"),
 		AP_INIT_TAKE1("OIDCCookieDomain", oidc_set_cookie_domain, NULL, RSRC_CONF, "Specify domain element for OIDC session cookie."),
 		AP_INIT_TAKE1("OIDCCryptoPassphrase", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase), RSRC_CONF, "Passphrase used for AES crypto on cookies and state."),
 		AP_INIT_TAKE1("OIDCAttributeDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, attribute_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued attributes in the HTTP headers."),
