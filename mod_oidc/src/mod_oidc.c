@@ -74,8 +74,6 @@
  * ==========================================================
  * LoadModule oidc_module modules/mod_oidc.so
  *
- * LogLevel debug
- *
  * OIDCClientID <your-client-id-administered-through-the-google-api-console>
  * OIDCClientSecret <your-client-secret-administered-through-the-google-api-console>
  * OIDCIssuer accounts.google.com
@@ -85,7 +83,7 @@
  * OIDCCryptoPassphrase <some-generated-password>
  * OIDCScope "openid email profile"
  *
- * <Location /example>
+ * <Location /example/>
  *    Authtype openid-connect
  *    require valid-user
  * </Location>
@@ -105,8 +103,7 @@
 #include "ap_provider.h"
 #include "apr_lib.h"
 #include "apr_file_io.h"
-#include "util_md5.h"
-#include "apr_md5.h"
+#include "apr_sha1.h"
 #include "apr_base64.h"
 
 #include "httpd.h"
@@ -137,6 +134,8 @@
 #define OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH "client_secret_post"
 
 module AP_MODULE_DECLARE_DATA oidc_module;
+
+// TODO: require SSL
 
 typedef struct oidc_cfg {
 	unsigned int merged;
@@ -597,7 +596,8 @@ apr_byte_t oidc_get_code_and_state(request_rec *r, char **code, char **state) {
 			ap_unescape_url(*code);
 		}
 		if (p && strncmp(p, k_state_param, k_state_param_sz) == 0) {
-			oidc_base64url_decode_decrypt_string(r, state, p + k_state_param_sz);
+			*state = apr_pstrdup(r->pool, p + k_state_param_sz);
+			ap_unescape_url(*state);
 		}
 		p = apr_strtok(NULL, "&", &tokenizer_ctx);
 	} while (p);
@@ -1070,6 +1070,7 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_set_cookie()");
 	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
+	if (apr_strnatcmp(cookieValue, "") == 0) headerString = apr_psprintf(r->pool, "%s;expires=0;Max-Age=0", headerString);
 	/* use r->err_headers_out so we always print our headers (even on 302 redirect) - headers_out only prints on 2xx responses */
 	// TODO: warn about length > some_rather_arbitrary_max_cookie_length
 	apr_table_add(r->err_headers_out, "Set-Cookie", headerString);
@@ -1092,10 +1093,82 @@ char *oidc_get_authorization_endpoint(request_rec *r, oidc_cfg *c) {
 	return(apr_uri_unparse(r->pool, &c->authorization_endpoint_url, 0));
 }
 
+#define OIDCStateCookieName  "oidc-state"
+#define OIDCStateCookieSep  " "
+#define OIDCSHA1Len 20
+#define OIDCRandomLen 32
+
+char *oidc_get_browser_state_hash(request_rec *r, const char *s) {
+	unsigned char hash[OIDCSHA1Len];
+	apr_sha1_ctx_t sha1;
+	apr_sha1_init(&sha1);
+	char *v = (char *) apr_table_get(r->headers_in, "X_FORWARDED_FOR");
+	if (v != NULL) apr_sha1_update(&sha1, v, strlen(v));
+	v = (char *) apr_table_get(r->headers_in, "USER_AGENT");
+	if (v != NULL) apr_sha1_update(&sha1, v, strlen(v));
+	apr_sha1_update(&sha1, r->connection->remote_ip, strlen(r->connection->remote_ip));
+	apr_sha1_update(&sha1, s, strlen(s));
+	apr_sha1_final(hash, &sha1);
+	char *result = apr_palloc(r->pool, apr_base64_encode_len(OIDCSHA1Len) +1);
+	apr_base64_encode(result, (const char *)hash, OIDCSHA1Len);
+	return result;
+}
+
+char *oidc_check_state_and_get_url(request_rec *r, char *state) {
+	char *result = NULL;
+	char *cookieValue = oidc_get_cookie(r, OIDCStateCookieName);
+	if (cookieValue == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: no \"%s\" cookie found.", OIDCStateCookieName);
+		return NULL;
+	}
+
+	// clear oidc-state cookie
+	oidc_set_cookie(r, OIDCStateCookieName, "");
+
+	char *svalue;
+	oidc_base64url_decode_decrypt_string(r, &svalue, cookieValue);
+	char *ctx = NULL;
+	char *b64 = apr_strtok(svalue, OIDCStateCookieSep, &ctx);
+	if (b64 == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: no first element found in \"%s\" cookie (%s).", OIDCStateCookieName, cookieValue);
+		return NULL;
+	}
+
+	char *calc = oidc_get_browser_state_hash(r, b64);
+	if (apr_strnatcmp(calc, state) != 0) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: calculated state from cookie does not match state parameter passed back in URL: \"%s\" != \"%s\"", state, calc);
+		return NULL;
+	}
+
+	result = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
+	if (result == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: no separator (%s) found in \"%s\" cookie (%s).", OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
+		return NULL;
+	}
+	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: original URL restored from cookie: %s.", result);
+	return result;
+}
+
+char *oidc_create_state_and_set_cookie(request_rec *r, oidc_cfg *c) {
+	char *cookieValue = NULL;
+	char *url = oidc_get_current_url(r, c);
+
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_create_state_and_set_cookie()");
+
+	unsigned char *brnd = apr_pcalloc(r->pool, OIDCRandomLen);
+	apr_generate_random_bytes((unsigned char *) brnd, OIDCRandomLen);
+	char *b64 = apr_palloc(r->pool, apr_base64_encode_len(OIDCRandomLen) + 1);
+	apr_base64_encode(b64, (const char *)brnd, OIDCRandomLen);
+
+	char *rvalue = apr_psprintf(r->pool, "%s%s%s", b64, OIDCStateCookieSep, url);
+	oidc_encrypt_base64url_encode_string(r, &cookieValue, rvalue);
+	char *headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", OIDCStateCookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
+	apr_table_add(r->err_headers_out, "Set-Cookie", headerString);
+
+	return oidc_get_browser_state_hash(r, b64);
+}
+
 void oidc_redirect(request_rec *r, oidc_cfg *c) {
-	// TODO:
-	// a) use nonce and state correctly because we set the id_token as a cookie: ask John why/how
-	// b) bind state cryptographically to a user agent cookie
 	char *destination = NULL, *state = NULL;
 	char *endpoint = oidc_get_authorization_endpoint(r, c);
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_redirect()");
@@ -1103,8 +1176,8 @@ void oidc_redirect(request_rec *r, oidc_cfg *c) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "MOD_OIDC: Cannot redirect request (no OIDCAuthorizationURL)");
 		return;
 	}
-	oidc_encrypt_base64url_encode_string(r, &state, oidc_get_current_url(r, c));
-	destination = apr_psprintf(r->pool, "%s%sresponse_type=%s&scope=%s&client_id=%s&state=%s&redirect_uri=%s", endpoint, (strchr(endpoint, '?') != NULL ? "&" : "?"), "code", oidc_escape_string(r, c->scope), oidc_escape_string(r, c->client_id), state, oidc_escape_string(r, apr_uri_unparse(r->pool, &c->redirect_uri, 0)));
+	state = oidc_create_state_and_set_cookie(r, c);
+	destination = apr_psprintf(r->pool, "%s%sresponse_type=%s&scope=%s&client_id=%s&state=%s&redirect_uri=%s", endpoint, (strchr(endpoint, '?') != NULL ? "&" : "?"), "code", oidc_escape_string(r, c->scope), oidc_escape_string(r, c->client_id), oidc_escape_string(r, state), oidc_escape_string(r, apr_uri_unparse(r->pool, &c->redirect_uri, 0)));
 	apr_table_add(r->headers_out, "Location", destination);
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Adding outgoing header: Location: %s", destination);
 
@@ -1112,7 +1185,6 @@ void oidc_redirect(request_rec *r, oidc_cfg *c) {
 
 apr_byte_t oidc_is_valid_cookie(request_rec *r, oidc_cfg *c, char *cookie, char **user, apr_table_t **attrs) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-
 	char *id_token = NULL;
 	oidc_base64url_decode_decrypt_string(r, &id_token, cookie);
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_is_valid_cookie()");
@@ -1191,6 +1263,8 @@ static int oidc_check_user_id(request_rec *r) {
 	// protected URL can't have a code= parameter without it being interpreted as an OIDC callback
 	if (oidc_request_matches_redirect_uri(r, c) == TRUE) {
 		if (oidc_get_code_and_state(r, &code, &state) == TRUE) {
+			char *original_url = oidc_check_state_and_get_url(r, state);
+			if (original_url == NULL) return HTTP_UNAUTHORIZED;
 			char *id_token = NULL;
 			if (oidc_resolve_code(r, c, d, code, &remoteUser, &attrs, &id_token)) {
 				char *encrypted_token = NULL;
@@ -1200,7 +1274,7 @@ static int oidc_check_user_id(request_rec *r) {
 				if (d->authn_header != NULL)
 					apr_table_set(r->headers_in, d->authn_header, remoteUser);
 				// NB: no oidc_set_attribute_headers(r, attrs) here because of the redirect that follows
-				apr_table_add(r->headers_out, "Location", state);
+				apr_table_add(r->headers_out, "Location", original_url);
 				return HTTP_MOVED_TEMPORARILY;
 			} else {
 				/* sometimes, pages that automatically refresh will re-send the code parameter, so let's check any cookies presented or return an error if none */
