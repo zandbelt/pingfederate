@@ -117,27 +117,9 @@
 
 #include "mod_oidc.h"
 #include "oidc_crypto.h"
+#include "oidc_config.h"
 
-module AP_MODULE_DECLARE_DATA oidc_module;
-
-#define OIDC_DEFAULT_SSL_VALIDATE_SERVER 1
-#define OIDC_DEFAULT_CLIENT_ID NULL
-#define OIDC_DEFAULT_CLIENT_SECRET NULL
-#define OIDC_DEFAULT_REDIRECT_URI NULL
-#define OIDC_DEFAULT_AUTHORIZATION_ENDPOINT NULL
-#define OIDC_DEFAULT_TOKEN_ENDPOINT NULL
-#define OIDC_DEFAULT_USERINFO_ENDPOINT NULL
-#define OIDC_DEFAULT_COOKIE "MOD_OIDC"
-#define OIDC_DEFAULT_AUTHN_HEADER NULL
-#define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS NULL
-#define OIDC_DEFAULT_DIR_SCOPE NULL
-#define OIDC_DEFAULT_COOKIE_DOMAIN NULL
-#define OIDC_DEFAULT_CRYPTO_PASSPHRASE NULL
-#define OIDC_DEFAULT_ISSUER NULL
-#define OIDC_DEFAULT_ATTRIBUTE_DELIMITER ","
-#define OIDC_DEFAULT_ATTRIBUTE_PREFIX "OIDC_ATTR_"
-#define OIDC_DEFAULT_SCOPE "openid"
-#define OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH "client_secret_post"
+extern module AP_MODULE_DECLARE_DATA oidc_module;
 
 // TODO: require SSL
 
@@ -199,150 +181,6 @@ int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char 
 	int dec_len = oidc_base64url_decode(r, &decbuf, src, 0);
 	*dst = (char *)oidc_crypto_aes_decrypt(r->pool, &c->d_ctx, (unsigned char *)decbuf, &dec_len);
 	return dec_len;
-}
-
-const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-    return ap_set_flag_slot(cmd, cfg, arg);
-}
-
-const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-	return ap_set_string_slot(cmd, cfg, arg);
-}
-
-const char *oidc_set_url(apr_pool_t *pool, apr_uri_t *uri, const char *url) {
-	if (url == NULL) {
-		memset(uri, '\0', sizeof(apr_uri_t));
-		return NULL;
-	}
-	if (apr_uri_parse(pool, url, uri) != APR_SUCCESS) {
-		return apr_psprintf(pool, "MOD_OIDC: URL '%s' could not be parsed!", url);
-	}
-	if (uri->port == 0) uri->port = apr_uri_port_of_scheme(uri->scheme);
-	if (uri->hostname == NULL) return apr_psprintf(pool, "MOD_OIDC: hostname in URL '%s' parsed to NULL!", url);
-	return NULL;
-}
-
-const char *oidc_set_uri_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-	int offset = (int)(long)cmd->info;
-	apr_uri_t *p = (apr_uri_t *)((unsigned char *)cfg + offset);
-	return oidc_set_url(cmd->pool, p, arg);
-}
-
-const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-	size_t sz, limit;
-	char d;
-	limit = strlen(value);
-	for(sz = 0; sz < limit; sz++) {
-		d = value[sz];
-		if ( (d < '0' || d > '9') &&
-				(d < 'a' || d > 'z') &&
-				(d < 'A' || d > 'Z') &&
-				d != '.' && d != '-') {
-			return(apr_psprintf(cmd->pool, "MOD_OIDC: Invalid character (%c) in OIDCCookieDomain", d));
-		}
-	}
-	cfg->cookie_domain = apr_pstrdup(cmd->pool, value);
-	return NULL;
-}
-
-const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *value) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-	if ( (apr_strnatcmp(value, "client_auth_post") != 0) && (!apr_strnatcmp(value, "client_auth_basic") != 0) ) {
-		return apr_psprintf(cmd->pool, "MOD_OIDC: Invalid value (%s) for OIDCTokenEndpointAuth: must be \"client_auth_post\" or \"client_auth_basic\".", value);
-	}
-	cfg->token_endpoint_auth = apr_pstrdup(cmd->pool, value);
-	return NULL;
-}
-
-void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
-	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
-	c->merged = FALSE;
-	c->ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
-	c->client_id = OIDC_DEFAULT_CLIENT_ID;
-	c->client_secret = OIDC_DEFAULT_CLIENT_SECRET;
-	c->cookie_domain = OIDC_DEFAULT_COOKIE_DOMAIN;
-	c->crypto_passphrase = OIDC_DEFAULT_CRYPTO_PASSPHRASE;
-	c->issuer = OIDC_DEFAULT_ISSUER;
-	oidc_set_url(pool, &c->authorization_endpoint_url, OIDC_DEFAULT_AUTHORIZATION_ENDPOINT);
-	oidc_set_url(pool, &c->token_endpoint_url, OIDC_DEFAULT_TOKEN_ENDPOINT);
-	c->token_endpoint_auth = OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH;
-	oidc_set_url(pool, &c->userinfo_endpoint_url, OIDC_DEFAULT_USERINFO_ENDPOINT);
-	oidc_set_url(pool, &c->redirect_uri, OIDC_DEFAULT_REDIRECT_URI);
-	c->attribute_delimiter = OIDC_DEFAULT_ATTRIBUTE_DELIMITER;
-	c->attribute_prefix = OIDC_DEFAULT_ATTRIBUTE_PREFIX;
-	c->scope = OIDC_DEFAULT_SCOPE;
-	return c;
-}
-
-void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
-	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
-	oidc_cfg *base = BASE;
-	oidc_cfg *add = ADD;
-	apr_uri_t test;
-	memset(&test, '\0', sizeof(apr_uri_t));
-	c->merged = TRUE;
-	c->ssl_validate_server = (add->ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->ssl_validate_server : base->ssl_validate_server);
-	c->client_id = (apr_strnatcasecmp(add->client_id, OIDC_DEFAULT_CLIENT_ID) != 0 ? add->client_id : base->client_id);
-	c->client_secret = (apr_strnatcasecmp(add->client_secret, OIDC_DEFAULT_CLIENT_SECRET) != 0 ? add->client_secret : base->client_secret);
-	c->crypto_passphrase = (apr_strnatcasecmp(add->crypto_passphrase, OIDC_DEFAULT_CRYPTO_PASSPHRASE) != 0 ? add->crypto_passphrase : base->crypto_passphrase);
-	c->issuer = (apr_strnatcasecmp(add->issuer, OIDC_DEFAULT_ISSUER) != 0 ? add->issuer : base->issuer);
-	if (memcmp(&add->authorization_endpoint_url, &test, sizeof(apr_uri_t)) == 0)
-		memcpy(&c->authorization_endpoint_url, &base->authorization_endpoint_url, sizeof(apr_uri_t));
-	else
-		memcpy(&c->authorization_endpoint_url, &add->authorization_endpoint_url, sizeof(apr_uri_t));
-	if (memcmp(&add->token_endpoint_url, &test, sizeof(apr_uri_t)) == 0)
-		memcpy(&c->token_endpoint_url, &base->token_endpoint_url, sizeof(apr_uri_t));
-	else
-		memcpy(&c->token_endpoint_url, &add->token_endpoint_url, sizeof(apr_uri_t));
-	c->token_endpoint_auth = (apr_strnatcasecmp(add->token_endpoint_auth, OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH) != 0 ? add->token_endpoint_auth : base->token_endpoint_auth);
-	if (memcmp(&add->userinfo_endpoint_url, &test, sizeof(apr_uri_t)) == 0)
-		memcpy(&c->userinfo_endpoint_url, &base->userinfo_endpoint_url, sizeof(apr_uri_t));
-	else
-		memcpy(&c->userinfo_endpoint_url, &add->userinfo_endpoint_url, sizeof(apr_uri_t));
-	if (memcmp(&add->redirect_uri, &test, sizeof(apr_uri_t)) == 0)
-		memcpy(&c->redirect_uri, &base->redirect_uri, sizeof(apr_uri_t));
-	else
-		memcpy(&c->redirect_uri, &add->redirect_uri, sizeof(apr_uri_t));
-	c->cookie_domain = (add->cookie_domain != OIDC_DEFAULT_COOKIE_DOMAIN ? add->cookie_domain : base->cookie_domain);
-	c->attribute_delimiter = (apr_strnatcasecmp(add->attribute_delimiter, OIDC_DEFAULT_ATTRIBUTE_DELIMITER) != 0 ? add->attribute_delimiter : base->attribute_delimiter);
-	c->attribute_prefix = (apr_strnatcasecmp(add->attribute_prefix, OIDC_DEFAULT_ATTRIBUTE_PREFIX) != 0 ? add->attribute_prefix : base->attribute_prefix);
-	c->scope = (apr_strnatcasecmp(add->scope, OIDC_DEFAULT_SCOPE) != 0 ? add->scope : base->scope);
-	return c;
-}
-
-void *oidc_create_dir_config(apr_pool_t *pool, char *path) {
-	oidc_dir_cfg *c = apr_pcalloc(pool, sizeof(oidc_dir_cfg));
-	c->cookie = OIDC_DEFAULT_COOKIE;
-	c->dir_scope = OIDC_DEFAULT_DIR_SCOPE;
-	c->authn_header = OIDC_DEFAULT_AUTHN_HEADER;
-	c->scrub_request_headers = OIDC_DEFAULT_SCRUB_REQUEST_HEADERS;
-	return(c);
-}
-
-void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD) {
-	oidc_dir_cfg *c = apr_pcalloc(pool, sizeof(oidc_dir_cfg));
-	oidc_dir_cfg *base = BASE;
-	oidc_dir_cfg *add = ADD;
-	c->cookie = (apr_strnatcasecmp(add->cookie, OIDC_DEFAULT_COOKIE) != 0 ?
-		add->cookie : base->cookie);
-	c->dir_scope = (add->dir_scope != OIDC_DEFAULT_DIR_SCOPE ?
-		add->dir_scope : base->dir_scope);
-	if (add->dir_scope != NULL && apr_strnatcasecmp(add->dir_scope, "Off") == 0)
-		c->dir_scope = NULL;
-	c->authn_header = (add->authn_header != OIDC_DEFAULT_AUTHN_HEADER ?
-		add->authn_header : base->authn_header);
-	if (add->authn_header != NULL && apr_strnatcasecmp(add->authn_header, "Off") == 0)
-		c->authn_header = NULL;
-	c->scrub_request_headers = (add->scrub_request_headers != OIDC_DEFAULT_SCRUB_REQUEST_HEADERS ?
-		 add->scrub_request_headers :
-		 base->scrub_request_headers);
-	if (add->scrub_request_headers != NULL && apr_strnatcasecmp(add->scrub_request_headers, "Off") == 0)
-		c->scrub_request_headers = NULL;
-	return(c);
 }
 
 int oidc_char_to_env(int c) {
@@ -1220,7 +1058,7 @@ static void oidc_set_attribute_headers(request_rec *r, apr_table_t *attrs) {
 	}
 }
 
-static int oidc_check_user_id(request_rec *r) {
+int oidc_check_user_id(request_rec *r) {
 	char *code = NULL, *state = NULL;
 	char *cookieString = NULL;
 	char *remoteUser = NULL;
@@ -1309,143 +1147,13 @@ static int oidc_check_user_id(request_rec *r) {
 	return HTTP_UNAUTHORIZED;
 }
 
-static int oidc_auth_checker(request_rec *r) {
+int oidc_auth_checker(request_rec *r) {
 	// TODO: when attributes are resolved and stored (copy the file caching mechanism from mod_auth_cas...)
 	// we can parse expressions here that match and autorize on attributes
 	return DECLINED;
 }
 
-#if defined(OPENSSL_THREADS) && APR_HAS_THREADS
-
-static apr_thread_mutex_t **ssl_locks;
-static int ssl_num_locks;
-
-static void oidc_ssl_locking_callback(int mode, int type, const char *file, int line) {
-	if (type < ssl_num_locks) {
-		if (mode & CRYPTO_LOCK)
-			apr_thread_mutex_lock(ssl_locks[type]);
-		else
-			apr_thread_mutex_unlock(ssl_locks[type]);
-	}
-}
-
-#ifdef OPENSSL_NO_THREADID
-static unsigned long oidc_ssl_id_callback(void) {
-	return (unsigned long) apr_os_thread_current();
-}
-#else
-static void oidc_ssl_id_callback(CRYPTO_THREADID *id)
-{
-	CRYPTO_THREADID_set_numeric(id, (unsigned long) apr_os_thread_current());
-}
-#endif /* OPENSSL_NO_THREADID */
-
-#endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
-
-apr_status_t oidc_cleanup(void *data) {
-	server_rec *s = (server_rec *) data;
-	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "entering oidc_cleanup()");
-#if (defined (OPENSSL_THREADS) && APR_HAS_THREADS)
-	if (CRYPTO_get_locking_callback() == oidc_ssl_locking_callback)
-		CRYPTO_set_locking_callback(NULL);
-#ifdef OPENSSL_NO_THREADID
-	if (CRYPTO_get_id_callback() == oidc_ssl_id_callback)
-		CRYPTO_set_id_callback(NULL);
-#else
-	if (CRYPTO_THREADID_get_callback() == oidc_ssl_id_callback)
-		CRYPTO_THREADID_set_callback(NULL);
-#endif /* OPENSSL_NO_THREADID */
-
-#endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
-	curl_global_cleanup();
-	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "exiting oidc_cleanup()");
-	return APR_SUCCESS;
-}
-
-int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_rec *s) {
-	const char *userdata_key = "auth_oidc_init";
-	void *data;
-	int i;
-
-	/* Since the post_config hook is invoked twice (once
-	 * for 'sanity checking' of the config and once for
-	 * the actual server launch, we have to use a hack
-	 * to not run twice
-	 */
-	apr_pool_userdata_get(&data, userdata_key, s->process->pool);
-
-	if (data) {
-		curl_global_init(CURL_GLOBAL_ALL);
-
-#if (defined(OPENSSL_THREADS) && APR_HAS_THREADS)
-		ssl_num_locks = CRYPTO_num_locks();
-		ssl_locks = apr_pcalloc(s->process->pool, ssl_num_locks * sizeof(*ssl_locks));
-
-		for(i = 0; i < ssl_num_locks; i++)
-			apr_thread_mutex_create(&(ssl_locks[i]), APR_THREAD_MUTEX_DEFAULT, s->process->pool);
-
-#ifdef OPENSSL_NO_THREADID
-		if (CRYPTO_get_locking_callback() == NULL && CRYPTO_get_id_callback() == NULL) {
-			CRYPTO_set_locking_callback(oidc_ssl_locking_callback);
-			CRYPTO_set_id_callback(oidc_ssl_id_callback);
-		}
-#else
-		if (CRYPTO_get_locking_callback() == NULL && CRYPTO_THREADID_get_callback() == NULL) {
-			CRYPTO_set_locking_callback(oidc_ssl_locking_callback);
-			CRYPTO_THREADID_set_callback(oidc_ssl_id_callback);
-		}
-#endif /* OPENSSL_NO_THREADID */
-#endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
-		apr_pool_cleanup_register(pool, s, oidc_cleanup, apr_pool_cleanup_null);
-	}
-
-	apr_pool_userdata_set((const void *)1, userdata_key, apr_pool_cleanup_null, s->process->pool);
-
-	/*
-	 * Apache has a base vhost that true vhosts derive from.
-	 * There are two startup scenarios:
-	 *
-	 * 1. Only the base vhost contains OIDC settings.
-	 *    No server configs have been merged.
-	 *    Only the base vhost needs to be checked.
-	 *
-	 * 2. The base vhost contains zero or more OIDC settings.
-	 *    One or more vhosts override these.
-	 *    These vhosts have a merged config.
-	 *    All merged configs need to be checked.
-	 */
-//	if (!merged_vhost_configs_exist(s)) {
-		/* nothing merged, only check the base vhost */
-//		return check_vhost_config(pool, s);
-//	}
-
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config, &oidc_module);
-	const char *result = oidc_crypto_aes_init(cfg->crypto_passphrase, &cfg->e_ctx, &cfg->d_ctx);
-	if (result != NULL) {
-		ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, "oidc_post_config: couldn't initialize AES cipher: %s", result);
-		return HTTP_INTERNAL_SERVER_ERROR;
-	}
-
-	return OK;
-}
-
-static void oidc_register_hooks(apr_pool_t *pool) {
-	static const char *const authzSucc[] = { "mod_authz_user.c", NULL };
-	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);
-#if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-	ap_hook_check_access_ex(
-		oidc_check_user_id,
-		NULL,
-		NULL,
-		APR_HOOK_MIDDLE,
-		AP_AUTH_INTERNAL_PER_URI);
-#else
-	ap_hook_check_user_id(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE);
-#endif
-	ap_hook_auth_checker(oidc_auth_checker, NULL, authzSucc, APR_HOOK_MIDDLE);
-}
-
-static const command_rec oidc_cmds[] = {
+const command_rec oidc_config_cmds[] = {
 		AP_INIT_FLAG("OIDCSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, ssl_validate_server), RSRC_CONF, "Require validation of the OpenID Connect OP SSL server certificate for successful authentication (On or Off)"),
 		AP_INIT_TAKE1("OIDCClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, client_id), RSRC_CONF, "Client identifier used in calls to OpenID Connect OP."),
 		AP_INIT_TAKE1("OIDCClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, client_secret), RSRC_CONF, "Client secret used in calls to OpenID Connect OP."),
@@ -1474,6 +1182,6 @@ module AP_MODULE_DECLARE_DATA oidc_module = {
 	oidc_merge_dir_config,
 	oidc_create_server_config,
 	oidc_merge_server_config,
-	oidc_cmds,
+	oidc_config_cmds,
 	oidc_register_hooks
 };
