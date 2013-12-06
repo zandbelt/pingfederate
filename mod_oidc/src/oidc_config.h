@@ -49,41 +49,23 @@
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
-#ifndef MOD_OIDC_H_
-#define MOD_OIDC_H_
+#ifndef OIDC_CONFIG_H_
+#define OIDC_CONFIG_H_
 
-#include <openssl/evp.h>
-#include <apr_uri.h>
+#include <apr_pools.h>
 #include <httpd.h>
 
-typedef struct oidc_cfg {
-	unsigned int merged;
-	int ssl_validate_server;
-	char *client_id;
-	char *client_secret;
-	apr_uri_t redirect_uri;
-	char *issuer;
-	apr_uri_t authorization_endpoint_url;
-	apr_uri_t token_endpoint_url;
-	char *token_endpoint_auth;
-	apr_uri_t userinfo_endpoint_url;
-	char *cookie_domain;
-	char *crypto_passphrase;
-	char *attribute_delimiter;
-	char *attribute_prefix;
-	char *scope;
-	EVP_CIPHER_CTX e_ctx;
-	EVP_CIPHER_CTX d_ctx;
-} oidc_cfg;
+void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr);
+void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD);
+void *oidc_create_dir_config(apr_pool_t *pool, char *path);
+void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD);
+void oidc_register_hooks(apr_pool_t *pool);
 
-typedef struct oidc_dir_cfg {
-	char *dir_scope;
-	char *cookie;
-	char *authn_header;
-	char *scrub_request_headers;
-} oidc_dir_cfg;
+const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg);
+const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
+const char *oidc_set_uri_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
+const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *value);
+const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
 
-int oidc_auth_checker(request_rec *r);
-int oidc_check_user_id(request_rec *r);
 
-#endif /* MOD_OIDC_H_ */
+#endif /* OIDC_CONFIG_H_ */
