@@ -96,8 +96,6 @@
 #include <stdio.h>
 
 #include <curl/curl.h>
-#include <openssl/evp.h>
-#include <openssl/aes.h>
 
 #include "apr_hash.h"
 #include "apr_strings.h"
@@ -116,6 +114,11 @@
 #include "http_request.h"
 
 #include "apr_json.h"
+
+#include "mod_oidc.h"
+#include "oidc_crypto.h"
+
+module AP_MODULE_DECLARE_DATA oidc_module;
 
 #define OIDC_DEFAULT_SSL_VALIDATE_SERVER 1
 #define OIDC_DEFAULT_CLIENT_ID NULL
@@ -136,114 +139,7 @@
 #define OIDC_DEFAULT_SCOPE "openid"
 #define OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH "client_secret_post"
 
-module AP_MODULE_DECLARE_DATA oidc_module;
-
 // TODO: require SSL
-
-typedef struct oidc_cfg {
-	unsigned int merged;
-	int ssl_validate_server;
-	char *client_id;
-	char *client_secret;
-	apr_uri_t redirect_uri;
-	char *issuer;
-	apr_uri_t authorization_endpoint_url;
-	apr_uri_t token_endpoint_url;
-	char *token_endpoint_auth;
-	apr_uri_t userinfo_endpoint_url;
-	char *cookie_domain;
-	char *crypto_passphrase;
-	char *attribute_delimiter;
-	char *attribute_prefix;
-	char *scope;
-	EVP_CIPHER_CTX e_ctx;
-	EVP_CIPHER_CTX d_ctx;
-} oidc_cfg;
-
-typedef struct oidc_dir_cfg {
-	char *dir_scope;
-	char *cookie;
-	char *authn_header;
-	char *scrub_request_headers;
-} oidc_dir_cfg;
-
-int oidc_aes_init(server_rec *s) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config, &oidc_module);
-
-	if (cfg->crypto_passphrase == NULL) {
-		ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, "MOD_OIDC: OIDCCryptoPassphrase has not been set; can't continue initializing crypto!");
-		return -1;
-	}
-
-	unsigned char *key_data = (unsigned char *)cfg->crypto_passphrase;
-	int key_data_len = strlen(cfg->crypto_passphrase);
-
-	unsigned int s_salt[] = {41892, 72930};
-	unsigned char *salt = (unsigned char *)&s_salt;
-
-	int i, nrounds = 5;
-	unsigned char key[32], iv[32];
-
-	/*
-	 * Gen key & IV for AES 256 CBC mode. A SHA1 digest is used to hash the supplied key material.
-	 * nrounds is the number of times the we hash the material. More rounds are more secure but
-	 * slower.
-	 */
-	i = EVP_BytesToKey(EVP_aes_256_cbc(), EVP_sha1(), salt, key_data, key_data_len, nrounds, key, iv);
-	if (i != 32) {
-		ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, "MOD_OIDC: Key size is %d bits - should be 256 bits!", i);
-		return -1;
-	}
-
-	EVP_CIPHER_CTX_init(&cfg->e_ctx);
-	EVP_EncryptInit_ex(&cfg->e_ctx, EVP_aes_256_cbc(), NULL, key, iv);
-
-	EVP_CIPHER_CTX_init(&cfg->d_ctx);
-	EVP_DecryptInit_ex(&cfg->d_ctx, EVP_aes_256_cbc(), NULL, key, iv);
-
-	return 0;
-}
-
-unsigned char *oidc_aes_encrypt(apr_pool_t *pool, EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len) {
-	/* max ciphertext len for a n bytes of plaintext is n + AES_BLOCK_SIZE -1 bytes */
-	int c_len = *len + AES_BLOCK_SIZE, f_len = 0;
-	unsigned char *ciphertext = apr_palloc(pool, c_len);
-
-	/* allows reusing of 'e' for multiple encryption cycles */
-	EVP_EncryptInit_ex(e, NULL, NULL, NULL, NULL);
-
-	/* update ciphertext, c_len is filled with the length of ciphertext generated,
-	 *len is the size of plaintext in bytes */
-	EVP_EncryptUpdate(e, ciphertext, &c_len, plaintext, *len);
-
-	/* update ciphertext with the final remaining bytes */
-	EVP_EncryptFinal_ex(e, ciphertext+c_len, &f_len);
-
-	*len = c_len + f_len;
-	return ciphertext;
-}
-
-unsigned char *oidc_aes_decrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len) {
-	/* because we have padding ON, we must allocate an extra cipher block size of memory */
-	int p_len = *len, f_len = 0;
-	unsigned char *plaintext = apr_palloc(r->pool, p_len + AES_BLOCK_SIZE);
-
-	if (!EVP_DecryptInit_ex(e, NULL, NULL, NULL, NULL)) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "MOD_OIDC: EVP_DecryptInit_ex failed!");
-		return NULL;
-	}
-	if (!EVP_DecryptUpdate(e, plaintext, &p_len, ciphertext, *len)) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "MOD_OIDC: EVP_DecryptUpdate failed!");
-		return NULL;
-	}
-	if (!EVP_DecryptFinal_ex(e, plaintext+p_len, &f_len)) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "MOD_OIDC: EVP_DecryptFinal_ex failed!");
-		return NULL;
-	}
-
-	*len = p_len + f_len;
-	return plaintext;
-}
 
 // TODO: always padded now, do we need an option to remove the padding?
 int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_len) {
@@ -293,7 +189,7 @@ int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int paddi
 int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	int crypted_len = strlen(src) + 1;
-	unsigned char *crypted = oidc_aes_encrypt(r->pool, &c->e_ctx, (unsigned char *)src, &crypted_len);
+	unsigned char *crypted = oidc_crypto_aes_encrypt(r->pool, &c->e_ctx, (unsigned char *)src, &crypted_len);
 	return oidc_base64url_encode(r, dst, (const char *)crypted, crypted_len);
 }
 
@@ -301,7 +197,7 @@ int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char 
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	char *decbuf = NULL;
 	int dec_len = oidc_base64url_decode(r, &decbuf, src, 0);
-	*dst = (char *)oidc_aes_decrypt(r, &c->d_ctx, (unsigned char *)decbuf, &dec_len);
+	*dst = (char *)oidc_crypto_aes_decrypt(r->pool, &c->d_ctx, (unsigned char *)decbuf, &dec_len);
 	return dec_len;
 }
 
@@ -1523,8 +1419,10 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 //		return check_vhost_config(pool, s);
 //	}
 
-	if (oidc_aes_init(s)) {
-		ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, "MOD_OIDC: Couldn't initialize AES cipher.");
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config, &oidc_module);
+	const char *result = oidc_crypto_aes_init(cfg->crypto_passphrase, &cfg->e_ctx, &cfg->d_ctx);
+	if (result != NULL) {
+		ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, "oidc_post_config: couldn't initialize AES cipher: %s", result);
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
