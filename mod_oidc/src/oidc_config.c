@@ -143,6 +143,46 @@ const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *
 	return NULL;
 }
 
+char *oidc_get_endpoint(request_rec *r, apr_uri_t *url, const char *s) {
+	apr_uri_t test;
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_get_authorization_endpoint()");
+	memset(&test, '\0', sizeof(apr_uri_t));
+	if (memcmp(url, &test, sizeof(apr_uri_t)) == 0) {
+		if (s != NULL) ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_endpoint: %s null (not set?)", s);
+		return NULL;
+	}
+	return (apr_uri_unparse(r->pool, url, 0));
+}
+
+char *oidc_get_path(request_rec *r) {
+	size_t i;
+	char *p;
+	p = r->parsed_uri.path;
+	if (p[0] == '\0')
+		return apr_pstrdup(r->pool, "/");
+	for (i = strlen(p) - 1; i > 0; i--)
+		if (p[i] == '/')
+			break;
+	return apr_pstrndup(r->pool, p, i + 1);
+}
+
+char *oidc_get_dir_scope(request_rec *r) {
+	char *rv = NULL, *requestPath = oidc_get_path(r);
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
+	if (d->dir_scope != NULL) {
+		if (strncmp(d->dir_scope, requestPath, strlen(d->dir_scope)) == 0)
+			rv = d->dir_scope;
+		else {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "MOD_OIDC: OIDCDirScope (%s) not a substring of request path, using request path (%s) for cookie", d->dir_scope, requestPath);
+			rv = requestPath;
+		}
+	} else {
+			rv = requestPath;
+	}
+	return (rv);
+}
+
 void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
 	c->merged = FALSE;

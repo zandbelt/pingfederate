@@ -1,8 +1,8 @@
 MY_APXS=/opt/local/apache2/bin/apxs
 MY_LDFLAGS=-lcurl
 
-MY_SOURCES = src/apr_json_decode.c src/oidc_crypto.c src/oidc_config.c
-MY_OBJECTS = src/apr_json_decode.slo src/oidc_crypto.slo src/oidc_config.slo
+MY_SOURCES = src/apr_json_decode.c src/oidc_crypto.c src/oidc_config.c src/oidc_util.c
+MY_OBJECTS = src/apr_json_decode.slo src/oidc_crypto.slo src/oidc_config.slo src/oidc_util.slo
 
 src/mod_oidc.la: src/mod_oidc.c $(MY_OBJECTS)
 	$(MY_APXS) $(MY_LDFLAGS) $(MY_CFLAGS) -c $< $(MY_SOURCES)

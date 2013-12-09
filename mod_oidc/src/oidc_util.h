@@ -49,25 +49,22 @@
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
-#ifndef OIDC_CONFIG_H_
-#define OIDC_CONFIG_H_
+#ifndef OIDC_UTIL_H_
+#define OIDC_UTIL_H_
 
-#include <apr_pools.h>
 #include <httpd.h>
+#include "mod_oidc.h"
 
-void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr);
-void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD);
-void *oidc_create_dir_config(apr_pool_t *pool, char *path);
-void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD);
-void oidc_register_hooks(apr_pool_t *pool);
+int oidc_strnenvcmp(const char *a, const char *b, int len);
+int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding);
+char *oidc_escape_string(const request_rec *r, const char *str);
+char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *postfields, int basic_auth, const char *bearer_token);
+void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue);
+char *oidc_get_cookie(request_rec *r, char *cookieName);
+int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src);
+int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char *src);
+char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c);
+char *oidc_url_encode(const request_rec *r, const char *str, const char *charsToEncode);
+void oidc_set_attribute_headers(request_rec *r, apr_table_t *attrs);
 
-const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg);
-const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
-const char *oidc_set_uri_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
-const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *value);
-const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
-
-char *oidc_get_endpoint(request_rec *r, apr_uri_t *url, const char *s);
-char *oidc_get_dir_scope(request_rec *r);
-
-#endif /* OIDC_CONFIG_H_ */
+#endif /* OIDC_UTIL_H_ */
