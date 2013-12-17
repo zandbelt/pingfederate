@@ -200,6 +200,8 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->attribute_delimiter = OIDC_DEFAULT_ATTRIBUTE_DELIMITER;
 	c->attribute_prefix = OIDC_DEFAULT_ATTRIBUTE_PREFIX;
 	c->scope = OIDC_DEFAULT_SCOPE;
+	c->validate_client_id = OIDC_DEFAULT_CLIENT_ID;
+	c->validate_client_secret = OIDC_DEFAULT_CLIENT_SECRET;
 	return c;
 }
 
@@ -236,6 +238,8 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->attribute_delimiter = (apr_strnatcasecmp(add->attribute_delimiter, OIDC_DEFAULT_ATTRIBUTE_DELIMITER) != 0 ? add->attribute_delimiter : base->attribute_delimiter);
 	c->attribute_prefix = (apr_strnatcasecmp(add->attribute_prefix, OIDC_DEFAULT_ATTRIBUTE_PREFIX) != 0 ? add->attribute_prefix : base->attribute_prefix);
 	c->scope = (apr_strnatcasecmp(add->scope, OIDC_DEFAULT_SCOPE) != 0 ? add->scope : base->scope);
+	c->validate_client_id = (apr_strnatcasecmp(add->validate_client_id, OIDC_DEFAULT_CLIENT_ID) != 0 ? add->validate_client_id : base->validate_client_id);
+	c->validate_client_secret = (apr_strnatcasecmp(add->validate_client_secret, OIDC_DEFAULT_CLIENT_SECRET) != 0 ? add->validate_client_secret : base->validate_client_secret);
 	return c;
 }
 

@@ -54,17 +54,18 @@
 
 #include <httpd.h>
 #include "mod_oidc.h"
+#include "apr_json.h"
 
 int oidc_strnenvcmp(const char *a, const char *b, int len);
 int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding);
 char *oidc_escape_string(const request_rec *r, const char *str);
-char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *postfields, int basic_auth, const char *bearer_token);
+char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *postfields, const char *basic_auth, const char *bearer_token);
 void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue);
 char *oidc_get_cookie(request_rec *r, char *cookieName);
 int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src);
 int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char *src);
 char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c);
 char *oidc_url_encode(const request_rec *r, const char *str, const char *charsToEncode);
-void oidc_set_attribute_headers(request_rec *r, apr_table_t *attrs);
+char *oidc_normalize_header_name(const request_rec *r, const char *str);
 
 #endif /* OIDC_UTIL_H_ */

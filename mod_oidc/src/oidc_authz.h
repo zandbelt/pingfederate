@@ -49,43 +49,13 @@
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
-#ifndef MOD_OIDC_H_
-#define MOD_OIDC_H_
+#ifndef OIDC_AUTHZ_H_
+#define OIDC_AUTHZ_H_
 
-#include <openssl/evp.h>
-#include <apr_uri.h>
 #include <httpd.h>
+#include <http_core.h>
+#include "apr_json.h"
 
-typedef struct oidc_cfg {
-	unsigned int merged;
-	int ssl_validate_server;
-	char *client_id;
-	char *client_secret;
-	apr_uri_t redirect_uri;
-	char *issuer;
-	apr_uri_t authorization_endpoint_url;
-	apr_uri_t token_endpoint_url;
-	char *token_endpoint_auth;
-	apr_uri_t userinfo_endpoint_url;
-	char *cookie_domain;
-	char *crypto_passphrase;
-	char *attribute_delimiter;
-	char *attribute_prefix;
-	char *scope;
-	char *validate_client_id;
-	char *validate_client_secret;
-	EVP_CIPHER_CTX e_ctx;
-	EVP_CIPHER_CTX d_ctx;
-} oidc_cfg;
+int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const require_line *const reqs, int nelts);
 
-typedef struct oidc_dir_cfg {
-	char *dir_scope;
-	char *cookie;
-	char *authn_header;
-	char *scrub_request_headers;
-} oidc_dir_cfg;
-
-int oidc_auth_checker(request_rec *r);
-int oidc_check_user_id(request_rec *r);
-
-#endif /* MOD_OIDC_H_ */
+#endif /* OIDC_AUTHZ_H_ */
