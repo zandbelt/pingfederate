@@ -260,7 +260,7 @@ size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream)
 	return (nmemb*size);
 }
 
-char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *postfields, int basic_auth, const char *bearer_token) {
+char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *postfields, const char *basic_auth, const char *bearer_token) {
 	char curlError[CURL_ERROR_SIZE];
 	oidc_curl_buffer curlBuffer;
 	CURL *curl;
@@ -304,9 +304,9 @@ char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *p
 		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	}
 
-	if (basic_auth) {
+	if (basic_auth != NULL) {
 		curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-		curl_easy_setopt(curl, CURLOPT_USERPWD, apr_psprintf(r->pool, "%s:%s", c->client_id, c->client_secret));
+		curl_easy_setopt(curl, CURLOPT_USERPWD, basic_auth);
 	}
 
 	if (postfields != NULL) {
@@ -399,18 +399,5 @@ char *oidc_normalize_header_name(const request_rec *r, const char *str)
                 else if (strchr(separators, ns[i]) != NULL) ns[i] = '-';
         }
         return ns;
-}
-
-int oidc_set_attribute_header(void* rec, const char* key, const char* value) {
-	request_rec* r = (request_rec *)rec;
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
-	apr_table_set(r->headers_in, apr_psprintf(r->pool, "%s%s", c->attribute_prefix, oidc_normalize_header_name(r, key)), value);
-	return 1;
-}
-
-void oidc_set_attribute_headers(request_rec *r, apr_table_t *attrs) {
-	if (attrs != NULL) {
-		apr_table_do(oidc_set_attribute_header, r, attrs, NULL);
-	}
 }
 
