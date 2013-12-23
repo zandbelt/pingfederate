@@ -62,9 +62,7 @@
 #include <http_request.h>
 #include "http_protocol.h"
 
-#include "oidc_util.h"
-#include "oidc_config.h"
-#include "oidc_crypto.h"
+#include "mod_oidc.h"
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 

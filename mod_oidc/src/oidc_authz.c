@@ -53,7 +53,7 @@
 #include <http_log.h>
 #include <http_protocol.h>
 
-#include "oidc_authz.h"
+#include "mod_oidc.h"
 
 //extern module AP_MODULE_DECLARE_DATA oidc_module;
 

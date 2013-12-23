@@ -61,9 +61,7 @@
 
 #include <curl/curl.h>
 
-#include "oidc_config.h"
 #include "mod_oidc.h"
-#include "oidc_crypto.h"
 
 #define OIDC_DEFAULT_SSL_VALIDATE_SERVER 1
 #define OIDC_DEFAULT_CLIENT_ID NULL

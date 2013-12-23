@@ -50,8 +50,6 @@
  */
 
 #include "mod_oidc.h"
-#include "oidc_crypto.h"
-
 #include <openssl/aes.h>
 
 const char *oidc_crypto_aes_init(const char *passphrase, EVP_CIPHER_CTX *encode, EVP_CIPHER_CTX *decode) {
