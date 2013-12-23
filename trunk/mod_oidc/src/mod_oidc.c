@@ -56,14 +56,12 @@
  * Additionally it can operate as an OAuth 2.0 Resource Server to a PingFederate OAuth 2.0
  * Authorization Server, cq. validate Bearer access_tokens against PingFederate.
  *
- * Version 1.3 - sets the REMOTE_USER variable to the id_token sub claim, other id_token claims
+ * Version 2.0 - sets the REMOTE_USER variable to the id_token sub claim, other id_token claims
  * are passed in HTTP headers, together with those (optionally) obtained from the user info endpoint
  * Allows for authorization rules (based on Requires primitive) that can do matching against the
  * set of claims provided in the id_token/userinfo or the access_token (after introspection).
+ * Uses server-side storage caching through files in /tmp. TODO: configurable path/create dir
  *
- * Todo for version 2.0: server sides storage and caching using mem_cache (or similar,
- * such as the shared filesystem approach that mod_auth_cas uses)
- * 
  * Largely based on mod_auth_cas.c:
  * https://github.com/Jasig/mod_auth_cas
  *
@@ -149,14 +147,8 @@
 #include "http_protocol.h"
 #include "http_request.h"
 
-#include "apr_json.h"
-
 #include "mod_oidc.h"
-#include "oidc_crypto.h"
-#include "oidc_config.h"
-#include "oidc_util.h"
-#include "oidc_authz.h"
-
+#
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
 // TODO: require SSL
@@ -300,7 +292,7 @@ apr_byte_t oidc_get_code_and_state(request_rec *r, char **code, char **state) {
 
 // TODO: when encrypted, we don't need to aud/check the cookie anymore
 // TODO: split out checks into separate functions
-int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_json_value_t **attrs) {
+int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_json_value_t **attrs, apr_time_t *expires) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	const char *s = id_token;
@@ -363,10 +355,11 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON object did not contain an \"exp\" number");
 		return FALSE;
 	}
-	if (apr_time_now() / APR_USEC_PER_SEC > exp->value.lnumber) {
+	if (apr_time_sec(apr_time_now()) > exp->value.lnumber) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "id_token expired");
 		return FALSE;
 	}
+	*expires = apr_time_from_sec(exp->value.lnumber);
 
 	apr_json_value_t *aud = apr_hash_get(payload->value.object, "aud", APR_HASH_KEY_STRING);
 	if ( aud != NULL) {
@@ -420,7 +413,7 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 		return FALSE;
 	}
 
-	ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "### valid id_token for user \"%s\" (expires in %ld seconds)", username->value.string.p, exp->value.lnumber - apr_time_now() / APR_USEC_PER_SEC);
+	ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r, "### valid id_token for user \"%s\" (expires in %ld seconds)", username->value.string.p, exp->value.lnumber - apr_time_sec(apr_time_now()));
 
 	*user = apr_pstrdup(r->pool, username->value.string.p);
 
@@ -448,7 +441,7 @@ apr_byte_t oidc_json_error_check(request_rec *r, apr_json_value_t *result, const
 	return TRUE;
 }
 
-apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *code, char **user, apr_json_value_t **attrs, char **s_id_token, char **s_access_token) {
+apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *code, char **user, apr_json_value_t **attrs, char **s_id_token, char **s_access_token, apr_time_t *expires) {
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_resolve_code(): entering");
 
@@ -511,7 +504,7 @@ apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_resolve_code(): returned id_token: %s", id_token->value.string.p);
 	*s_id_token = apr_pstrdup(r->pool, id_token->value.string.p);
 
-	oidc_parse_id_token(r, id_token->value.string.p, user, attrs);
+	oidc_parse_id_token(r, id_token->value.string.p, user, attrs, expires);
 
 	return (status == APR_SUCCESS) ? TRUE : FALSE;
 }
@@ -591,8 +584,7 @@ char *oidc_create_state_and_set_cookie(request_rec *r, oidc_cfg *c) {
 
 	char *rvalue = apr_psprintf(r->pool, "%s%s%s", b64, OIDCStateCookieSep, url);
 	oidc_encrypt_base64url_encode_string(r, &cookieValue, rvalue);
-	char *headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", OIDCStateCookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
-	apr_table_add(r->err_headers_out, "Set-Cookie", headerString);
+	oidc_set_cookie(r, OIDCStateCookieName, cookieValue);
 
 	return oidc_get_browser_state_hash(r, b64);
 }
@@ -607,52 +599,6 @@ void oidc_redirect(request_rec *r, oidc_cfg *c) {
 	apr_table_add(r->headers_out, "Location", destination);
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Adding outgoing header: Location: %s", destination);
 
-}
-
-apr_byte_t oidc_is_valid_cookie(request_rec *r, oidc_cfg *c, char *cookie, char **user, apr_json_value_t **attrs) {
-	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-	char *value = NULL;
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_is_valid_cookie()");
-
-	if (oidc_base64url_decode_decrypt_string(r, &value, cookie) <= 0) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_is_valid_cookie: could not find decode cookie value");
-		return FALSE;
-	}
-
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_is_valid_cookie: decrypted cookie value: %s", value);
-
-	char *p = strrchr(value, '.');
-	if (p == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_is_valid_cookie: could not find last \".\" in cookie value");
-		return FALSE;
-	}
-	*p = '\0';
-	p++;
-
-	char *s = apr_palloc(r->pool, apr_base64_decode_len(p));
-	apr_base64_decode(s, p);
-
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_is_valid_cookie: id_token value: %s", value);
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_is_valid_cookie: JSON attributes value: %s", s);
-
-	oidc_parse_id_token(r, value, user, attrs);
-	// TODO: now the call from the userinfo endpoint will overwrite the id_token attributes
-
-	if (apr_strnatcmp(s, "") != 0) {
-		apr_status_t status = apr_json_decode(attrs, s, strlen(s), r->pool);
-		apr_json_value_t *attributes = *attrs;
-		if (status != APR_SUCCESS) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_is_valid_cookie: could not decode JSON from UserInfo endpoint response successfully");
-			return FALSE;
-		}
-		if ( (attributes == NULL) || (attributes->type != APR_JSON_OBJECT) ) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_is_valid_cookie: UserInfo endpoint response did not contain a JSON object");
-			return FALSE;
-		}
-		//oidc_parse_attributes_to_table(r, c, attributes, attrs, "");
-	}
-
-	return TRUE;
 }
 
 apr_byte_t oidc_request_matches_redirect_uri(request_rec *r, oidc_cfg *c) {
@@ -696,6 +642,7 @@ static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, apr_json_va
 	}
 }
 
+// TODO: pass around session object instead of attributes
 static void oidc_set_attributes(request_rec *r, apr_json_value_t *const attrs) {
 	/* Always set the attributes in the current request, even if
 	 * it is a subrequest, because we always allocate memory in
@@ -715,21 +662,17 @@ static const apr_json_value_t *oidc_get_attributes(request_rec *r) {
 
 int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 	char *code = NULL, *state = NULL;
-	char *cookieString = NULL;
-	char *remoteUser = NULL;
-	apr_json_value_t *attrs = NULL;
 
-	oidc_dir_cfg *d;
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Entering oidc_check_user_id()");
 
-	d = ap_get_module_config(r->per_dir_config, &oidc_module);
+	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
 	if (ap_is_initial_req(r) && d->scrub_request_headers) {
 		oidc_scrub_request_headers(r, c, d);
 	}
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Entering oidc_check_user_id()");
-
-	cookieString = oidc_get_cookie(r, d->cookie);
+	session_rec *session = NULL;
+	oidc_session_load(r, &session);
 
 	// check that the request path matches the configured redirect URI, otherwise a regular
 	// protected URL can't have a code= parameter without it being interpreted as an OIDC callback
@@ -737,16 +680,35 @@ int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 		if (oidc_get_code_and_state(r, &code, &state) == TRUE) {
 			char *original_url = oidc_check_state_and_get_url(r, state);
 			if (original_url == NULL) return HTTP_UNAUTHORIZED;
-			char *id_token = NULL, *access_token = NULL, *attributes = NULL;
-			if (oidc_resolve_code(r, c, d, code, &remoteUser, &attrs, &id_token, &access_token)) {
+			char *id_token = NULL, *access_token = NULL, *response = NULL;
 
-				oidc_resolve_userinfo(r, c, d, &attributes, access_token);
-				char *b64 = apr_palloc(r->pool, apr_base64_encode_len(strlen(attributes)));
-				apr_base64_encode(b64, attributes, strlen(attributes));
-				char *crypted = NULL;
-				oidc_encrypt_base64url_encode_string(r, &crypted, apr_psprintf(r->pool, "%s.%s", id_token, b64));
+			char *remoteUser = NULL;
+			apr_time_t expires;
+			apr_json_value_t *attrs = NULL;
 
-				oidc_set_cookie(r, d->cookie, crypted);
+			if (oidc_resolve_code(r, c, d, code, &remoteUser, &attrs, &id_token, &access_token, &expires)) {
+
+				oidc_resolve_userinfo(r, c, d, &response, access_token);
+
+				if (response != NULL) {
+					// now id_token attributes are overwritten in attrs...
+					apr_status_t status = apr_json_decode(&attrs, response, strlen(response), r->pool);
+					if (status != APR_SUCCESS) {
+						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: could not decode JSON from UserInfo endpoint response successfully");
+						return HTTP_UNAUTHORIZED;
+					}
+					if ( (attrs == NULL) || (attrs->type != APR_JSON_OBJECT) ) {
+						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: UserInfo endpoint response did not contain a JSON object");
+						return HTTP_UNAUTHORIZED;
+					}
+				}
+
+				session->remote_user = remoteUser;
+				session->expiry = expires;
+				oidc_session_set(r, session, "id_token", id_token);
+				oidc_session_set(r, session, "attributes", response);
+				oidc_session_save(r, session);
+
 				r->user = remoteUser;
 				if (d->authn_header != NULL)
 					apr_table_set(r->headers_in, d->authn_header, remoteUser);
@@ -755,14 +717,14 @@ int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 				return HTTP_MOVED_TEMPORARILY;
 			} else {
 				/* sometimes, pages that automatically refresh will re-send the code parameter, so let's check any cookies presented or return an error if none */
-				if (cookieString == NULL)
+				if (session->remote_user == NULL)
 					return HTTP_UNAUTHORIZED;
 			}
 		}
 	}
 
-	if (cookieString == NULL) {
-		/* redirect the user to the OIDC OP  since they have no cookie and no ticket */
+	if (session->remote_user == NULL) {
+		/* redirect the user to the OIDC OP  since they have no session and this is not an authorization response */
 		oidc_redirect(r, c);
 		return HTTP_MOVED_TEMPORARILY;
 	} else {
@@ -780,22 +742,21 @@ int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 		}
 		*/
 
-		if (oidc_is_valid_cookie(r, c, cookieString, &remoteUser, &attrs)) {
-			r->user = remoteUser;
-			if (d->authn_header != NULL) {
-				apr_table_set(r->headers_in, d->authn_header, remoteUser);
- 			}
+		r->user = (char *)session->remote_user;
+		if (d->authn_header != NULL) {
+			apr_table_set(r->headers_in, d->authn_header, session->remote_user);
+ 		}
 
-			// TODO: place ok?
-			oidc_set_attributes(r, attrs);
+		// TODO: clean up
+		// TODO: combine already resolved attrs from id_token with those from user_info endpoint
+		apr_json_value_t *attrs = NULL;
+		const char *attributes = NULL;
+		oidc_session_get(r, session, "attributes", &attributes);
+		apr_status_t status = apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
+		oidc_set_attributes(r, attrs);
+		oidc_set_attribute_headers(r, c, attrs);
 
-			oidc_set_attribute_headers(r, c, attrs);
-			return OK;
-		} else {
-			/* maybe the cookie expired, have the user re-authenticate */
-			oidc_redirect(r, c);
-			return HTTP_MOVED_TEMPORARILY;
-		}
+		return OK;
 	}
 
 	return HTTP_UNAUTHORIZED;
@@ -844,33 +805,47 @@ int oidc_check_userid_oauth20(request_rec *r, oidc_cfg *c) {
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_check_userid_oauth20: bearer token: %s", auth_line);
 
-	const char *response = oidc_oauth20_resolve_access_token(r, c, auth_line);
+	apr_json_value_t *result, *token = NULL;
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_check_userid_oauth20: response from server: %s", response);
+	const char *json = NULL;
+	oidc_cache_get(r, auth_line, &json);
+	if (json == NULL) {
+		const char *response = oidc_oauth20_resolve_access_token(r, c, auth_line);
+		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_check_userid_oauth20: response from server: %s", response);
+		apr_status_t status = apr_json_decode(&result, response, strlen(response), r->pool);
+		if (status != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_oauth20: could not decode response successfully");
+			return HTTP_UNAUTHORIZED;
+		}
 
-	apr_json_value_t *result = NULL;
-	apr_status_t status = apr_json_decode(&result, response, strlen(response), r->pool);
+		if ( (result ==NULL) || (result->type != APR_JSON_OBJECT) ) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_oauth20: response did not contain a JSON object");
+			return HTTP_UNAUTHORIZED;
+		}
 
-	if (status != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_oauth20: could not decode response successfully");
-		return HTTP_UNAUTHORIZED;
+		token = apr_hash_get(result->value.object, "access_token", APR_HASH_KEY_STRING);
+		if ( (token == NULL) || (token->type != APR_JSON_OBJECT) ) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_oauth20: response JSON object did not contain an access_token object");
+			return HTTP_UNAUTHORIZED;
+		}
+
+		apr_json_value_t *expires_in = apr_hash_get(result->value.object, "expires_in", APR_HASH_KEY_STRING);
+		if ( (expires_in == NULL) || (expires_in->type != APR_JSON_LONG) ) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON object did not contain an \"expires_in\" number");
+			return HTTP_UNAUTHORIZED;
+		}
+		if (expires_in->value.lnumber <= 0) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "\"expires_in\" number <= 0 (%ld); token already expired...", expires_in->value.lnumber);
+			return HTTP_UNAUTHORIZED;
+		}
+		oidc_cache_set(r, auth_line, response, apr_time_now() + apr_time_from_sec(expires_in->value.lnumber));
+	} else {
+		apr_json_decode(&result, json, strlen(json), r->pool);
+		token = apr_hash_get(result->value.object, "access_token", APR_HASH_KEY_STRING);
 	}
-
-	if ( (result ==NULL) || (result->type != APR_JSON_OBJECT) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_oauth20: response did not contain a JSON object");
-		return HTTP_UNAUTHORIZED;
-	}
-
-	apr_json_value_t *token = apr_hash_get(result->value.object, "access_token", APR_HASH_KEY_STRING);
-	if ( (token == NULL) || (token->type != APR_JSON_OBJECT) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_oauth20: response JSON object did not contain an access_token object");
-		return HTTP_UNAUTHORIZED;
-	}
-
-	// TODO:
-	// a) caching
-	// b) user attribute header settings
 	oidc_set_attributes(r, token);
+
+	// TODO: user attribute header settings & scrubbing ?
 
 	apr_json_value_t *username = apr_hash_get(token->value.object, "Username", APR_HASH_KEY_STRING);
 	if ( (username == NULL) || (username->type != APR_JSON_STRING) ) {
