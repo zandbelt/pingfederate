@@ -18,7 +18,7 @@
  */
 
 /***************************************************************************
- * Copyright (C) 2013 Ping Identity Corporation
+ * Copyright (C) 2013-2014 Ping Identity Corporation
  * All rights reserved.
  *
  * The contents of this file are the property of Ping Identity Corporation.
@@ -137,6 +137,7 @@ unsigned char *oidc_crypto_aes_decrypt(apr_pool_t *pool, EVP_CIPHER_CTX *e, unsi
 
 // oidc_session.c
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20081201
+#define OIDC_SESSION_USE_APACHE_SESSIONS 1
 // this stuff should make it easy to migrate to the post 2.3 mod_session infrastructure
 #include "mod_session.h"
 #else

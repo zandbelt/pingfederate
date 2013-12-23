@@ -18,7 +18,7 @@
  */
 
 /***************************************************************************
- * Copyright (C) 2013 Ping Identity Corporation
+ * Copyright (C) 2013-2014 Ping Identity Corporation
  * All rights reserved.
  *
  * The contents of this file are the property of Ping Identity Corporation.
@@ -59,7 +59,7 @@
 
 #include "mod_oidc.h"
 
-#define OIDC_CACHE_LINE_SIZE 1014
+#define OIDC_CACHE_LINE_SIZE 2048
 
 static const char *oidc_cache_path(request_rec *r, const char *key) {
 	return apr_psprintf(r->pool, "/tmp/oidc-%s", key);
@@ -113,7 +113,7 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 		}
 	} else {
 		*value = apr_array_pstrcat(r->pool, arr, 0);
-		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_get: got entry %s=%s, expires in: %ld", key, *value, apr_time_sec(expiry - apr_time_now()));
+		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_get: got entry (expires in: %ld) %s=%s", apr_time_sec(expiry - apr_time_now()), key, *value);
 	}
 
 	return APR_SUCCESS;
@@ -173,6 +173,7 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 			}
 		}
 	} while (i == APR_SUCCESS);
+
 	apr_dir_close(dir);
 
 	return APR_SUCCESS;

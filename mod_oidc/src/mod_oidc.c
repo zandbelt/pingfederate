@@ -18,7 +18,7 @@
  */
 
 /***************************************************************************
- * Copyright (C) 2013 Ping Identity Corporation
+ * Copyright (C) 2013-2014 Ping Identity Corporation
  * All rights reserved.
  *
  * The contents of this file are the property of Ping Identity Corporation.
@@ -52,22 +52,29 @@
  * to operate as an OpenID Connect Relying Party, i.e. requires users to authenticate to the
  * Apache hosted content through an external OpenID Connect Identity Provider using the OpenID
  * Connect Basic Client profile (cq. a backchannel flow aka. "code" flow).
+ *
+ * It sets the REMOTE_USER variable to the id_token sub claim, other id_token claims
+ * are passed in HTTP headers, together with those (optionally) obtained from the user info endpoint
  * 
+ * It allows for authorization rules (based on Requires primitive) that can do matching against the
+ * set of claims provided in the id_token/userinfo.
+ *
  * Additionally it can operate as an OAuth 2.0 Resource Server to a PingFederate OAuth 2.0
  * Authorization Server, cq. validate Bearer access_tokens against PingFederate.
+ * In that case it sets the REMOTE_USER variable to the "Username" claim and matches the claims
+ * in the intro-spected access_token against the Requires primitive.
  *
- * Version 2.0 - sets the REMOTE_USER variable to the id_token sub claim, other id_token claims
- * are passed in HTTP headers, together with those (optionally) obtained from the user info endpoint
- * Allows for authorization rules (based on Requires primitive) that can do matching against the
- * set of claims provided in the id_token/userinfo or the access_token (after introspection).
- * Uses server-side storage caching through files in /tmp. TODO: configurable path/create dir
+ * It uses server-side storage caching through files in /tmp.
+ * TODO: configurable path/create dir
  *
- * Largely based on mod_auth_cas.c:
+ * Initially based on mod_auth_cas.c:
  * https://github.com/Jasig/mod_auth_cas
  *
  * Other code copied/borrowed/adapted:
  * JSON decoding: apr_json.h apr_json_decode.c: https://github.com/moriyoshi/apr-json/
  * AES crypto: http://saju.net.in/code/misc/openssl_aes.c.txt
+ * session handling: Apache 2.4 mod_session.c
+ * session handling backport: http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
  *
  *
  *
@@ -810,8 +817,11 @@ int oidc_check_userid_oauth20(request_rec *r, oidc_cfg *c) {
 	const char *json = NULL;
 	oidc_cache_get(r, auth_line, &json);
 	if (json == NULL) {
+
 		const char *response = oidc_oauth20_resolve_access_token(r, c, auth_line);
 		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_check_userid_oauth20: response from server: %s", response);
+		if (response == NULL) return HTTP_UNAUTHORIZED;
+
 		apr_status_t status = apr_json_decode(&result, response, strlen(response), r->pool);
 		if (status != APR_SUCCESS) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_oauth20: could not decode response successfully");
