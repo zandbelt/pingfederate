@@ -18,7 +18,7 @@
  */
 
 /***************************************************************************
- * Copyright (C) 2013 Ping Identity Corporation
+ * Copyright (C) 2013-2014 Ping Identity Corporation
  * All rights reserved.
  *
  * The contents of this file are the property of Ping Identity Corporation.

@@ -18,7 +18,7 @@
  */
 
 /***************************************************************************
- * Copyright (C) 2013 Ping Identity Corporation
+ * Copyright (C) 2013-2014 Ping Identity Corporation
  * All rights reserved.
  *
  * The contents of this file are the property of Ping Identity Corporation.
@@ -61,41 +61,159 @@
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
-session_rec * oidc_session_empty(apr_pool_t *pool) {
-	session_rec *zz = apr_pcalloc(pool, sizeof(session_rec));
-	zz->pool = pool;
-	zz->uuid = (apr_uuid_t *) apr_pcalloc(zz->pool, sizeof(apr_uuid_t));
-	apr_uuid_get(zz->uuid);
-	zz->remote_user = NULL;
-	zz->encoded = NULL;
-	zz->entries = apr_table_make(zz->pool, 10);
-	return zz;
-}
+//#define OIDC_SESSION_USE_COOKIE 1
 
 #define OIDC_SESSION_REMOTE_USER_KEY "remote-user"
 #define OIDC_SESSION_EXPIRY_KEY      "oidc-expiry"
 
-apr_status_t oidc_session_load_cookie(request_rec *r, session_rec *z) {
-	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-	char *value = oidc_get_cookie(r, d->cookie);
-	if (value != NULL) {
-		if (oidc_base64url_decode_decrypt_string(r, (char **)&z->encoded, value) <= 0) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_is_valid_cookie: could not decrypt cookie value");
-			return APR_EGENERAL;
+// stuff copied from:
+// http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
+#define T_ESCAPE_URLENCODED    (64)
+
+static const unsigned char test_c_table[256] = {
+	32,126,126,126,126,126,126,126,126,126,127,126,126,126,126,126,126,126,126,126,
+	126,126,126,126,126,126,126,126,126,126,126,126,14,64,95,70,65,102,65,65,
+	73,73,1,64,72,0,0,74,0,0,0,0,0,0,0,0,0,0,104,79,
+	79,72,79,79,72,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,79,95,79,71,0,71,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,79,103,79,65,126,118,118,118,118,118,118,118,118,118,118,118,118,
+	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
+	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
+	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
+	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
+	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
+	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118
+};
+
+#define TEST_CHAR(c, f)        (test_c_table[(unsigned)(c)] & (f))
+
+static const char c2x_table[] = "0123456789abcdef";
+
+static APR_INLINE unsigned char *c2x(unsigned what, unsigned char prefix,
+                                     unsigned char *where)
+{
+#if APR_CHARSET_EBCDIC
+    what = apr_xlate_conv_byte(ap_hdrs_to_ascii, (unsigned char)what);
+#endif /*APR_CHARSET_EBCDIC*/
+    *where++ = prefix;
+    *where++ = c2x_table[what >> 4];
+    *where++ = c2x_table[what & 0xf];
+    return where;
+}
+
+static char x2c(const char *what)
+{
+	register char digit;
+
+#if !APR_CHARSET_EBCDIC
+	digit = ((what[0] >= 'A') ? ((what[0] & 0xdf) - 'A') + 10
+			: (what[0] - '0'));
+	digit *= 16;
+	digit += (what[1] >= 'A' ? ((what[1] & 0xdf) - 'A') + 10
+			: (what[1] - '0'));
+#else /*APR_CHARSET_EBCDIC*/
+	char xstr[5];
+	xstr[0]='0';
+	xstr[1]='x';
+	xstr[2]=what[0];
+	xstr[3]=what[1];
+	xstr[4]='\0';
+	digit = apr_xlate_conv_byte(ap_hdrs_from_ascii,
+			0xFF & strtol(xstr, NULL, 16));
+#endif /*APR_CHARSET_EBCDIC*/
+	return (digit);
+}
+
+AP_DECLARE(char *) ap_escape_urlencoded_buffer(char *copy, const char *buffer) {
+    const unsigned char *s = (const unsigned char *)buffer;
+    unsigned char *d = (unsigned char *)copy;
+    unsigned c;
+
+    while ((c = *s)) {
+        if (TEST_CHAR(c, T_ESCAPE_URLENCODED)) {
+            d = c2x(c, '%', d);
+        }
+        else if (c == ' ') {
+            *d++ = '+';
+        }
+        else {
+            *d++ = c;
+        }
+        ++s;
+    }
+    *d = '\0';
+    return copy;
+}
+
+static int oidc_session_unescape_url(char *url, const char *forbid, const char *reserved)
+{
+	register int badesc, badpath;
+	char *x, *y;
+
+	badesc = 0;
+	badpath = 0;
+	/* Initial scan for first '%'. Don't bother writing values before
+	 * seeing a '%' */
+	y = strchr(url, '%');
+	if (y == NULL) {
+		return OK;
+	}
+	for (x = y; *y; ++x, ++y) {
+		if (*y != '%') {
+			*x = *y;
+		}
+		else {
+			if (!apr_isxdigit(*(y + 1)) || !apr_isxdigit(*(y + 2))) {
+				badesc = 1;
+				*x = '%';
+			}
+			else {
+				char decoded;
+				decoded = x2c(y + 1);
+				if ((decoded == '\0')
+						|| (forbid && ap_strchr_c(forbid, decoded))) {
+					badpath = 1;
+					*x = decoded;
+					y += 2;
+				}
+				else if (reserved && ap_strchr_c(reserved, decoded)) {
+					*x++ = *y++;
+					*x++ = *y++;
+					*x = *y;
+				}
+				else {
+					*x = decoded;
+					y += 2;
+				}
+			}
 		}
 	}
-	return APR_SUCCESS;
+	*x = '\0';
+	if (badesc) {
+		return HTTP_BAD_REQUEST;
+	}
+	else if (badpath) {
+		return HTTP_NOT_FOUND;
+	}
+	else {
+		return OK;
+	}
 }
 
-apr_status_t oidc_session_save_cookie(request_rec *r, session_rec *z) {
-	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-	char *crypted = NULL;
-	oidc_encrypt_base64url_encode_string(r, &crypted, z->encoded);
-	oidc_set_cookie(r, d->cookie, crypted);
-	return APR_SUCCESS;
+AP_DECLARE(int) ap_unescape_urlencoded(char *query) {
+    char *slider;
+    /* replace plus with a space */
+    if (query) {
+        for (slider = query; *slider; slider++) {
+            if (*slider == '+') {
+                *slider = ' ';
+            }
+        }
+    }
+    /* unescape everything else */
+    return oidc_session_unescape_url(query, NULL, NULL);
 }
-
-#include "oidc_compat.c"
 
 // copied from mod_session.c
 static apr_status_t oidc_session_identity_decode(request_rec * r, session_rec * z) {
@@ -183,37 +301,61 @@ static apr_status_t oidc_session_identity_encode(request_rec * r, session_rec * 
 
 apr_status_t oidc_session_load_pool(request_rec *r, session_rec *z) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-
 	char *uuid = oidc_get_cookie(r, d->cookie);
 	if (uuid != NULL) oidc_cache_get(r, uuid, &z->encoded);
-
 	return APR_SUCCESS;
 }
 
 apr_status_t oidc_session_save_pool(request_rec *r, session_rec *z) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-
 	char key[APR_UUID_FORMATTED_LENGTH + 1];
 	apr_uuid_format((char *)&key, z->uuid);
 	oidc_set_cookie(r, d->cookie, key);
-
 	oidc_cache_set(r, key, z->encoded, z->expiry);
-
 	return APR_SUCCESS;
 }
 
-apr_status_t oidc_session_load(request_rec *r, session_rec **z) {
+#ifdef OIDC_SESSION_USE_COOKIE
+apr_status_t oidc_session_load_cookie(request_rec *r, session_rec *z) {
+	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
+	char *value = oidc_get_cookie(r, d->cookie);
+	if (value != NULL) {
+		if (oidc_base64url_decode_decrypt_string(r, (char **)&z->encoded, value) <= 0) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_is_valid_cookie: could not decrypt cookie value");
+			return APR_EGENERAL;
+		}
+	}
+	return APR_SUCCESS;
+}
+
+apr_status_t oidc_session_save_cookie(request_rec *r, session_rec *z) {
+	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
+	char *crypted = NULL;
+	oidc_encrypt_base64url_encode_string(r, &crypted, z->encoded);
+	oidc_set_cookie(r, d->cookie, crypted);
+	return APR_SUCCESS;
+}
+#endif
+
+apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 #ifdef OIDC_SESSION_USE_APACHE_SESSIONS
 #else
-	*z = oidc_session_empty(r->server->process->pool);
-	session_rec *zz = *z;
-
-	//apr_status_t rc = oidc_session_load_cookie(r, zz);
-	apr_status_t rc = oidc_session_load_pool(r, zz);
+	session_rec *z = (*zz = apr_pcalloc(r->pool, sizeof(session_rec)));
+	z->pool = r->pool;
+	z->uuid = (apr_uuid_t *) apr_pcalloc(z->pool, sizeof(apr_uuid_t));
+	apr_uuid_get(z->uuid);
+	z->remote_user = NULL;
+	z->encoded = NULL;
+	z->entries = apr_table_make(z->pool, 10);
+#ifdef OIDC_SESSION_USE_COOKIE
+	apr_status_t rc = oidc_session_load_cookie(r, z);
+#else
+	apr_status_t rc = oidc_session_load_pool(r, z);
+#endif
 	if (rc == APR_SUCCESS) {
-		rc = oidc_session_identity_decode(r, zz);
+		rc = oidc_session_identity_decode(r, z);
 	}
-	zz->remote_user = apr_table_get(zz->entries, OIDC_SESSION_REMOTE_USER_KEY);
+	z->remote_user = apr_table_get(z->entries, OIDC_SESSION_REMOTE_USER_KEY);
 	return rc;
 #endif
 }
@@ -224,8 +366,11 @@ apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
 	// temporary? workaround for remote_user pool (set in main module...)
 	apr_table_set(z->entries, OIDC_SESSION_REMOTE_USER_KEY, z->remote_user);
 	oidc_session_identity_encode(r, z);
-	//return oidc_session_save_cookie(r, z);
+#ifdef OIDC_SESSION_USE_COOKIE
+	return oidc_session_save_cookie(r, z);
+#else
 	return oidc_session_save_pool(r, z);
+#endif
 #endif
 }
 
