@@ -162,5 +162,6 @@ apr_status_t oidc_session_load(request_rec *r, session_rec **z);
 apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value);
 apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value);
 apr_status_t oidc_session_save(request_rec *r, session_rec *z);
+session_rec *oidc_session_load_from_request(request_rec *r);
 
 #endif /* MOD_OIDC_H_ */

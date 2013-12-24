@@ -337,9 +337,22 @@ apr_status_t oidc_session_save_cookie(request_rec *r, session_rec *z) {
 }
 #endif
 
+session_rec *oidc_session_load_from_request(request_rec *r) {
+	session_rec *z = ap_get_module_config(r->request_config, &oidc_module);
+	if (z == NULL && r->main != NULL) {
+		return oidc_session_load_from_request(r->main);
+	} else {
+		return z;
+	}
+}
+
 apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 #ifdef OIDC_SESSION_USE_APACHE_SESSIONS
 #else
+	if (((*zz) = oidc_session_load_from_request(r)) != NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_session_load: loading session from request state");
+		return APR_SUCCESS;
+	}
 	session_rec *z = (*zz = apr_pcalloc(r->pool, sizeof(session_rec)));
 	z->pool = r->pool;
 	z->uuid = (apr_uuid_t *) apr_pcalloc(z->pool, sizeof(apr_uuid_t));
@@ -352,10 +365,12 @@ apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 #else
 	apr_status_t rc = oidc_session_load_pool(r, z);
 #endif
+	// TODO: return proper response (creation is handled in this function already); no need to decode and set user if loading did not succeed
 	if (rc == APR_SUCCESS) {
 		rc = oidc_session_identity_decode(r, z);
 	}
 	z->remote_user = apr_table_get(z->entries, OIDC_SESSION_REMOTE_USER_KEY);
+	ap_set_module_config(r->request_config, &oidc_module, z);
 	return rc;
 #endif
 }
@@ -366,6 +381,7 @@ apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
 	// temporary? workaround for remote_user pool (set in main module...)
 	apr_table_set(z->entries, OIDC_SESSION_REMOTE_USER_KEY, z->remote_user);
 	oidc_session_identity_encode(r, z);
+	ap_set_module_config(r->request_config, &oidc_module, z);
 #ifdef OIDC_SESSION_USE_COOKIE
 	return oidc_session_save_cookie(r, z);
 #else

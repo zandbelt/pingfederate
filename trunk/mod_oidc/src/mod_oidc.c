@@ -64,8 +64,8 @@
  * In that case it sets the REMOTE_USER variable to the "Username" claim and matches the claims
  * in the intro-spected access_token against the Requires primitive.
  *
- * It uses server-side storage caching through files in /tmp.
- * TODO: configurable path/create dir
+ * It implements server-side caching across different Apache processes through file storage in a temp directory.
+ *
  *
  * Initially based on mod_auth_cas.c:
  * https://github.com/Jasig/mod_auth_cas
@@ -297,8 +297,7 @@ apr_byte_t oidc_get_code_and_state(request_rec *r, char **code, char **state) {
 	return TRUE;
 }
 
-// TODO: when encrypted, we don't need to aud/check the cookie anymore
-// TODO: split out checks into separate functions
+// TODO: split out checks into separate functions, maybe id_token handling in its own file
 int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_json_value_t **attrs, apr_time_t *expires) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
@@ -615,8 +614,10 @@ apr_byte_t oidc_request_matches_redirect_uri(request_rec *r, oidc_cfg *c) {
 	return (apr_strnatcmp(p1, p2) == 0) ? TRUE : FALSE;
 }
 
-static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, apr_json_value_t *attrs) {
-	//oidc_parse_attributes_to_table(r, c, payload, attrs, "iss,sub,aud,nonce,exp,iat,azp,at_hash,c_hash,");
+static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, const char *attributes) {
+
+	apr_json_value_t *attrs = NULL;
+	apr_status_t status = apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
 	apr_hash_index_t *hi;
 	for (hi = apr_hash_first(r->pool, attrs->value.object); hi; hi = apr_hash_next(hi)) {
 		const char *k; apr_json_value_t *v;
@@ -631,7 +632,7 @@ static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, apr_json_va
 			for (int i = 0; i < v->value.array->nelts; i++) {
 				apr_json_value_t *elem = APR_ARRAY_IDX(v->value.array, i, apr_json_value_t *);
 				if (elem->type == APR_JSON_STRING) {
-					// TODO: escape the delimiter in the values
+					// TODO: escape the delimiter in the values (maybe reuse/extract url-formatted code from oidc_session_identity_encode)
 					if (apr_strnatcmp(csvs, "") != 0) {
 						csvs = apr_psprintf(r->pool, "%s%s%s", csvs, c->attribute_delimiter, elem->value.string.p);
 					} else {
@@ -658,7 +659,7 @@ static void oidc_set_attributes(request_rec *r, apr_json_value_t *const attrs) {
 	ap_set_module_config(r->request_config, &oidc_module, attrs);
 }
 
-static const apr_json_value_t *oidc_get_attributes(request_rec *r) {
+static apr_json_value_t *oidc_get_attributes(request_rec *r) {
 	const apr_json_value_t *attrs = ap_get_module_config(r->request_config, &oidc_module);
 	if (attrs == NULL && r->main != NULL) {
 		return oidc_get_attributes(r->main);
@@ -670,25 +671,26 @@ static const apr_json_value_t *oidc_get_attributes(request_rec *r) {
 int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 	char *code = NULL, *state = NULL;
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Entering oidc_check_user_id()");
-
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-
-	if (ap_is_initial_req(r) && d->scrub_request_headers) {
-		oidc_scrub_request_headers(r, c, d);
-	}
 
 	session_rec *session = NULL;
 	oidc_session_load(r, &session);
 
-	// check that the request path matches the configured redirect URI, otherwise a regular
-	// protected URL can't have a code= parameter without it being interpreted as an OIDC callback
-	if (oidc_request_matches_redirect_uri(r, c) == TRUE) {
-		if (oidc_get_code_and_state(r, &code, &state) == TRUE) {
-			char *original_url = oidc_check_state_and_get_url(r, state);
-			if (original_url == NULL) return HTTP_UNAUTHORIZED;
-			char *id_token = NULL, *access_token = NULL, *response = NULL;
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_check_userid_openid_connect: incoming request: \"%s\", session->remote_user=%s, ap_is_initial_req(r)=%d", r->parsed_uri.path, session->remote_user, ap_is_initial_req(r));
 
+	if (ap_is_initial_req(r)) {
+
+		// check that the request path matches the configured redirect URI, otherwise a regular
+		// protected URL can't have a code= parameter without it being interpreted as an OIDC callback
+		if ( (oidc_request_matches_redirect_uri(r, c) == TRUE) && (oidc_get_code_and_state(r, &code, &state) == TRUE) ) {
+
+			// initial request to redirect_uri with code & state parameters
+
+			char *original_url = oidc_check_state_and_get_url(r, state);
+
+			if (original_url == NULL) return HTTP_UNAUTHORIZED;
+
+			char *id_token = NULL, *access_token = NULL, *response = NULL;
 			char *remoteUser = NULL;
 			apr_time_t expires;
 			apr_json_value_t *attrs = NULL;
@@ -717,53 +719,51 @@ int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 				oidc_session_save(r, session);
 
 				r->user = remoteUser;
-				if (d->authn_header != NULL)
-					apr_table_set(r->headers_in, d->authn_header, remoteUser);
-				// NB: no oidc_set_attribute_headers(r, attrs) here because of the redirect that follows
 				apr_table_add(r->headers_out, "Location", original_url);
-				return HTTP_MOVED_TEMPORARILY;
-			} else {
-				/* sometimes, pages that automatically refresh will re-send the code parameter, so let's check any cookies presented or return an error if none */
-				if (session->remote_user == NULL)
-					return HTTP_UNAUTHORIZED;
-			}
-		}
-	}
 
-	if (session->remote_user == NULL) {
-		/* redirect the user to the OIDC OP  since they have no session and this is not an authorization response */
-		oidc_redirect(r, c);
-		return HTTP_MOVED_TEMPORARILY;
-	} else {
-		/*
-		if (!ap_is_initial_req(r)) {
-			if (r->main != NULL)
-				remoteUser = r->main->user;
-			else if (r->prev != NULL)
-				remoteUser = r->prev->user;
-			else {
-				oidc_redirect(r, c);
 				return HTTP_MOVED_TEMPORARILY;
-			}
-			ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "recycling user '%s' from initial request for sub request", remoteUser);
-		}
-		*/
 
+			} // else: resolving the "code" failed; an error will have been reported and we'll return HTTP_UNAUTHORIZED by default flow
+
+		} else if (session->remote_user != NULL)  {
+
+			// initial request to application url and we have a session
+			if (d->scrub_request_headers) oidc_scrub_request_headers(r, c, d);
+
+			r->user = (char *)session->remote_user;
+			if (d->authn_header != NULL) {
+				apr_table_set(r->headers_in, d->authn_header, session->remote_user);
+			}
+
+			// TODO: combine already resolved attrs from id_token with those from user_info endpoint
+			const char *attributes = NULL;
+			oidc_session_get(r, session, "attributes", &attributes);
+			oidc_set_attribute_headers(r, c, attributes);
+
+			return OK;
+
+		} else {
+
+			// initial request to application URL but we have no session
+			oidc_redirect(r, c);
+
+			return HTTP_MOVED_TEMPORARILY;
+
+		}
+
+	} else if (session->remote_user != NULL)  {
+
+		// sub-request and we have a session (headers will have been scrubbed and set already)
 		r->user = (char *)session->remote_user;
-		if (d->authn_header != NULL) {
-			apr_table_set(r->headers_in, d->authn_header, session->remote_user);
- 		}
-
-		// TODO: clean up
-		// TODO: combine already resolved attrs from id_token with those from user_info endpoint
-		apr_json_value_t *attrs = NULL;
-		const char *attributes = NULL;
-		oidc_session_get(r, session, "attributes", &attributes);
-		apr_status_t status = apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
-		oidc_set_attributes(r, attrs);
-		oidc_set_attribute_headers(r, c, attrs);
+		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "recycling user '%s' from initial request for sub request", r->user);
 
 		return OK;
+
+	} else {
+
+		// sub-request and we have no session
+		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "unable to recycle user from initial request for sub request... (fail now, but should we have redirected?)");
+
 	}
 
 	return HTTP_UNAUTHORIZED;
@@ -888,7 +888,23 @@ int oidc_auth_checker(request_rec *r) {
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_auth_checker()");
 
-	const apr_json_value_t *const attrs = oidc_get_attributes(r);
+	apr_json_value_t *attrs;
+
+	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect") == 0) {
+		// TOOD: we're parsing multiple times now, which is overhead
+		// so store decoded JSON in request somehow next to session; need new construct?
+		// also find out how to do that with mod_session and/or oauth20...
+		// (moreover because we do this on subrequests as well)
+		session_rec *session = oidc_session_load_from_request(r);
+		const char *attributes = NULL;
+		oidc_session_get(r, session, "attributes", &attributes);
+		apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
+	}
+
+	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "oauth20") == 0) {
+		attrs = oidc_get_attributes(r);
+	}
+
 	const apr_array_header_t *const reqs_arr = ap_requires(r);
 	const require_line *const reqs = reqs_arr ? (require_line *) reqs_arr->elts : NULL;
 

@@ -59,6 +59,8 @@
 
 #include "mod_oidc.h"
 
+// TODO: encrypt the cache
+
 #define OIDC_CACHE_LINE_SIZE 2048
 
 static const char *oidc_cache_path(request_rec *r) {
