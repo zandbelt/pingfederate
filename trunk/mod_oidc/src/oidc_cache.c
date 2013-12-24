@@ -61,36 +61,52 @@
 
 #define OIDC_CACHE_LINE_SIZE 2048
 
-static const char *oidc_cache_path(request_rec *r, const char *key) {
-	return apr_psprintf(r->pool, "/tmp/oidc-%s", key);
+static const char *oidc_cache_path(request_rec *r) {
+	const char *tmp_dir = NULL;
+	apr_temp_dir_get(&tmp_dir, r->pool);
+	char *path = apr_psprintf(r->pool, "%s/mod_oidc", tmp_dir);
+	apr_dir_t *dir;
+	if (apr_dir_open(&dir, path, r->pool) != APR_SUCCESS) {
+		apr_dir_make_recursive(path, APR_OS_DEFAULT, r->pool);
+	}
+	return path;
+}
+
+static const char *oidc_cache_file(request_rec *r, const char *key) {
+	return apr_psprintf(r->pool, "%s/%s", oidc_cache_path(r), key);
+}
+
+apr_status_t oidc_cache_get_expiry(request_rec *r, const char *path, apr_file_t *f, apr_time_t *expiry) {
+	apr_status_t rc = APR_SUCCESS;
+	char line[OIDC_CACHE_LINE_SIZE];
+	if ((rc = apr_file_gets(line, sizeof(line), f)) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: could not read first line (expiry) from %s", path);
+	} else if (sscanf(line, "%" APR_TIME_T_FMT, expiry) != 1) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: could not scan first line (expiry) from %s", path);
+		rc = APR_EGENERAL;
+	}
+	return rc;
 }
 
 apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value) {
 	apr_file_t *f;
 	apr_status_t rc = APR_SUCCESS;
 
-	const char *path = oidc_cache_path(r, key);
+	const char *path = oidc_cache_file(r, key);
 
-	if ((rc = apr_file_open(&f, path, APR_FOPEN_READ|APR_FOPEN_BUFFERED, APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: cache entry '%s' could not be opened", path);
-		return rc;
+	if (apr_file_open(&f, path, APR_FOPEN_READ|APR_FOPEN_BUFFERED, APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_get: cache miss '%s'", key);
+		return APR_SUCCESS;
 	}
+
 	apr_file_lock(f, APR_FLOCK_EXCLUSIVE);
 	apr_off_t begin = 0;
 	apr_file_seek(f, APR_SET, &begin);
 
-	char line[OIDC_CACHE_LINE_SIZE];
 	apr_time_t expiry;
-	if ((rc = apr_file_gets(line, sizeof(line), f)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: could not read first line (expiry) from %s", path);
-		goto error_close;
-	}
-	if (sscanf(line, "%" APR_TIME_T_FMT, &expiry) != 1) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: could not scan first line (expiry) from %s", path);
-		rc = APR_EGENERAL;
-		goto error_close;
-	}
+	if ((rc = oidc_cache_get_expiry(r, path, f, &expiry)) != APR_SUCCESS) goto error_close;
 
+	char line[OIDC_CACHE_LINE_SIZE];
 	apr_array_header_t *arr = apr_array_make(r->pool, 10, sizeof(char *));
 	while (!apr_file_eof(f) ) {
 		rc = apr_file_gets(line, sizeof(line), f);
@@ -128,17 +144,33 @@ error_end:
 	return rc;
 }
 
+#define OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS 60
+#define OIDC_CACHE_FILE_LAST_CLEANED "mod-oidc-last-cleaned"
+
 apr_status_t oidc_cache_clean(request_rec *r) {
-	char *dir_path = "/tmp";
 	apr_status_t rc = APR_SUCCESS;
 	apr_dir_t *dir;
 	apr_file_t *file;
 	apr_status_t i;
 	apr_finfo_t fi;
-	char *path;
+	const char *path, *cache_dir = oidc_cache_path(r);
 
-	if ((rc = apr_dir_open(&dir, dir_path, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error opening cache directory '%s' for cleaning", dir_path);
+	// really clean only once per minute
+	path = apr_psprintf(r->pool, "%s/%s", cache_dir, OIDC_CACHE_FILE_LAST_CLEANED);
+	if ((rc = apr_stat(&fi, path, APR_FINFO_MTIME, r->pool))  == APR_SUCCESS)  {
+		if (apr_time_now() < fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS)) {
+			ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in %ld secs)", apr_time_sec(fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS) - apr_time_now()));
+			return APR_SUCCESS;
+		}
+		apr_file_mtime_set(path, apr_time_now(), r->pool);
+	} else {
+		if (apr_file_open(&file, path, (APR_FOPEN_WRITE|APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error creating cache timestamp %s", path);
+		}
+	}
+
+	if ((rc = apr_dir_open(&dir, cache_dir, r->pool)) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error opening cache directory '%s' for cleaning", cache_dir);
 		return rc;
 	}
 
@@ -146,30 +178,28 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 		i = apr_dir_read(&fi, APR_FINFO_NAME, dir);
 		if (i == APR_SUCCESS) {
 			if (fi.name[0] == '.') continue;
-			if (strstr(fi.name, "oidc-") != fi.name) continue;
+			if (apr_strnatcmp(fi.name, OIDC_CACHE_FILE_LAST_CLEANED) == 0) continue;
 
-			path = apr_psprintf(r->pool, "%s/%s", dir_path, fi.name);
+			path = oidc_cache_file(r, fi.name);
 
 			if (apr_file_open(&file, path, APR_FOPEN_READ, APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
-				ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_clean: unable to clean cache entry '%s'", path);
+				ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_clean: unable to open cache entry '%s'", path);
 				continue;
 			}
-
-			char line[OIDC_CACHE_LINE_SIZE];
-			rc = apr_file_gets(line, sizeof(line), file);
-			apr_file_close(file);
 
 			apr_time_t expiry;
-			if (rc != APR_SUCCESS) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: could not read first line (expiry) from %s", path);
-			} else if (sscanf(line, "%" APR_TIME_T_FMT, &expiry) != 1) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: could not scan first line (expiry) from %s", path);
-			} else if (apr_time_now() < expiry) {
-				continue;
+			oidc_cache_get_expiry(r, path, file, &expiry);
+			apr_file_close(file);
+
+			if (rc == APR_SUCCESS) {
+				if (apr_time_now() < expiry) continue;
+				ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_clean: cache entry (%s) expired, removing file (%s)", fi.name, path);
+			} else {
+				ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_clean: cache entry (%s) corrupted, removing file (%s)", fi.name, path);
 			}
-			ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_get: cache entry (%s) expired, removing file (%s)", fi.name, path);
+
 			if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: could not delete cache file %s", path);
+				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: could not delete cache file %s", path);
 			}
 		}
 	} while (i == APR_SUCCESS);
@@ -180,16 +210,13 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 }
 
 apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, apr_time_t expiry) {
-	const char *path = oidc_cache_path(r, key);
+	const char *path = oidc_cache_file(r, key);
 
-	// TODO:
-	// a) harmonize path/file usage
-	// b) clean only once per minute
 	oidc_cache_clean(r);
 
 	apr_file_t *f;
 	if (apr_file_open(&f, path, (APR_FOPEN_WRITE|APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Cache entry '%s' could not be opened", path);
+		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_set: cache entry '%s' could not be opened", path);
 		return APR_EGENERAL;
 	}
 	apr_file_lock(f, APR_FLOCK_EXCLUSIVE);
@@ -201,6 +228,8 @@ apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, 
 
 	apr_file_unlock(f);
 	apr_file_close(f);
+
+	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_cache_set: set entry (expires in: %ld) %s=%s", apr_time_sec(expiry - apr_time_now()), key, value);
 
 	return APR_SUCCESS;
 }
