@@ -61,6 +61,9 @@
 
 #include "apr_json.h"
 
+#define OIDC_DEBUG APLOG_INFO
+//#define APLOG_OIDC_DEBUG APLOG_DEBUG
+
 typedef struct oidc_cfg {
 	unsigned int merged;
 	int ssl_validate_server;

@@ -113,7 +113,7 @@ int oidc_authz_match_attribute(const char *const attr_spec, const apr_json_value
 					apr_json_value_t *elem = APR_ARRAY_IDX(val->value.array, i, apr_json_value_t *);
 
 					if (elem->type != APR_JSON_STRING) {
-						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Unhandled in-array JSON object type [%d]", elem->type);
+						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_attribute: unhandled in-array JSON object type [%d]", elem->type);
 						continue;
 					}
 
@@ -126,7 +126,7 @@ int oidc_authz_match_attribute(const char *const attr_spec, const apr_json_value
 				}
 
 			} else {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Unhandled JSON object type [%d]", val->type);
+				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_attribute: unhandled JSON object type [%d]", val->type);
 				continue;
 			}
 
@@ -214,8 +214,8 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 			token = ap_getword_conf(r->pool, &requirement);
 			count_oauthattr++;
 
-			ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
-				     "Evaluating attribute specification: %s",
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+				     "oidc_authz_worker: evaluating attribute specification: %s",
 				     token);
 
 			if (oidc_authz_match_attribute(token, attrs, r) ==
@@ -224,8 +224,8 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 				/* If *any* attribute matches, then
 				 * authorization has succeeded and all
 				 * of the others are ignored. */
-				ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
-					      "Require attribute "
+				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+					      "oidc_authz_worker: require attribute "
 					      "'%s' matched", token);
 				return OK;
 			}
@@ -236,9 +236,8 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 	 * we're irrelevant.
 	 */
 	if (!have_oauthattr) {
-		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
-			      "No attribute statements found. "
-                              "Not performing authZ.");
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			      "oidc_authz_worker: no attribute statements found, not performing authz.");
 		return DECLINED;
 	}
 	/* If there was a "Require attribute", but no actual attributes,
@@ -246,13 +245,13 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 	 */
 	if (count_oauthattr == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-			      "'Require attribute' missing specification(s) in configuration. Declining.");
+			      "oidc_authz_worker: 'require attribute' missing specification(s) in configuration. Declining.");
 		return DECLINED;
 	}
 
 	/* OK, our decision is final and binding */
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
-		      "Authorization denied for client session");
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+		      "oidc_authz_worker: authorization denied for client session");
 
 	ap_note_auth_failure(r);
 

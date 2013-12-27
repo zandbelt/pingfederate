@@ -100,10 +100,10 @@ const char *oidc_set_url(apr_pool_t *pool, apr_uri_t *uri, const char *url) {
 		return NULL;
 	}
 	if (apr_uri_parse(pool, url, uri) != APR_SUCCESS) {
-		return apr_psprintf(pool, "MOD_OIDC: URL '%s' could not be parsed!", url);
+		return apr_psprintf(pool, "oidc_set_url: URL '%s' could not be parsed!", url);
 	}
 	if (uri->port == 0) uri->port = apr_uri_port_of_scheme(uri->scheme);
-	if (uri->hostname == NULL) return apr_psprintf(pool, "MOD_OIDC: hostname in URL '%s' parsed to NULL!", url);
+	if (uri->hostname == NULL) return apr_psprintf(pool, "oidc_set_url: hostname in URL '%s' parsed to NULL!", url);
 	return NULL;
 }
 
@@ -125,7 +125,7 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
 				(d < 'a' || d > 'z') &&
 				(d < 'A' || d > 'Z') &&
 				d != '.' && d != '-') {
-			return(apr_psprintf(cmd->pool, "MOD_OIDC: Invalid character (%c) in OIDCCookieDomain", d));
+			return(apr_psprintf(cmd->pool, "oidc_set_cookie_domain: invalid character (%c) in OIDCCookieDomain", d));
 		}
 	}
 	cfg->cookie_domain = apr_pstrdup(cmd->pool, value);
@@ -135,7 +135,7 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
 const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *value) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	if ( (apr_strnatcmp(value, "client_auth_post") != 0) && (!apr_strnatcmp(value, "client_auth_basic") != 0) ) {
-		return apr_psprintf(cmd->pool, "MOD_OIDC: Invalid value (%s) for OIDCTokenEndpointAuth: must be \"client_auth_post\" or \"client_auth_basic\".", value);
+		return apr_psprintf(cmd->pool, "oidc_set_token_endpoint_auth: Invalid value (%s) for OIDCTokenEndpointAuth: must be \"client_auth_post\" or \"client_auth_basic\".", value);
 	}
 	cfg->token_endpoint_auth = apr_pstrdup(cmd->pool, value);
 	return NULL;
@@ -143,7 +143,6 @@ const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *
 
 char *oidc_get_endpoint(request_rec *r, apr_uri_t *url, const char *s) {
 	apr_uri_t test;
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_get_authorization_endpoint()");
 	memset(&test, '\0', sizeof(apr_uri_t));
 	if (memcmp(url, &test, sizeof(apr_uri_t)) == 0) {
 		if (s != NULL) ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_endpoint: %s null (not set?)", s);
@@ -172,7 +171,7 @@ char *oidc_get_dir_scope(request_rec *r) {
 		if (strncmp(d->dir_scope, requestPath, strlen(d->dir_scope)) == 0)
 			rv = d->dir_scope;
 		else {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "MOD_OIDC: OIDCDirScope (%s) not a substring of request path, using request path (%s) for cookie", d->dir_scope, requestPath);
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_dir_scope: OIDCDirScope (%s) not a substring of request path, using request path (%s) for cookie", d->dir_scope, requestPath);
 			rv = requestPath;
 		}
 	} else {
@@ -301,7 +300,7 @@ static void oidc_ssl_id_callback(CRYPTO_THREADID *id)
 
 apr_status_t oidc_cleanup(void *data) {
 	server_rec *s = (server_rec *) data;
-	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "entering oidc_cleanup()");
+	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s, "oidc_cleanup: entering");
 #if (defined (OPENSSL_THREADS) && APR_HAS_THREADS)
 	if (CRYPTO_get_locking_callback() == oidc_ssl_locking_callback)
 		CRYPTO_set_locking_callback(NULL);
@@ -315,7 +314,7 @@ apr_status_t oidc_cleanup(void *data) {
 
 #endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
 	curl_global_cleanup();
-	ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, "exiting oidc_cleanup()");
+	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s, "oidc_cleanup: returning");
 	return APR_SUCCESS;
 }
 
