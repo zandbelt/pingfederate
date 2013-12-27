@@ -235,7 +235,7 @@ char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c) {
 		port_str, r->uri,
 		(r->args != NULL && *r->args != '\0' ? "?" : ""),
 		r->args, NULL);
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Current URL '%s'", url);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_current_url: current URL '%s'", url);
 	return url;
 }
 
@@ -264,7 +264,7 @@ char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *p
 	CURL *curl;
 	char *rv = NULL;
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_http_call()");
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_http_call: entering");
 
 	curl = curl_easy_init();
 	if (curl == NULL) {
@@ -314,11 +314,11 @@ char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *p
 	}
 
 	if (curl_easy_perform(curl) != CURLE_OK) {
-		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_http_call: curl_easy_perform() failed (%s)", curlError);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_http_call: curl_easy_perform() failed (%s)", curlError);
 		goto out;
 	}
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_http_call: response=%s", curlBuffer.buf);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_http_call: response=%s", curlBuffer.buf);
 
 	rv = apr_pstrndup(r->pool, curlBuffer.buf, strlen(curlBuffer.buf));
 
@@ -328,9 +328,11 @@ out:
 }
 
 void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_cookie: entering");
+
 	char *headerString, *currentCookies;
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_set_cookie()");
 	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
 	if (apr_strnatcmp(cookieValue, "") == 0) headerString = apr_psprintf(r->pool, "%s;expires=0;Max-Age=0", headerString);
 	/* use r->err_headers_out so we always print our headers (even on 302 redirect) - headers_out only prints on 2xx responses */
@@ -340,7 +342,9 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 		apr_table_add(r->headers_in, "Cookie", headerString);
 	else
 		apr_table_set(r->headers_in, "Cookie", (apr_pstrcat(r->pool, headerString, ";", currentCookies, NULL)));
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "Adding outgoing header: Set-Cookie: %s", headerString);
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_cookie: adding outgoing header: Set-Cookie: %s", headerString);
+
 	return;
 }
 
@@ -348,7 +352,7 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
 	char *cookie, *tokenizerCtx, *rv = NULL;
 	apr_byte_t cookieFound = FALSE;
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_get_cookie()");
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_cookie: entering");
 
 	char *cookies = apr_pstrdup(r->pool, (char *) apr_table_get(r->headers_in, "Cookie"));
 	if (cookies != NULL) {
@@ -370,7 +374,7 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
 		} while (cookieFound == FALSE);
 	}
 
-	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_get_cookie: returning %s", rv);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_cookie: returning %s", rv);
 
 	return rv;
 }

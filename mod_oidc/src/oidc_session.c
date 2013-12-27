@@ -221,7 +221,7 @@ static apr_status_t oidc_session_identity_decode(request_rec * r, session_rec * 
 	    char *encoded, *pair;
 	    const char *sep = "&";
 
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_session_identity_decode: decoding %s", z->encoded);
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_session_identity_decode: decoding %s", z->encoded);
 
 	    /* sanity check - anything to decode? */
 	    if (!z->encoded) {
@@ -237,7 +237,7 @@ static apr_status_t oidc_session_identity_decode(request_rec * r, session_rec * 
 	        char *key = apr_strtok(pair, psep, &plast);
 	        char *val = apr_strtok(NULL, psep, &plast);
 
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_session_identity_decode: decoding %s=%s", key, val);
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_session_identity_decode: decoding %s=%s", key, val);
 
 	        if (key && *key) {
 	            if (!val || !*val) {
@@ -321,7 +321,7 @@ apr_status_t oidc_session_load_cookie(request_rec *r, session_rec *z) {
 	char *value = oidc_get_cookie(r, d->cookie);
 	if (value != NULL) {
 		if (oidc_base64url_decode_decrypt_string(r, (char **)&z->encoded, value) <= 0) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_is_valid_cookie: could not decrypt cookie value");
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_session_load_cookie: could not decrypt cookie value");
 			return APR_EGENERAL;
 		}
 	}
@@ -341,7 +341,7 @@ apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 #ifdef OIDC_SESSION_USE_APACHE_SESSIONS
 #else
 	if (((*zz) = (session_rec *)oidc_request_state_get(r, "session")) != NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "oidc_session_load: loading session from request state");
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_session_load: loading session from request state");
 		return APR_SUCCESS;
 	}
 	session_rec *z = (*zz = apr_pcalloc(r->pool, sizeof(session_rec)));
