@@ -614,10 +614,7 @@ apr_byte_t oidc_request_matches_redirect_uri(request_rec *r, oidc_cfg *c) {
 	return (apr_strnatcmp(p1, p2) == 0) ? TRUE : FALSE;
 }
 
-static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, const char *attributes) {
-
-	apr_json_value_t *attrs = NULL;
-	apr_status_t status = apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
+static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, apr_json_value_t *attrs) {
 	apr_hash_index_t *hi;
 	for (hi = apr_hash_first(r->pool, attrs->value.object); hi; hi = apr_hash_next(hi)) {
 		const char *k; apr_json_value_t *v;
@@ -650,22 +647,28 @@ static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, const char 
 	}
 }
 
-// TODO: pass around session object instead of attributes
-static void oidc_set_attributes(request_rec *r, apr_json_value_t *const attrs) {
-	/* Always set the attributes in the current request, even if
-	 * it is a subrequest, because we always allocate memory in
-	 * the current request, so we run the risk of accessing freed
-	 * memory if we were to set it in the main request. */
-	ap_set_module_config(r->request_config, &oidc_module, attrs);
+apr_table_t *oidc_request_state(request_rec *r) {
+	// TODO: how does this work with other modules setting request_config?
+	apr_table_t *state = ap_get_module_config(r->request_config, &oidc_module);
+	if (state == NULL && r->main != NULL) {
+		return oidc_request_state(r->main);
+	}
+	if (state == NULL) {
+		state = apr_table_make(r->pool, 5);
+		ap_set_module_config(r->request_config, &oidc_module, state);
+	}
+	return state;
 }
 
-static apr_json_value_t *oidc_get_attributes(request_rec *r) {
-	const apr_json_value_t *attrs = ap_get_module_config(r->request_config, &oidc_module);
-	if (attrs == NULL && r->main != NULL) {
-		return oidc_get_attributes(r->main);
-	} else {
-		return attrs;
-	}
+void oidc_request_state_set(request_rec *r, const char *key, const char *value) {
+	apr_table_t *state = oidc_request_state(r);
+	apr_table_setn(state, key, value);
+}
+
+const char*oidc_request_state_get(request_rec *r, const char *key) {
+	apr_table_t *state = oidc_request_state(r);
+	const char *value = apr_table_get(state, key);
+	return value;
 }
 
 int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
@@ -738,7 +741,12 @@ int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 			// TODO: combine already resolved attrs from id_token with those from user_info endpoint
 			const char *attributes = NULL;
 			oidc_session_get(r, session, "attributes", &attributes);
-			oidc_set_attribute_headers(r, c, attributes);
+
+			apr_json_value_t *attrs = NULL;
+			apr_status_t status = apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
+
+			oidc_set_attribute_headers(r, c, attrs);
+			oidc_request_state_set(r, "attributes", (const char *)attrs);
 
 			return OK;
 
@@ -853,7 +861,8 @@ int oidc_check_userid_oauth20(request_rec *r, oidc_cfg *c) {
 		apr_json_decode(&result, json, strlen(json), r->pool);
 		token = apr_hash_get(result->value.object, "access_token", APR_HASH_KEY_STRING);
 	}
-	oidc_set_attributes(r, token);
+
+	oidc_request_state_set(r, "attributes", (const char *)token);
 
 	// TODO: user attribute header settings & scrubbing ?
 
@@ -888,22 +897,7 @@ int oidc_auth_checker(request_rec *r) {
 
 	ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "entering oidc_auth_checker()");
 
-	apr_json_value_t *attrs;
-
-	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect") == 0) {
-		// TOOD: we're parsing multiple times now, which is overhead
-		// so store decoded JSON in request somehow next to session; need new construct?
-		// also find out how to do that with mod_session and/or oauth20...
-		// (moreover because we do this on subrequests as well)
-		session_rec *session = oidc_session_load_from_request(r);
-		const char *attributes = NULL;
-		oidc_session_get(r, session, "attributes", &attributes);
-		apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
-	}
-
-	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "oauth20") == 0) {
-		attrs = oidc_get_attributes(r);
-	}
+	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, "attributes");
 
 	const apr_array_header_t *const reqs_arr = ap_requires(r);
 	const require_line *const reqs = reqs_arr ? (require_line *) reqs_arr->elts : NULL;

@@ -93,6 +93,8 @@ typedef struct oidc_dir_cfg {
 int oidc_auth_checker(request_rec *r);
 int oidc_check_user_id(request_rec *r);
 
+void oidc_request_state_set(request_rec *r, const char *key, const char *value);
+const char*oidc_request_state_get(request_rec *r, const char *key);
 
 // oidc_cache.c
 apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value);
@@ -162,6 +164,5 @@ apr_status_t oidc_session_load(request_rec *r, session_rec **z);
 apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value);
 apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value);
 apr_status_t oidc_session_save(request_rec *r, session_rec *z);
-session_rec *oidc_session_load_from_request(request_rec *r);
 
 #endif /* MOD_OIDC_H_ */
