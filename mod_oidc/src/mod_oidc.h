@@ -97,7 +97,7 @@ typedef struct oidc_dir_cfg {
 int oidc_check_user_id(request_rec *r);
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-authz_status oidc_authz_checker(request_rec *r, const char *require_line);
+authz_status oidc_authz_checker(request_rec *r, const char *require_args, const void *parsed_require_args);
 #else
 int oidc_auth_checker(request_rec *r);
 #endif
