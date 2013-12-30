@@ -399,7 +399,7 @@ void oidc_register_hooks(apr_pool_t *pool) {
 	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 	ap_hook_check_authn(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
-    ap_register_provider(p, AUTHZ_PROVIDER_GROUP, "attribute", "0", &authz_oidc_provider);
+	ap_register_provider(pool, AUTHZ_PROVIDER_GROUP, "attribute", "0", &authz_oidc_provider);
 	//ap_hook_check_authz(oidc_auth_checker, NULL, authzSucc, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
 #else
 	ap_hook_check_user_id(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE);

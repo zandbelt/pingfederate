@@ -950,7 +950,7 @@ int oidc_check_user_id(request_rec *r) {
 }
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-authz_status oidc_authz_checker(request_rec *r, const char *require_line) {
+authz_status oidc_authz_checker(request_rec *r, const char *require_args, const void *parsed_require_args) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authz_checker: entering");
 
@@ -958,7 +958,7 @@ authz_status oidc_authz_checker(request_rec *r, const char *require_line) {
 
 	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, "attributes");
 
-	return oidc_authz_worker24(r, attrs, require_line);
+	return oidc_authz_worker24(r, attrs, require_args);
 }
 #else
 int oidc_auth_checker(request_rec *r) {

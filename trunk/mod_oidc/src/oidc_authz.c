@@ -260,7 +260,7 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const attrs,
-		const char *require_line) {
+		const char *require_args) {
 
 	int count_oauthattr = 0;
 	const char *t, *w;
@@ -268,7 +268,7 @@ authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const 
 	if (!attrs)
 		return AUTHZ_DENIED;
 
-	t = require_line;
+	t = require_args;
 	while ((w = ap_getword_conf(r->pool, &t)) && w[0]) {
 
 		count_oauthattr++;
