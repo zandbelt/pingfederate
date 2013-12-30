@@ -949,6 +949,18 @@ int oidc_check_user_id(request_rec *r) {
 	return DECLINED;
 }
 
+#if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
+authz_status oidc_authz_checker(request_rec *r, const char *require_line) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authz_checker: entering");
+
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+
+	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, "attributes");
+
+	return oidc_authz_worker24(r, attrs, require_line);
+}
+#else
 int oidc_auth_checker(request_rec *r) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_auth_checker: entering");
@@ -967,18 +979,6 @@ int oidc_auth_checker(request_rec *r) {
 	}
 
 	return oidc_authz_worker(r, attrs, reqs, reqs_arr->nelts);
-}
-
-#if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-authz_status oidc_authz_checker(request_rec *r, const char *require_line) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authz_checker: entering");
-
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
-
-	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, "attributes");
-
-	return oidc_authz_worker24(r, attrs, require_line);
 }
 #endif
 
