@@ -94,11 +94,12 @@ typedef struct oidc_dir_cfg {
 	char *scrub_request_headers;
 } oidc_dir_cfg;
 
-int oidc_auth_checker(request_rec *r);
 int oidc_check_user_id(request_rec *r);
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 authz_status oidc_authz_checker(request_rec *r, const char *require_line);
+#else
+int oidc_auth_checker(request_rec *r);
 #endif
 
 void oidc_request_state_set(request_rec *r, const char *key, const char *value);
@@ -110,6 +111,9 @@ apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, 
 
 // oidc_authz.c
 int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const require_line *const reqs, int nelts);
+#if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
+authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const attrs, const char *require_line);
+#endif
 
 // oidc_config.c
 void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr);

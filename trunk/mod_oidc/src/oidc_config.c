@@ -58,6 +58,7 @@
 #include <http_config.h>
 #include <http_log.h>
 #include <http_request.h>
+#include <ap_provider.h>
 
 #include <curl/curl.h>
 

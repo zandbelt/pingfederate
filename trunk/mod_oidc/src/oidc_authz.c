@@ -259,7 +259,7 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 }
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-int oidc_authz_worker24(request_rec *r, const apr_json_value_t * const attrs,
+authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const attrs,
 		const char *require_line) {
 
 	int count_oauthattr = 0;
