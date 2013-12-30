@@ -96,6 +96,10 @@ typedef struct oidc_dir_cfg {
 int oidc_auth_checker(request_rec *r);
 int oidc_check_user_id(request_rec *r);
 
+#if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
+authz_status oidc_authz_checker(request_rec *r, const char *require_line);
+#endif
+
 void oidc_request_state_set(request_rec *r, const char *key, const char *value);
 const char*oidc_request_state_get(request_rec *r, const char *key);
 
@@ -163,6 +167,7 @@ typedef struct {
 } session_rec;
 #endif
 
+apr_status_t oidc_session_init();
 apr_status_t oidc_session_load(request_rec *r, session_rec **z);
 apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value);
 apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value);

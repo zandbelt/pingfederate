@@ -258,3 +258,39 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 	return HTTP_UNAUTHORIZED;
 }
 
+#if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
+int oidc_authz_worker24(request_rec *r, const apr_json_value_t * const attrs,
+		const char *require_line) {
+
+	int count_oauthattr = 0;
+	const char *t, *w;
+
+	if (!attrs)
+		return AUTHZ_DENIED;
+
+	t = require_line;
+	while ((w = ap_getword_conf(r->pool, &t)) && w[0]) {
+
+		count_oauthattr++;
+
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+				"oidc_authz_worker24: evaluating attribute specification: %s",
+				w);
+
+		if (oidc_authz_match_attribute(w, attrs, r) == OIDC_ATTR_MATCH) {
+
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+					"oidc_authz_worker24: require attribute "
+							"'%s' matched", w);
+			return AUTHZ_GRANTED;
+		}
+	}
+
+	if (count_oauthattr == 0) {
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+				"oidc_authz_worker24: 'require attribute' missing specification(s) in configuration. Denying.");
+	}
+
+	return AUTHZ_DENIED;
+}
+#endif
