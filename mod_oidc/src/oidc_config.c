@@ -382,21 +382,26 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
+	oidc_session_init();
+
 	return OK;
 }
+
+#if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
+static const authz_provider authz_oidc_provider = {
+    &oidc_authz_checker,
+};
+#endif
 
 void oidc_register_hooks(apr_pool_t *pool) {
 	static const char *const authzSucc[] = { "mod_authz_user.c", NULL };
 	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-	ap_hook_check_access_ex(
-		oidc_check_user_id,
-		NULL,
-		NULL,
-		APR_HOOK_MIDDLE,
-		AP_AUTH_INTERNAL_PER_URI);
+	ap_hook_check_authn(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
+    ap_register_provider(p, AUTHZ_PROVIDER_GROUP, "attribute", "0", &authz_oidc_provider);
+	//ap_hook_check_authz(oidc_auth_checker, NULL, authzSucc, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
 #else
 	ap_hook_check_user_id(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE);
-#endif
 	ap_hook_auth_checker(oidc_auth_checker, NULL, authzSucc, APR_HOOK_MIDDLE);
+#endif
 }

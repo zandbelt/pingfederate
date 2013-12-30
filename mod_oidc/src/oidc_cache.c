@@ -59,7 +59,8 @@
 
 #include "mod_oidc.h"
 
-// TODO: encrypt the cache
+// TODO: read by block instead ofline
+// TODO: make the cache path configurable so it can be shared across different machines using a shared file system
 
 #define OIDC_CACHE_LINE_SIZE 2048
 

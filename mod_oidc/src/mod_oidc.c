@@ -533,22 +533,51 @@ apr_byte_t oidc_resolve_userinfo(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, c
 #define OIDCSHA1Len 20
 #define OIDCRandomLen 32
 
-char *oidc_get_browser_state_hash(request_rec *r, const char *s) {
+/*
+ * Calculates a hash value based on request fingerprint plus a provided state string.
+ */
+char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_browser_state_hash: entering");
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_get_browser_state_hash: entering");
 
-	unsigned char hash[OIDCSHA1Len];
+	/* helper to hold to header values */
+	const char *value = NULL;
+	/* the hash context */
 	apr_sha1_ctx_t sha1;
+
+	/* initialize the hash context */
 	apr_sha1_init(&sha1);
-	char *v = (char *) apr_table_get(r->headers_in, "X_FORWARDED_FOR");
-	if (v != NULL) apr_sha1_update(&sha1, v, strlen(v));
-	v = (char *) apr_table_get(r->headers_in, "USER_AGENT");
-	if (v != NULL) apr_sha1_update(&sha1, v, strlen(v));
-	apr_sha1_update(&sha1, r->connection->remote_ip, strlen(r->connection->remote_ip));
-	apr_sha1_update(&sha1, s, strlen(s));
+
+	/* get the X_FORWARDED_FOR header value  */
+	value = (char *) apr_table_get(r->headers_in, "X_FORWARDED_FOR");
+	/* if we have a value for this header, concat it to the hash input */
+	if (value != NULL)
+		apr_sha1_update(&sha1, value, strlen(value));
+
+	/* get the USER_AGENT header value  */
+	value = (char *) apr_table_get(r->headers_in, "USER_AGENT");
+	/* if we have a value for this header, concat it to the hash input */
+	if (value != NULL)
+		apr_sha1_update(&sha1, value, strlen(value));
+
+	/* get the remote client IP address or host name */
+	int remotehost_is_ip;
+	value = ap_get_remote_host(r->connection,
+			r->per_dir_config, REMOTE_NOLOOKUP, &remotehost_is_ip);
+	/* concat the remote IP address/hostname to the hash input */
+	apr_sha1_update(&sha1, value, strlen(value));
+
+	/* concat the state parameter to the hash input */
+	apr_sha1_update(&sha1, state, strlen(state));
+
+	/* finalize the hash input and calculate the resulting hash output */
+	unsigned char hash[OIDCSHA1Len];
 	apr_sha1_final(hash, &sha1);
-	char *result = apr_palloc(r->pool, apr_base64_encode_len(OIDCSHA1Len) +1);
-	apr_base64_encode(result, (const char *)hash, OIDCSHA1Len);
+
+	/* base64 encode the resulting hash and return it */
+	char *result = apr_palloc(r->pool, apr_base64_encode_len(OIDCSHA1Len) + 1);
+	apr_base64_encode(result, (const char *) hash, OIDCSHA1Len);
 	return result;
 }
 
@@ -939,6 +968,19 @@ int oidc_auth_checker(request_rec *r) {
 
 	return oidc_authz_worker(r, attrs, reqs, reqs_arr->nelts);
 }
+
+#if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
+authz_status oidc_authz_checker(request_rec *r, const char *require_line) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authz_checker: entering");
+
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+
+	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, "attributes");
+
+	return oidc_authz_worker24(r, attrs, require_line);
+}
+#endif
 
 const command_rec oidc_config_cmds[] = {
 		AP_INIT_FLAG("OIDCSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, ssl_validate_server), RSRC_CONF, "Require validation of the OpenID Connect OP SSL server certificate for successful authentication (On or Off)"),
