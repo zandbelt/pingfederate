@@ -58,6 +58,7 @@
 #include <httpd.h>
 #include <http_core.h>
 #include <http_config.h>
+#include <mod_auth.h>
 
 #include "apr_json.h"
 

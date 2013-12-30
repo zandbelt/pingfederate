@@ -52,7 +52,6 @@
 #include <http_core.h>
 #include <http_log.h>
 #include <http_protocol.h>
-#include <mod_auth.h>
 
 #include "mod_oidc.h"
 
