@@ -391,6 +391,7 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 static const authz_provider authz_oidc_provider = {
     &oidc_authz_checker,
+    NULL,
 };
 #endif
 
