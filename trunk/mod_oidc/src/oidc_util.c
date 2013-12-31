@@ -114,7 +114,7 @@ int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int paddi
 int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	int crypted_len = strlen(src) + 1;
-	unsigned char *crypted = oidc_crypto_aes_encrypt(r->pool, &c->e_ctx, (unsigned char *)src, &crypted_len);
+	unsigned char *crypted = oidc_crypto_aes_encrypt(r, &c->e_ctx, (unsigned char *)src, &crypted_len);
 	return oidc_base64url_encode(r, dst, (const char *)crypted, crypted_len);
 }
 
@@ -122,7 +122,7 @@ int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char 
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	char *decbuf = NULL;
 	int dec_len = oidc_base64url_decode(r, &decbuf, src, 0);
-	*dst = (char *)oidc_crypto_aes_decrypt(r->pool, &c->d_ctx, (unsigned char *)decbuf, &dec_len);
+	*dst = (char *)oidc_crypto_aes_decrypt(r, &c->d_ctx, (unsigned char *)decbuf, &dec_len);
 	return dec_len;
 }
 

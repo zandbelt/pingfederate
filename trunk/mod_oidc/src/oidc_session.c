@@ -315,8 +315,8 @@ static apr_status_t oidc_session_save_pool(request_rec *r, session_rec *z) {
 	return APR_SUCCESS;
 }
 
-apr_status_t oidc_session_init() {
-	return OK;
+apr_status_t oidc_session_init(apr_pool_t *pool, server_rec *s) {
+	return APR_SUCCESS;
 }
 
 apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
@@ -372,7 +372,7 @@ static apr_status_t (*ap_session_get_fn)(request_rec *r, session_rec *z, const c
 static apr_status_t (*ap_session_set_fn)(request_rec *r, session_rec *z, const char *key, const char *value) = NULL;
 static apr_status_t (*ap_session_save_fn)(request_rec *r, session_rec *z) = NULL;
 
-apr_status_t oidc_session_init() {
+apr_status_t oidc_session_init(apr_pool_t *pool, server_rec *s) {
 	if (!ap_session_load_fn || !ap_session_get_fn || !ap_session_set_fn || !ap_session_save_fn) {
 	    ap_session_load_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_load);
 	    ap_session_get_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_get);

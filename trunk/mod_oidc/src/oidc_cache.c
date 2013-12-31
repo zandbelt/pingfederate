@@ -46,12 +46,9 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
- */
-
-/*
  * mem_cache-like interface and semantics (string keys/values) using a file storage backend
- * TODO: make the cache path configurable so it can be shared across different machines using a shared file system
+ *
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
 #include <apr_hash.h>
@@ -64,6 +61,8 @@
 
 #include "mod_oidc.h"
 
+extern module AP_MODULE_DECLARE_DATA oidc_module;
+
 /*
  * header structure that holds the metadata info for a cache file entry
  */
@@ -75,33 +74,56 @@ typedef struct {
 } oidc_cache_info_t;
 
 /*
- * return the path to the directory where the cache files reside
+ * initialize the cache
+ */
+apr_status_t oidc_cache_init(apr_pool_t *pool, server_rec *s) {
+	// too bad creating a directory here does not work because of permissions..
+	return APR_SUCCESS;
+}
+
+#define OIDC_CACHE_FILE_PREFIX "mod-oidc-"
+
+/*
+ * return the fully qualified path name to the cache directory
  */
 static const char *oidc_cache_dir_path(request_rec *r) {
 
-	char *path = NULL;
-	const char *tmp_dir = NULL;
+	// TODO: each-and-every attempt to optimize this earlier horribly failed...
+	//       we really need to combine this with oidc_cache_init to set a process variable only once
+
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
 	apr_dir_t *dir;
+	const char *path = NULL;
 
-	/* get an OS specific temporary directory */
-	apr_temp_dir_get(&tmp_dir, r->pool);
+	if ((path = cfg->cache_dir) == NULL) {
 
-	/* append the mod_oidc specific path portion */
-	path = apr_psprintf(r->pool, "%s/mod_oidc", tmp_dir);
+		/* get an OS specific temporary directory */
+		if (apr_temp_dir_get(&path, r->pool) != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_dir_path: could not obtain a temporary directory (apr_temp_dir_get)");
+			return NULL;
+		}
+
+	}
 
 	/* ensure the directory exists */
 	if (apr_dir_open(&dir, path, r->pool) != APR_SUCCESS) {
-		apr_dir_make_recursive(path, APR_OS_DEFAULT, r->pool);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_dir_path: open the cache directory (%s)", path);
+		return NULL;
 	}
 
 	return path;
 }
 
+
+static const char *oidc_cache_filename(request_rec *r, const char *key) {
+	return apr_psprintf(r->pool, "%s%s", OIDC_CACHE_FILE_PREFIX, key);
+}
+
 /*
  * return the fully qualified path name to a cache file for a specified key
  */
-static const char *oidc_cache_file(request_rec *r, const char *key) {
-	return apr_psprintf(r->pool, "%s/%s", oidc_cache_dir_path(r), key);
+static const char *oidc_cache_file_path(request_rec *r, const char *key) {
+	return apr_psprintf(r->pool, "%s/%s", oidc_cache_dir_path(r), oidc_cache_filename(r, key));
 }
 
 /*
@@ -163,7 +185,7 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 	apr_status_t rc = APR_SUCCESS;
 
 	/* get the fully qualified path to the cache file based on the key name */
-	const char *path = oidc_cache_file(r, key);
+	const char *path = oidc_cache_file_path(r, key);
 
 	/* open the cache file if it exists, otherwise we just have a "regular" cache miss */
 	if (apr_file_open(&fd, path, APR_FOPEN_READ|APR_FOPEN_BUFFERED, APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
@@ -236,7 +258,7 @@ error_close:
 }
 
 #define OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS 60
-#define OIDC_CACHE_FILE_LAST_CLEANED "mod-oidc-last-cleaned"
+#define OIDC_CACHE_FILE_LAST_CLEANED "last-cleaned"
 
 /*
  * delete all expired entries from the cache directory
@@ -249,14 +271,13 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 	apr_finfo_t fi;
 	oidc_cache_info_t info;
 
-	/* get the path to the cache directory */
-	const char *cache_dir = oidc_cache_dir_path(r);
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	/* get the path to the metadata file that holds "last cleaned" metadata info */
-	const char *path = apr_psprintf(r->pool, "%s/%s", cache_dir, OIDC_CACHE_FILE_LAST_CLEANED);
+	const char *metadata_path = oidc_cache_file_path(r, OIDC_CACHE_FILE_LAST_CLEANED);
 
 	/* open the metadata file if it exists */
-	if ((rc = apr_stat(&fi, path, APR_FINFO_MTIME, r->pool))  == APR_SUCCESS)  {
+	if ((rc = apr_stat(&fi, metadata_path, APR_FINFO_MTIME, r->pool))  == APR_SUCCESS)  {
 
 		/* really only clean once per so much time, check that we haven not recently run */
 		if (apr_time_now() < fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS)) {
@@ -265,20 +286,20 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 		}
 
 		/* time to clean, reset the modification time of the metadata file to reflect the timestamp of this cleaning cycle */
-		apr_file_mtime_set(path, apr_time_now(), r->pool);
+		apr_file_mtime_set(metadata_path, apr_time_now(), r->pool);
 
 	} else {
 
 		/* no metadata file exists yet, create one and open it */
-		if ((rc = apr_file_open(&fd, path, (APR_FOPEN_WRITE|APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error creating cache timestamp %s", path);
+		if ((rc = apr_file_open(&fd, metadata_path, (APR_FOPEN_WRITE|APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error creating cache timestamp %s", metadata_path);
 			return rc;
 		}
 	}
 
 	/* time to clean, open the cache directory */
-	if ((rc = apr_dir_open(&dir, cache_dir, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error opening cache directory '%s' for cleaning", cache_dir);
+	if ((rc = apr_dir_open(&dir, oidc_cache_dir_path(r), r->pool)) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error opening cache directory '%s' for cleaning", cfg->cache_dir);
 		return rc;
 	}
 
@@ -291,10 +312,10 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 		if (i == APR_SUCCESS) {
 
 			/* skip non-cache entries, cq. the ".", ".." and the metadata file */
-			if ( (fi.name[0] == '.') || (apr_strnatcmp(fi.name, OIDC_CACHE_FILE_LAST_CLEANED) == 0) ) continue;
+			if ( (fi.name[0] == '.') || (strstr(fi.name, OIDC_CACHE_FILE_PREFIX) != fi.name) || ((apr_strnatcmp(fi.name, oidc_cache_filename(r, OIDC_CACHE_FILE_LAST_CLEANED)) == 0)) ) continue;
 
 			/* get the fully qualified path to the cache file and open it */
-			path = oidc_cache_file(r, fi.name);
+			const char *path = apr_psprintf(r->pool, "%s/%s", oidc_cache_dir_path(r), fi.name);
 			if (apr_file_open(&fd, path, APR_FOPEN_READ, APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: unable to open cache entry '%s'", path);
 				continue;
@@ -343,7 +364,7 @@ apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, 
 	apr_status_t rc = APR_SUCCESS;
 
 	/* get the fully qualified path to the cache file based on the key name */
-	const char *path = oidc_cache_file(r, key);
+	const char *path = oidc_cache_file_path(r, key);
 
 	/* only on writes (not on reads) we clean the cache first (if not done recently) */
 	oidc_cache_clean(r);

@@ -49,17 +49,28 @@
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
-#include "mod_oidc.h"
+#include <httpd.h>
+#include <http_config.h>
+#include <http_log.h>
+#include <http_request.h>
+
 #include <openssl/aes.h>
 
-const char *oidc_crypto_aes_init(const char *passphrase, EVP_CIPHER_CTX *encode, EVP_CIPHER_CTX *decode) {
+#include "mod_oidc.h"
 
-	if (passphrase == NULL) {
-		return "oidc_crypto_aes_init: OIDCCryptoPassphrase has not been set; can't continue initializing crypto!";
+extern module AP_MODULE_DECLARE_DATA oidc_module;
+
+apr_status_t oidc_crypto_init(apr_pool_t *pool, server_rec *s) {
+
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config, &oidc_module);
+
+	if (cfg->crypto_passphrase == NULL) {
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_crypto_init: OIDCCryptoPassphrase has not been set; can't continue initializing crypto");
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
-	unsigned char *key_data = (unsigned char *)passphrase;
-	int key_data_len = strlen(passphrase);
+	unsigned char *key_data = (unsigned char *)cfg->crypto_passphrase;
+	int key_data_len = strlen(cfg->crypto_passphrase);
 
 	unsigned int s_salt[] = {41892, 72930};
 	unsigned char *salt = (unsigned char *)&s_salt;
@@ -74,52 +85,68 @@ const char *oidc_crypto_aes_init(const char *passphrase, EVP_CIPHER_CTX *encode,
 	 */
 	i = EVP_BytesToKey(EVP_aes_256_cbc(), EVP_sha1(), salt, key_data, key_data_len, nrounds, key, iv);
 	if (i != 32) {
-		return "oidc_crypto_aes_init: key size must be 256 bits!";
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_crypto_init: key size must be 256 bits!");
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
-	EVP_CIPHER_CTX_init(encode);
-	EVP_EncryptInit_ex(encode, EVP_aes_256_cbc(), NULL, key, iv);
+	EVP_CIPHER_CTX_init(&cfg->e_ctx);
+	if (!EVP_EncryptInit_ex(&cfg->e_ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_crypto_init: EVP_EncryptInit_ex on the encrypt context failed!");
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
 
-	EVP_CIPHER_CTX_init(decode);
-	EVP_DecryptInit_ex(decode, EVP_aes_256_cbc(), NULL, key, iv);
+	EVP_CIPHER_CTX_init(&cfg->d_ctx);
+	if (!EVP_DecryptInit_ex(&cfg->d_ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_crypto_init: EVP_EncryptInit_ex on the decrypt context failed!");
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
 
-	return NULL;
+	return APR_SUCCESS;
 }
 
-unsigned char *oidc_crypto_aes_encrypt(apr_pool_t *pool, EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len) {
+unsigned char *oidc_crypto_aes_encrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len) {
 	/* max ciphertext len for a n bytes of plaintext is n + AES_BLOCK_SIZE -1 bytes */
 	int c_len = *len + AES_BLOCK_SIZE, f_len = 0;
-	unsigned char *ciphertext = apr_palloc(pool, c_len);
+	unsigned char *ciphertext = apr_palloc(r->pool, c_len);
 
 	/* allows reusing of 'e' for multiple encryption cycles */
-	EVP_EncryptInit_ex(e, NULL, NULL, NULL, NULL);
+	if (!EVP_EncryptInit_ex(e, NULL, NULL, NULL, NULL)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_encrypt: EVP_EncryptInit_ex failed!");
+		return NULL;
+	}
 
 	/* update ciphertext, c_len is filled with the length of ciphertext generated,
 	 *len is the size of plaintext in bytes */
-	EVP_EncryptUpdate(e, ciphertext, &c_len, plaintext, *len);
+	if (!EVP_EncryptUpdate(e, ciphertext, &c_len, plaintext, *len)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_encrypt: EVP_EncryptUpdate failed!");
+		return NULL;
+	}
 
 	/* update ciphertext with the final remaining bytes */
-	EVP_EncryptFinal_ex(e, ciphertext+c_len, &f_len);
+	if (!EVP_EncryptFinal_ex(e, ciphertext+c_len, &f_len)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_encrypt: EVP_EncryptFinal_ex failed!");
+		return NULL;
+	}
 
 	*len = c_len + f_len;
 	return ciphertext;
 }
 
-unsigned char *oidc_crypto_aes_decrypt(apr_pool_t *pool, EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len) {
+unsigned char *oidc_crypto_aes_decrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len) {
 	/* because we have padding ON, we must allocate an extra cipher block size of memory */
 	int p_len = *len, f_len = 0;
-	unsigned char *plaintext = apr_palloc(pool, p_len + AES_BLOCK_SIZE);
+	unsigned char *plaintext = apr_palloc(r->pool, p_len + AES_BLOCK_SIZE);
 
 	if (!EVP_DecryptInit_ex(e, NULL, NULL, NULL, NULL)) {
-		//ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_decrypt: EVP_DecryptInit_ex failed!");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_decrypt: EVP_DecryptInit_ex failed!");
 		return NULL;
 	}
 	if (!EVP_DecryptUpdate(e, plaintext, &p_len, ciphertext, *len)) {
-		//ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_decrypt: EVP_DecryptUpdate failed!");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_decrypt: EVP_DecryptUpdate failed!");
 		return NULL;
 	}
 	if (!EVP_DecryptFinal_ex(e, plaintext+p_len, &f_len)) {
-		//ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_decrypt: EVP_DecryptFinal_ex failed!");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_crypto_aes_decrypt: EVP_DecryptFinal_ex failed!");
 		return NULL;
 	}
 

@@ -82,6 +82,7 @@
 #define OIDC_DEFAULT_ATTRIBUTE_PREFIX "OIDC_ATTR_"
 #define OIDC_DEFAULT_SCOPE "openid"
 #define OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH "client_secret_post"
+#define OIDC_DEFAULT_CACHE_DIR NULL
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -200,6 +201,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->scope = OIDC_DEFAULT_SCOPE;
 	c->validate_client_id = OIDC_DEFAULT_CLIENT_ID;
 	c->validate_client_secret = OIDC_DEFAULT_CLIENT_SECRET;
+	c->cache_dir = OIDC_DEFAULT_CACHE_DIR;
 	return c;
 }
 
@@ -238,6 +240,7 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->scope = (apr_strnatcasecmp(add->scope, OIDC_DEFAULT_SCOPE) != 0 ? add->scope : base->scope);
 	c->validate_client_id = (apr_strnatcasecmp(add->validate_client_id, OIDC_DEFAULT_CLIENT_ID) != 0 ? add->validate_client_id : base->validate_client_id);
 	c->validate_client_secret = (apr_strnatcasecmp(add->validate_client_secret, OIDC_DEFAULT_CLIENT_SECRET) != 0 ? add->validate_client_secret : base->validate_client_secret);
+	c->cache_dir = (add->cache_dir != OIDC_DEFAULT_CACHE_DIR ? add->cache_dir : base->cache_dir);
 	return c;
 }
 
@@ -376,14 +379,9 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 //		return check_vhost_config(pool, s);
 //	}
 
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config, &oidc_module);
-	const char *result = oidc_crypto_aes_init(cfg->crypto_passphrase, &cfg->e_ctx, &cfg->d_ctx);
-	if (result != NULL) {
-		ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, "oidc_post_config: couldn't initialize AES cipher: %s", result);
-		return HTTP_INTERNAL_SERVER_ERROR;
-	}
-
-	oidc_session_init();
+	oidc_crypto_init(pool, s);
+	oidc_cache_init(pool, s);
+	oidc_session_init(pool, s);
 
 	return OK;
 }
