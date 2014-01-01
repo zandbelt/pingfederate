@@ -853,6 +853,8 @@ int oidc_check_userid_oauth20(request_rec *r, oidc_cfg *c) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_oauth20: entering");
 
+	// TODO: recycle if not ap_is_initial_req(r), like we do in the openid-connect part
+
 	const char *auth_line;
 	char *decoded_line;
 	int length;
