@@ -108,7 +108,8 @@ int oidc_authz_match_attribute(const char *const attr_spec, const apr_json_value
 			} else if (val->type == APR_JSON_ARRAY) {
 
 				/* Compare the attribute values */
-				for (int i = 0; i < val->value.array->nelts; i++) {
+				int i = 0;
+				for (i = 0; i < val->value.array->nelts; i++) {
 
 					apr_json_value_t *elem = APR_ARRAY_IDX(val->value.array, i, apr_json_value_t *);
 
