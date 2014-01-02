@@ -153,7 +153,6 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, EVP_CIPHER_CTX *e, unsign
 
 // oidc_session.c
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20081201
-#define OIDC_SESSION_USE_APACHE_SESSIONS 1
 // this stuff should make it easy to migrate to the post 2.3 mod_session infrastructure
 #include "mod_session.h"
 #else
