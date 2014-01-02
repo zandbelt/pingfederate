@@ -149,7 +149,7 @@ static apr_status_t oidc_cache_file_read(request_rec *r, const char *path, apr_f
 
 	/* ensure that we've got the requested number of bytes */
 	if (bytes_read != len) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_file_read: could not read enough bytes from: \"%s\", bytes_read (" APR_SIZE_T_FMT ") != len (" APR_SIZE_T_FMT ")", path, bytes_read, len);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_file_read: could not read enough bytes from: \"%s\", bytes_read (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")", path, bytes_read, len);
 		rc = APR_EGENERAL;
 	}
 
@@ -176,7 +176,7 @@ static apr_status_t oidc_cache_file_write(request_rec *r, const char *path, apr_
 
 	/* check that all bytes from the header were written */
 	if (bytes_written !=  len) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_file_write: could not write enough bytes to: \"%s\", bytes_written (" APR_SIZE_T_FMT ") != len (" APR_SIZE_T_FMT ")", path, bytes_written, len);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_file_write: could not write enough bytes to: \"%s\", bytes_written (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")", path, bytes_written, len);
 		return APR_EGENERAL;
 	}
 
@@ -248,7 +248,7 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 	apr_file_close(fd);
 
 	/* log a succesful cache hit */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_get: cache hit for key \"%s\" (" APR_SIZE_T_FMT " bytes, expiring in: " APR_SIZE_T_FMT ")", key, info.len, apr_time_sec(info.expire - apr_time_now()));
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_get: cache hit for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expiring in: %" APR_SIZE_T_FMT ")", key, info.len, apr_time_sec(info.expire - apr_time_now()));
 
 	return APR_SUCCESS;
 
@@ -286,7 +286,7 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 
 		/* really only clean once per so much time, check that we haven not recently run */
 		if (apr_time_now() < fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS)) {
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in " APR_SIZE_T_FMT " secs)", apr_time_sec(fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS) - apr_time_now()));
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in %" APR_SIZE_T_FMT " secs)", apr_time_sec(fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS) - apr_time_now()));
 			return APR_SUCCESS;
 		}
 
@@ -409,7 +409,7 @@ apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, 
 	apr_file_close(fd);
 
 	/* log our success */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_set: set entry for key \"%s\" (" APR_SIZE_T_FMT " bytes, expires in: " APR_SIZE_T_FMT ")", key, info.len, apr_time_sec(expiry - apr_time_now()));
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_set: set entry for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expires in: %" APR_SIZE_T_FMT ")", key, info.len, apr_time_sec(expiry - apr_time_now()));
 
 	return APR_SUCCESS;
 }

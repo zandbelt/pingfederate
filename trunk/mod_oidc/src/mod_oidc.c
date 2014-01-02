@@ -423,7 +423,7 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 		return FALSE;
 	}
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_parse_id_token: valid id_token for user \"%s\" (expires in %lld seconds)", username->value.string.p, exp->value.lnumber - apr_time_sec(apr_time_now()));
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_parse_id_token: valid id_token for user \"%s\" (expires in %" APR_SIZE_T_FMT " seconds)", username->value.string.p, exp->value.lnumber - apr_time_sec(apr_time_now()));
 
 	*user = apr_pstrdup(r->pool, username->value.string.p);
 
