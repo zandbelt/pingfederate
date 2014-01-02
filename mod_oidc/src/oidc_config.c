@@ -353,9 +353,14 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 #endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
 		apr_pool_cleanup_register(pool, s, oidc_cleanup, apr_pool_cleanup_null);
 
-		oidc_crypto_init(pool, s);
-		oidc_cache_init(pool, s);
-		oidc_session_init(pool, s);
+		// TODO: I believe we initialize the base record still twice now
+		server_rec *sp = s;
+		while (sp != NULL) {
+			oidc_crypto_init(pool, sp);
+			oidc_cache_init(pool, sp);
+			oidc_session_init(pool, sp);
+			sp = sp->next;
+		}
 	}
 
 	apr_pool_userdata_set((const void *)1, userdata_key, apr_pool_cleanup_null, s->process->pool);
@@ -392,9 +397,8 @@ void oidc_register_hooks(apr_pool_t *pool) {
 	static const char *const authzSucc[] = { "mod_authz_user.c", NULL };
 	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-	ap_hook_check_authn(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
-	ap_register_provider(pool, AUTHZ_PROVIDER_GROUP, "attribute", "0", &authz_oidc_provider);
-	//ap_hook_check_authz(oidc_auth_checker, NULL, authzSucc, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
+	ap_hook_check_authn(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_CONF);
+	ap_register_auth_provider(pool, AUTHZ_PROVIDER_GROUP, "attribute", "0", &authz_oidc_provider, AP_AUTH_INTERNAL_PER_CONF);
 #else
 	ap_hook_check_user_id(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE);
 	ap_hook_auth_checker(oidc_auth_checker, NULL, authzSucc, APR_HOOK_MIDDLE);
