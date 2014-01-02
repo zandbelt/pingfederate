@@ -319,8 +319,10 @@ apr_status_t oidc_cleanup(void *data) {
 
 int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_rec *s) {
 	const char *userdata_key = "auth_oidc_init";
-	void *data;
+	void *data = NULL;
 	int i;
+
+	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s, "oidc_post_config: called for (%pp)", s);
 
 	/* Since the post_config hook is invoked twice (once
 	 * for 'sanity checking' of the config and once for
@@ -328,42 +330,42 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 	 * to not run twice
 	 */
 	apr_pool_userdata_get(&data, userdata_key, s->process->pool);
-
-	if (data) {
-		curl_global_init(CURL_GLOBAL_ALL);
+	if (data == NULL) {
+		apr_pool_userdata_set((const void *)1, userdata_key, apr_pool_cleanup_null, s->process->pool);
+		return OK;
+	}
+		
+	curl_global_init(CURL_GLOBAL_ALL);
 
 #if (defined(OPENSSL_THREADS) && APR_HAS_THREADS)
-		ssl_num_locks = CRYPTO_num_locks();
-		ssl_locks = apr_pcalloc(s->process->pool, ssl_num_locks * sizeof(*ssl_locks));
+	ssl_num_locks = CRYPTO_num_locks();
+	ssl_locks = apr_pcalloc(s->process->pool, ssl_num_locks * sizeof(*ssl_locks));
 
-		for(i = 0; i < ssl_num_locks; i++)
-			apr_thread_mutex_create(&(ssl_locks[i]), APR_THREAD_MUTEX_DEFAULT, s->process->pool);
+	for(i = 0; i < ssl_num_locks; i++)
+		apr_thread_mutex_create(&(ssl_locks[i]), APR_THREAD_MUTEX_DEFAULT, s->process->pool);
 
 #ifdef OPENSSL_NO_THREADID
-		if (CRYPTO_get_locking_callback() == NULL && CRYPTO_get_id_callback() == NULL) {
-			CRYPTO_set_locking_callback(oidc_ssl_locking_callback);
-			CRYPTO_set_id_callback(oidc_ssl_id_callback);
-		}
+	if (CRYPTO_get_locking_callback() == NULL && CRYPTO_get_id_callback() == NULL) {
+		CRYPTO_set_locking_callback(oidc_ssl_locking_callback);
+		CRYPTO_set_id_callback(oidc_ssl_id_callback);
+	}
 #else
-		if (CRYPTO_get_locking_callback() == NULL && CRYPTO_THREADID_get_callback() == NULL) {
-			CRYPTO_set_locking_callback(oidc_ssl_locking_callback);
-			CRYPTO_THREADID_set_callback(oidc_ssl_id_callback);
-		}
+	if (CRYPTO_get_locking_callback() == NULL && CRYPTO_THREADID_get_callback() == NULL) {
+		CRYPTO_set_locking_callback(oidc_ssl_locking_callback);
+		CRYPTO_THREADID_set_callback(oidc_ssl_id_callback);
+	}
 #endif /* OPENSSL_NO_THREADID */
 #endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
-		apr_pool_cleanup_register(pool, s, oidc_cleanup, apr_pool_cleanup_null);
+	apr_pool_cleanup_register(pool, s, oidc_cleanup, apr_pool_cleanup_null);
 
-		// TODO: I believe we initialize the base record still twice now
-		server_rec *sp = s;
-		while (sp != NULL) {
-			oidc_crypto_init(pool, sp);
-			oidc_cache_init(pool, sp);
-			oidc_session_init(pool, sp);
-			sp = sp->next;
-		}
+	// TODO: maybe there's a different way to initialize post-config stuff per server rec?
+	server_rec *sp = s;
+	while (sp != NULL) {
+		oidc_crypto_init(pool, sp);
+		oidc_cache_init(pool, sp);
+		oidc_session_init(pool, sp);
+		sp = sp->next;
 	}
-
-	apr_pool_userdata_set((const void *)1, userdata_key, apr_pool_cleanup_null, s->process->pool);
 
 	/*
 	 * Apache has a base vhost that true vhosts derive from.
