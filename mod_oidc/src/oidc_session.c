@@ -384,7 +384,7 @@ apr_status_t oidc_session_init(apr_pool_t *pool, server_rec *s) {
 
 apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 	apr_status_t rc = ap_session_load_fn(r, zz);
-	(*zz)->remote_user = apr_table_get(session->entries, "remote-user");
+	(*zz)->remote_user = apr_table_get((*zz)->entries, "remote-user");
 	return rc;
 }
 
