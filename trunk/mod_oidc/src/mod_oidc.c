@@ -423,7 +423,7 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 		return FALSE;
 	}
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_parse_id_token: valid id_token for user \"%s\" (expires in %ld seconds)", username->value.string.p, exp->value.lnumber - apr_time_sec(apr_time_now()));
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_parse_id_token: valid id_token for user \"%s\" (expires in %lld seconds)", username->value.string.p, exp->value.lnumber - apr_time_sec(apr_time_now()));
 
 	*user = apr_pstrdup(r->pool, username->value.string.p);
 
@@ -674,7 +674,8 @@ static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, apr_json_va
 		} else if (v->type == APR_JSON_ARRAY) {
 			char *csvs = apr_pstrdup(r->pool, "");
 			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_attribute_headers: parsing attribute array %s (#%d)", k, v->value.array->nelts);
-			for (int i = 0; i < v->value.array->nelts; i++) {
+			int i = 0;
+			for (i = 0; i < v->value.array->nelts; i++) {
 				apr_json_value_t *elem = APR_ARRAY_IDX(v->value.array, i, apr_json_value_t *);
 				if (elem->type == APR_JSON_STRING) {
 					// TODO: escape the delimiter in the values (maybe reuse/extract url-formatted code from oidc_session_identity_encode)
