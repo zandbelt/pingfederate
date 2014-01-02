@@ -65,8 +65,8 @@ apr_status_t oidc_crypto_init(apr_pool_t *pool, server_rec *s) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config, &oidc_module);
 
 	if (cfg->crypto_passphrase == NULL) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_crypto_init: OIDCCryptoPassphrase has not been set; can't continue initializing crypto");
-		return HTTP_INTERNAL_SERVER_ERROR;
+		// cq. base vhost with no OIDC settings
+		return APR_SUCCESS;
 	}
 
 	unsigned char *key_data = (unsigned char *)cfg->crypto_passphrase;

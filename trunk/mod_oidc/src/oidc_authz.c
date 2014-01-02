@@ -265,6 +265,8 @@ authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const 
 	int count_oauthattr = 0;
 	const char *t, *w;
 
+	if (r->user == NULL) return AUTHZ_DENIED_NO_USER;
+
 	if (!attrs)
 		return AUTHZ_DENIED;
 
