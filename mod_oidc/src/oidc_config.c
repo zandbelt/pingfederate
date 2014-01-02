@@ -87,6 +87,7 @@ const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg) {
 
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	//ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, cmd->server, "oidc_set_string_slot: set value: %s", arg);
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
@@ -351,6 +352,10 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 #endif /* OPENSSL_NO_THREADID */
 #endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
 		apr_pool_cleanup_register(pool, s, oidc_cleanup, apr_pool_cleanup_null);
+
+		oidc_crypto_init(pool, s);
+		oidc_cache_init(pool, s);
+		oidc_session_init(pool, s);
 	}
 
 	apr_pool_userdata_set((const void *)1, userdata_key, apr_pool_cleanup_null, s->process->pool);
@@ -372,10 +377,6 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 		/* nothing merged, only check the base vhost */
 //		return check_vhost_config(pool, s);
 //	}
-
-	oidc_crypto_init(pool, s);
-	oidc_cache_init(pool, s);
-	oidc_session_init(pool, s);
 
 	return OK;
 }
