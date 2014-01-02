@@ -79,81 +79,45 @@ typedef struct {
 apr_status_t oidc_cache_init(apr_pool_t *pool, server_rec *s) {
 
 	// too bad creating a directory here does not work because of permissions..
-	return APR_SUCCESS;
-
-//	apr_dir_t *dir;
-//	const char *path = NULL;
-//	apr_status_t rc;
-//	char s_err[128];
-//
-//	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
-//
-//	if ((path = cfg->cache_dir) == NULL) {
-//
-//		/* get an OS specific temporary directory */
-//		if (( rc = apr_temp_dir_get(&path, pool)) != APR_SUCCESS) {
-//			ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_dir_path: could not obtain a temporary directory 'apr_temp_dir_get' (%s)",  apr_strerror(rc, s_err, sizeof(s_err)));
-//		}
-//
-//		cfg->cache_dir = apr_pstrdup(pool, path);
-//	}
-//
-//	/* ensure the directory exists */
-//	if ((rc = apr_dir_open(&dir, path, pool)) != APR_SUCCESS) {
-//		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_dir_path: could not access the cache directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
-//	}
-//
-//	/* and cleanup... */
-//	if ((rc = apr_dir_close(dir)) != APR_SUCCESS) {
-//		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_dir_path: could not close the cache directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
-//	}
-//
-//	return rc;
-}
-
-#define OIDC_CACHE_FILE_PREFIX "mod-oidc-"
-
-/*
- * return the fully qualified path name to the cache directory
- */
-static const char *oidc_cache_dir_path(request_rec *r) {
-
-	// TODO: each-and-every attempt to optimize this earlier horribly failed...
-	//       we really need to combine this with oidc_cache_init to set a process variable only once
-	// TODO followup: the problem seems to be happening only when the directory is "/tmp"...
-
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	apr_dir_t *dir;
 	const char *path = NULL;
 	apr_status_t rc;
 	char s_err[128];
 
+	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
+
 	if ((path = cfg->cache_dir) == NULL) {
 
 		/* get an OS specific temporary directory */
-		if (( rc = apr_temp_dir_get(&path, r->pool)) != APR_SUCCESS) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_dir_path: could not obtain a temporary directory 'apr_temp_dir_get' (%s)",  apr_strerror(rc, s_err, sizeof(s_err)));
-			return NULL;
+		if (( rc = apr_temp_dir_get(&path, pool)) != APR_SUCCESS) {
+			ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_init: could not obtain a temporary directory 'apr_temp_dir_get' (%s)",  apr_strerror(rc, s_err, sizeof(s_err)));
 		}
 
+		cfg->cache_dir = apr_pstrdup(pool, path);
 	}
 
 	/* ensure the directory exists */
-	if ((rc = apr_dir_open(&dir, path, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_dir_path: could not access the cache directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
-		return NULL;
+	if ((rc = apr_dir_open(&dir, path, pool)) != APR_SUCCESS) {
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_init: could not access the cache directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
 	}
 
 	/* and cleanup... */
 	if ((rc = apr_dir_close(dir)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_dir_path: could not close the cache directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_init: could not close the cache directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
 	}
 
-	return path;
+	return rc;
 }
 
+/*
+ * prefix that distinguishes mod_oidc cache files from other files in the same directory (/tmp)
+ */
+#define OIDC_CACHE_FILE_PREFIX "mod-oidc-"
 
+/*
+ * return the cache file name for a specified key
+ */
 static const char *oidc_cache_filename(request_rec *r, const char *key) {
 	return apr_psprintf(r->pool, "%s%s", OIDC_CACHE_FILE_PREFIX, key);
 }
@@ -162,7 +126,8 @@ static const char *oidc_cache_filename(request_rec *r, const char *key) {
  * return the fully qualified path name to a cache file for a specified key
  */
 static const char *oidc_cache_file_path(request_rec *r, const char *key) {
-	return apr_psprintf(r->pool, "%s/%s", oidc_cache_dir_path(r), oidc_cache_filename(r, key));
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
+	return apr_psprintf(r->pool, "%s/%s", cfg->cache_dir, oidc_cache_filename(r, key));
 }
 
 /*
@@ -267,7 +232,7 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 	}
 
 	/* allocate space for the actual value based on the data size info in the header (+1 for \0 termination) */
-	*value = apr_palloc(r->pool, info.len + 1);
+	*value = apr_palloc(r->pool, info.len);
 
 	/* (blocking) read the requested data in to the buffer */
 	rc = oidc_cache_file_read(r, path, fd, (void *)*value, info.len);
@@ -277,9 +242,6 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_get: could not read cache value from %s", path);
 		goto error_close;
 	}
-
-	/* \0 terminate the string that we've just read */
-	value[info.len] = '\0';
 
 	/* we're done, unlock and close the file */
 	apr_file_unlock(fd);
@@ -346,7 +308,7 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 	}
 
 	/* time to clean, open the cache directory */
-	if ((rc = apr_dir_open(&dir, oidc_cache_dir_path(r), r->pool)) != APR_SUCCESS) {
+	if ((rc = apr_dir_open(&dir, cfg->cache_dir, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error opening cache directory '%s' for cleaning (%s)", cfg->cache_dir,  apr_strerror(rc, s_err, sizeof(s_err)));
 		return rc;
 	}
@@ -363,13 +325,13 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 			if ( (fi.name[0] == '.') || (strstr(fi.name, OIDC_CACHE_FILE_PREFIX) != fi.name) || ((apr_strnatcmp(fi.name, oidc_cache_filename(r, OIDC_CACHE_FILE_LAST_CLEANED)) == 0)) ) continue;
 
 			/* get the fully qualified path to the cache file and open it */
-			const char *path = apr_psprintf(r->pool, "%s/%s", oidc_cache_dir_path(r), fi.name);
+			const char *path = apr_psprintf(r->pool, "%s/%s", cfg->cache_dir, fi.name);
 			if ((rc = apr_file_open(&fd, path, APR_FOPEN_READ, APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: unable to open cache entry '%s' (%s)", path, apr_strerror(rc, s_err, sizeof(s_err)));
 				continue;
 			}
 
-			/* read the header with cache metadata info and close the file */
+			/* read the header with cache metadata info */
 			rc = oidc_cache_file_read(r, path, fd, &info, sizeof(oidc_cache_info_t));
 			apr_file_close(fd);
 
@@ -432,7 +394,7 @@ apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, 
 	/* construct the metadata for this cache entry in the header info */
 	oidc_cache_info_t info;
 	info.expire = expiry;
-	info.len = strlen(value);
+	info.len = strlen(value) + 1;
 
 	/* write the header */
 	if ((rc = oidc_cache_file_write(r, path, fd, &info, sizeof(oidc_cache_info_t))) != APR_SUCCESS)
