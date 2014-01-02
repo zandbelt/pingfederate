@@ -65,8 +65,6 @@
 #include "mod_oidc.h"
 
 #define OIDC_DEFAULT_SSL_VALIDATE_SERVER 1
-#define OIDC_DEFAULT_CLIENT_ID NULL
-#define OIDC_DEFAULT_CLIENT_SECRET NULL
 #define OIDC_DEFAULT_REDIRECT_URI NULL
 #define OIDC_DEFAULT_AUTHORIZATION_ENDPOINT NULL
 #define OIDC_DEFAULT_TOKEN_ENDPOINT NULL
@@ -75,14 +73,10 @@
 #define OIDC_DEFAULT_AUTHN_HEADER NULL
 #define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS NULL
 #define OIDC_DEFAULT_DIR_SCOPE NULL
-#define OIDC_DEFAULT_COOKIE_DOMAIN NULL
-#define OIDC_DEFAULT_CRYPTO_PASSPHRASE NULL
-#define OIDC_DEFAULT_ISSUER NULL
 #define OIDC_DEFAULT_ATTRIBUTE_DELIMITER ","
 #define OIDC_DEFAULT_ATTRIBUTE_PREFIX "OIDC_ATTR_"
 #define OIDC_DEFAULT_SCOPE "openid"
 #define OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH "client_secret_post"
-#define OIDC_DEFAULT_CACHE_DIR NULL
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -186,11 +180,11 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
 	c->merged = FALSE;
 	c->ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
-	c->client_id = OIDC_DEFAULT_CLIENT_ID;
-	c->client_secret = OIDC_DEFAULT_CLIENT_SECRET;
-	c->cookie_domain = OIDC_DEFAULT_COOKIE_DOMAIN;
-	c->crypto_passphrase = OIDC_DEFAULT_CRYPTO_PASSPHRASE;
-	c->issuer = OIDC_DEFAULT_ISSUER;
+	c->client_id = NULL;
+	c->client_secret = NULL;
+	c->cookie_domain = NULL;
+	c->crypto_passphrase = NULL;
+	c->issuer = NULL;
 	oidc_set_url(pool, &c->authorization_endpoint_url, OIDC_DEFAULT_AUTHORIZATION_ENDPOINT);
 	oidc_set_url(pool, &c->token_endpoint_url, OIDC_DEFAULT_TOKEN_ENDPOINT);
 	c->token_endpoint_auth = OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH;
@@ -199,9 +193,9 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->attribute_delimiter = OIDC_DEFAULT_ATTRIBUTE_DELIMITER;
 	c->attribute_prefix = OIDC_DEFAULT_ATTRIBUTE_PREFIX;
 	c->scope = OIDC_DEFAULT_SCOPE;
-	c->validate_client_id = OIDC_DEFAULT_CLIENT_ID;
-	c->validate_client_secret = OIDC_DEFAULT_CLIENT_SECRET;
-	c->cache_dir = OIDC_DEFAULT_CACHE_DIR;
+	c->validate_client_id = NULL;
+	c->validate_client_secret = NULL;
+	c->cache_dir = NULL;
 	return c;
 }
 
@@ -213,10 +207,10 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	memset(&test, '\0', sizeof(apr_uri_t));
 	c->merged = TRUE;
 	c->ssl_validate_server = (add->ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->ssl_validate_server : base->ssl_validate_server);
-	c->client_id = (apr_strnatcasecmp(add->client_id, OIDC_DEFAULT_CLIENT_ID) != 0 ? add->client_id : base->client_id);
-	c->client_secret = (apr_strnatcasecmp(add->client_secret, OIDC_DEFAULT_CLIENT_SECRET) != 0 ? add->client_secret : base->client_secret);
-	c->crypto_passphrase = (apr_strnatcasecmp(add->crypto_passphrase, OIDC_DEFAULT_CRYPTO_PASSPHRASE) != 0 ? add->crypto_passphrase : base->crypto_passphrase);
-	c->issuer = (apr_strnatcasecmp(add->issuer, OIDC_DEFAULT_ISSUER) != 0 ? add->issuer : base->issuer);
+	c->client_id = (add->client_id != NULL) ? add->client_id : base->client_id;
+	c->client_secret = add->client_secret != NULL ? add->client_secret : base->client_secret;
+	c->crypto_passphrase = add->crypto_passphrase != NULL ? add->crypto_passphrase : base->crypto_passphrase;
+	c->issuer = add->issuer != NULL ? add->issuer : base->issuer;
 	if (memcmp(&add->authorization_endpoint_url, &test, sizeof(apr_uri_t)) == 0)
 		memcpy(&c->authorization_endpoint_url, &base->authorization_endpoint_url, sizeof(apr_uri_t));
 	else
@@ -234,13 +228,13 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 		memcpy(&c->redirect_uri, &base->redirect_uri, sizeof(apr_uri_t));
 	else
 		memcpy(&c->redirect_uri, &add->redirect_uri, sizeof(apr_uri_t));
-	c->cookie_domain = (add->cookie_domain != OIDC_DEFAULT_COOKIE_DOMAIN ? add->cookie_domain : base->cookie_domain);
+	c->cookie_domain = add->cookie_domain != NULL ? add->cookie_domain : base->cookie_domain;
 	c->attribute_delimiter = (apr_strnatcasecmp(add->attribute_delimiter, OIDC_DEFAULT_ATTRIBUTE_DELIMITER) != 0 ? add->attribute_delimiter : base->attribute_delimiter);
 	c->attribute_prefix = (apr_strnatcasecmp(add->attribute_prefix, OIDC_DEFAULT_ATTRIBUTE_PREFIX) != 0 ? add->attribute_prefix : base->attribute_prefix);
 	c->scope = (apr_strnatcasecmp(add->scope, OIDC_DEFAULT_SCOPE) != 0 ? add->scope : base->scope);
-	c->validate_client_id = (apr_strnatcasecmp(add->validate_client_id, OIDC_DEFAULT_CLIENT_ID) != 0 ? add->validate_client_id : base->validate_client_id);
-	c->validate_client_secret = (apr_strnatcasecmp(add->validate_client_secret, OIDC_DEFAULT_CLIENT_SECRET) != 0 ? add->validate_client_secret : base->validate_client_secret);
-	c->cache_dir = (add->cache_dir != OIDC_DEFAULT_CACHE_DIR ? add->cache_dir : base->cache_dir);
+	c->validate_client_id = add->validate_client_id != NULL ? add->validate_client_id : base->validate_client_id;
+	c->validate_client_secret = add->validate_client_secret != NULL ? add->validate_client_secret : base->validate_client_secret;
+	c->cache_dir = add->cache_dir != NULL ? add->cache_dir : base->cache_dir;
 	return c;
 }
 
