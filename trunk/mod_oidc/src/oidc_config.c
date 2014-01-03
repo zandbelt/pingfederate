@@ -298,8 +298,6 @@ static void oidc_ssl_id_callback(CRYPTO_THREADID *id)
 #endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
 
 apr_status_t oidc_cleanup(void *data) {
-	server_rec *s = (server_rec *) data;
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s, "oidc_cleanup: entering");
 #if (defined (OPENSSL_THREADS) && APR_HAS_THREADS)
 	if (CRYPTO_get_locking_callback() == oidc_ssl_locking_callback)
 		CRYPTO_set_locking_callback(NULL);
@@ -313,7 +311,6 @@ apr_status_t oidc_cleanup(void *data) {
 
 #endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
 	curl_global_cleanup();
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s, "oidc_cleanup: returning");
 	return APR_SUCCESS;
 }
 
