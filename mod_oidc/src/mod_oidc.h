@@ -62,8 +62,9 @@
 
 #include "apr_json.h"
 
-#define OIDC_DEBUG APLOG_INFO
-//#define APLOG_OIDC_DEBUG APLOG_DEBUG
+#ifndef OIDC_DEBUG
+#define OIDC_DEBUG APLOG_DEBUG
+#endif
 
 typedef struct oidc_cfg {
 	unsigned int merged;
@@ -84,6 +85,8 @@ typedef struct oidc_cfg {
 	char *validate_client_id;
 	char *validate_client_secret;
 	char *cache_dir;
+	char *provider_metadata_dir;
+	char *client_metadata_dir;
 	EVP_CIPHER_CTX e_ctx;
 	EVP_CIPHER_CTX d_ctx;
 } oidc_cfg;
@@ -94,6 +97,18 @@ typedef struct oidc_dir_cfg {
 	char *authn_header;
 	char *scrub_request_headers;
 } oidc_dir_cfg;
+
+typedef struct oidc_op_meta_t {
+	int ssl_validate_server;
+	char *issuer;
+	char *authorization_endpoint_url;
+	char *token_endpoint_url;
+	char *token_endpoint_auth;
+	char *userinfo_endpoint_url;
+	char *client_id;
+	char *client_secret;
+	char *scope;
+} oidc_op_meta_t;
 
 int oidc_check_user_id(request_rec *r);
 
@@ -137,7 +152,7 @@ char *oidc_get_dir_scope(request_rec *r);
 int oidc_strnenvcmp(const char *a, const char *b, int len);
 int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding);
 char *oidc_escape_string(const request_rec *r, const char *str);
-char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *postfields, const char *basic_auth, const char *bearer_token);
+char *oidc_http_call(request_rec *r, const char *url, const char *postfields, const char *basic_auth, const char *bearer_token, int ssl_validate_server);
 void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue);
 char *oidc_get_cookie(request_rec *r, char *cookieName);
 int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src);
@@ -150,6 +165,11 @@ char *oidc_normalize_header_name(const request_rec *r, const char *str);
 apr_status_t oidc_crypto_init(apr_pool_t *pool, server_rec *s);
 unsigned char *oidc_crypto_aes_encrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len);
 unsigned char *oidc_crypto_aes_decrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len);
+
+// oidc_metadata.c
+apr_status_t oidc_metadata_init(apr_pool_t *pool, server_rec *s);
+apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **arr);
+apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *selected, oidc_op_meta_t **md);
 
 // oidc_session.c
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20081201

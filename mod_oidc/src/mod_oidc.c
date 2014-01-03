@@ -48,6 +48,8 @@
  *
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  *
+ * TODO: should we use one directory for both provider and client data?
+ *
  * mod_oidc is an Apache authentication/authorization module that allows an Apache server
  * to operate as an OpenID Connect Relying Party, i.e. requires users to authenticate to the
  * Apache hosted content through an external OpenID Connect Identity Provider using the OpenID
@@ -102,6 +104,44 @@
  *
  *
  *
+ * Another example using multiple OpenID Connect providers, which triggers OP discovery first:
+ *
+ * OIDCProviderMetadataDir points to a directory that contains a number of files that each
+ * contain (standard) OpenID Connect Discovery OP JSON metadata where each name of the file is
+ * the urlencoded issuer name of the OP that is decribed by the metadata in that file.
+ *
+ * OIDCClientMetadataDir points to a directory that contains a number of files that each
+ * contain mod_oidc specific JSON metadata (vaguely based on the OpenID Connect Client Registration
+ * specification) and the filename is the urlencoded issuer name of the OP that this client is registered with.
+ *
+ * Sample client metdata for issuer https://localhost:9031, so client metadata filename is:
+ * "https%3a%2f%2fmacbook%3a9031"
+ * ==========================================================
+ * {
+ *   "ssl_validate_server" : "Off",
+ *   "client_id" : "ac_oic_client",
+ *   "client_secret" : "abc123DEFghijklmnop4567rstuvwxyzZYXWUT8910SRQPOnmlijhoauthplaygroundapplication",
+ *   "scope" : "openid email profile",
+ * }
+ * ==========================================================
+ *
+ * ==========================================================
+ * LoadModule oidc_module modules/mod_oidc.so
+ *
+ * OIDCProviderMetadataDir <somewhere>/metadata/provider
+ * OIDCClientMetadataDir <somewhere>/metadata/client
+ *
+ * OIDCRedirectURI https://localhost/example/
+ * OIDCCryptoPassphrase <somestring>
+ *
+ * <Location /example/>
+ *    Authtype openid-connect
+ *    require valid-user
+ * </Location>
+ * ==========================================================
+ *
+ *
+ *
  * Another example config for using PingFederate as your OpenID OP and/or OAuth 2.0 Authorization
  * server, based on the OAuth 2.0 PlayGround 3.x default configuration:
  * (running on localhost and https://localhost/example/ registerd as redirect_uri for the client "ac_oic_client")
@@ -135,6 +175,7 @@
  *    #require valid-user
  *    require attribute Username:joe
  * </Location>
+ * ==========================================================
  *
  **************************************************************************/
 
@@ -295,15 +336,66 @@ apr_byte_t oidc_get_code_and_state(request_rec *r, char **code, char **state) {
 		}
 		return FALSE;
 	}
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_code_and_state: returning, code=%s and state=%s", *code, *state);
+
+	return TRUE;
+}
+
+#define OIDC_OP_PARAM_NAME "oidc_provider"
+#define OIDC_RT_PARAM_NAME "oidc_return"
+
+// TODO: factor this out against oidc_get_code_and_state...
+static apr_byte_t oidc_get_provider_selection(request_rec *r, char **selection, char **original_url) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_provider_selection: entering");
+
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+
+	*selection = NULL;
+
+	char *tokenizer_ctx, *p, *args, *rv = NULL;
+	const char *k_idp_param = apr_psprintf(r->pool, "%s=", OIDC_OP_PARAM_NAME);
+	const size_t k_idp_param_sz = strlen(k_idp_param);
+	const char *k_return_param = apr_psprintf(r->pool, "%s=", OIDC_RT_PARAM_NAME);
+	const size_t k_return_param_sz = strlen(k_return_param);
+
+	if (r->args == NULL || strlen(r->args) == 0) return FALSE;
+
+	args = apr_pstrndup(r->pool, r->args, strlen(r->args));
+
+	p = apr_strtok(args, "&", &tokenizer_ctx);
+	do {
+		if (p && strncmp(p, k_idp_param, k_idp_param_sz) == 0) {
+			*selection = apr_pstrdup(r->pool, p + k_idp_param_sz);
+			ap_unescape_url(*selection);
+		}
+		if (p && strncmp(p, k_return_param, k_return_param_sz) == 0) {
+			*original_url = apr_pstrdup(r->pool, p + k_return_param_sz);
+			ap_unescape_url(*original_url);
+		}
+		p = apr_strtok(NULL, "&", &tokenizer_ctx);
+	} while (p);
+
+	if ( (*selection == NULL) || (*original_url == NULL) ) {
+		if (*selection != NULL) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_provider_selection: \"%s\" parameter found at redirect_uri, but no \"%s\" parameter...", OIDC_OP_PARAM_NAME, OIDC_RT_PARAM_NAME);
+		}
+		if (*original_url != NULL) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_provider_selection: \"%s\" parameter found at redirect_uri, but no \"%s\" parameter...", OIDC_RT_PARAM_NAME, OIDC_OP_PARAM_NAME);
+		}
+		return FALSE;
+	}
+
 	return TRUE;
 }
 
 // TODO: split out checks into separate functions, maybe id_token handling in its own file
-int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_json_value_t **attrs, apr_time_t *expires) {
+static int oidc_parse_id_token(request_rec *r, oidc_op_meta_t *md, const char *id_token, char **user, apr_json_value_t **attrs, apr_time_t *expires) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_parse_id_token: entering");
 
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	const char *s = id_token;
 	char *p = strchr(s, '.');
@@ -355,8 +447,8 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON object did not contain an \"iss\" string");
 		return FALSE;
 	}
-	if (strcmp(c->issuer, iss->value.string.p) != 0) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Configured OIDCIssuer (%s) does not match received \"iss\" value in id_token (%s)", c->issuer, iss->value.string.p);
+	if (strcmp(md->issuer, iss->value.string.p) != 0) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Configured issuer (%s) does not match received \"iss\" value in id_token (%s)", md->issuer, iss->value.string.p);
 		return FALSE;
 	}
 
@@ -374,16 +466,17 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 	apr_json_value_t *aud = apr_hash_get(payload->value.object, "aud", APR_HASH_KEY_STRING);
 	if ( aud != NULL) {
 		if (aud->type == APR_JSON_STRING) {
-			if (strcmp(aud->value.string.p, c->client_id) != 0) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "our client_id (%s) did not match the JSON \"aud\" entry (%s)", c->client_id, aud->value.string.p);
+			if (strcmp(aud->value.string.p, md->client_id) != 0) {
+				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "configured client_id (%s) did not match the JSON \"aud\" entry (%s)", md->client_id, aud->value.string.p);
 				return FALSE;
 			}
 		} else if (aud->type == APR_JSON_ARRAY) {
 
 			apr_json_value_t *azp = apr_hash_get(payload->value.object, "azp", APR_HASH_KEY_STRING);
 			if (azp == NULL) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "\"aud\" is an array, but \"azp\" claim is not present; that is a spec violation...");
-				return FALSE;
+				ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "\"aud\" is an array, but \"azp\" claim is not present; that is a spec violation...");
+				//TODO: mitre.org does not yet do this..
+				//return FALSE;
 			}
 			int i;
 			for (i = 0; i < aud->value.array->nelts; i++) {
@@ -392,12 +485,12 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Unhandled in-array JSON object type [%d]", elem->type);
 					continue;
 				}
-				if (strcmp(elem->value.string.p, c->client_id) == 0) {
+				if (strcmp(elem->value.string.p, md->client_id) == 0) {
 					break;
 				}
 			}
 			if (i == aud->value.array->nelts) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "our client_id (%s) could not be found in the JSON \"aud\" array object", c->client_id);
+				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "configured client_id (%s) could not be found in the JSON \"aud\" array object", md->client_id);
 				return FALSE;
 			}
 		} else {
@@ -411,8 +504,8 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 
 	apr_json_value_t *azp = apr_hash_get(payload->value.object, "azp", APR_HASH_KEY_STRING);
 	if ( (azp != NULL) && (azp->type != APR_JSON_STRING) ) {
-		if (strcmp(azp->value.string.p, c->client_id) != 0) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "\"azp\" claim (%s) is not equal to our client_id (%s)", azp->value.string.p, c->client_id);
+		if (strcmp(azp->value.string.p, md->client_id) != 0) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "\"azp\" claim (%s) is not equal to configured client_id (%s)", azp->value.string.p, md->client_id);
 			return FALSE;
 		}
 	}
@@ -427,7 +520,7 @@ int oidc_parse_id_token(request_rec *r, const char *id_token, char **user, apr_j
 
 	*user = apr_pstrdup(r->pool, username->value.string.p);
 
-	return 0;
+	return TRUE;
 }
 
 apr_byte_t oidc_json_string_print(request_rec *r, apr_json_value_t *result, const char *key, const char *log) {
@@ -451,19 +544,19 @@ apr_byte_t oidc_json_error_check(request_rec *r, apr_json_value_t *result, const
 	return TRUE;
 }
 
-apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char *code, char **user, apr_json_value_t **attrs, char **s_id_token, char **s_access_token, apr_time_t *expires) {
+apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_dir_cfg *d, oidc_op_meta_t *md, char *code, char **user, apr_json_value_t **attrs, char **s_id_token, char **s_access_token, apr_time_t *expires) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_code: entering");
 
 	char *postfields = apr_psprintf(r->pool,
 			"grant_type=authorization_code&code=%s&redirect_uri=%s",
 			oidc_escape_string(r, code),
-			oidc_escape_string(r, apr_uri_unparse(r->pool, &c->redirect_uri, 0))
+			oidc_escape_string(r, apr_uri_unparse(r->pool, &cfg->redirect_uri, 0))
 	);
-	if ((apr_strnatcmp(c->token_endpoint_auth, "client_secret_post")) == 0) {
-		postfields = apr_psprintf(r->pool, "%s&client_id=%s&client_secret=%s", postfields, oidc_escape_string(r, c->client_id), oidc_escape_string(r, c->client_secret));
+	if ((apr_strnatcmp(md->token_endpoint_auth, "client_secret_post")) == 0) {
+		postfields = apr_psprintf(r->pool, "%s&client_id=%s&client_secret=%s", postfields, oidc_escape_string(r, md->client_id), oidc_escape_string(r, md->client_secret));
 	}
-	const char *response = oidc_http_call(r, c, apr_uri_unparse(r->pool, &c->token_endpoint_url, 0), postfields, (apr_strnatcmp(c->token_endpoint_auth, "client_secret_basic") == 0) ? apr_psprintf(r->pool, "%s:%s", c->client_id, c->client_secret) : NULL, NULL);
+	const char *response = oidc_http_call(r, md->token_endpoint_url, postfields, (apr_strnatcmp(md->token_endpoint_auth, "client_secret_basic") == 0) ? apr_psprintf(r->pool, "%s:%s", md->client_id, md->client_secret) : NULL, NULL, md->ssl_validate_server);
 	if (response == NULL)
 		return FALSE;
 
@@ -500,7 +593,7 @@ apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char 
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_resolve_code: response JSON object did not contain a token_type string");
 		return FALSE;
 	}
-	if ((apr_strnatcmp(token_type->value.string.p, "Bearer") != 0) && (oidc_get_endpoint(r, &c->userinfo_endpoint_url, NULL) != NULL)) {
+	if ((apr_strnatcmp(token_type->value.string.p, "Bearer") != 0) && (md->userinfo_endpoint_url != NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_resolve_code: token_type is \"%s\" and UserInfo endpoint is set: can only deal with Bearer authentication against the UserInfo endpoint!", token_type->value.string.p);
 		//return FALSE;
 	}
@@ -514,17 +607,12 @@ apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_code: returned id_token: %s", id_token->value.string.p);
 	*s_id_token = apr_pstrdup(r->pool, id_token->value.string.p);
 
-	oidc_parse_id_token(r, id_token->value.string.p, user, attrs, expires);
-
-	return (status == APR_SUCCESS) ? TRUE : FALSE;
+	return oidc_parse_id_token(r, md, id_token->value.string.p, user, attrs, expires);
 }
 
-apr_byte_t oidc_resolve_userinfo(request_rec *r, oidc_cfg *c, oidc_dir_cfg *d, char **attributes, char *access_token) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_userinfo: entering");
-
-	char *url = oidc_get_endpoint(r, &c->userinfo_endpoint_url, NULL);
-	*attributes = (url != NULL) ? oidc_http_call(r, c, url, NULL, 0, access_token) : apr_pstrdup(r->pool, "");
+static apr_byte_t oidc_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_dir_cfg *d, oidc_op_meta_t *md, char **attributes, char *access_token) {
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_userinfo: entering, endpoint=%s", md->userinfo_endpoint_url);
+	*attributes = (md->userinfo_endpoint_url != NULL) ? oidc_http_call(r,  md->userinfo_endpoint_url, NULL, 0, access_token, md->ssl_validate_server) : apr_pstrdup(r->pool, "");
 	return TRUE;
 }
 
@@ -581,15 +669,14 @@ char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
 	return result;
 }
 
-char *oidc_check_state_and_get_url(request_rec *r, char *state) {
+static apr_status_t oidc_check_state(request_rec *r, char *state, char **original_url, char **issuer) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state_and_get_url: entering");
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: entering");
 
-	char *result = NULL;
 	char *cookieValue = oidc_get_cookie(r, OIDCStateCookieName);
 	if (cookieValue == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: no \"%s\" cookie found", OIDCStateCookieName);
-		return NULL;
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: no \"%s\" cookie found", OIDCStateCookieName);
+		return FALSE;
 	}
 
 	// clear oidc-state cookie
@@ -600,55 +687,58 @@ char *oidc_check_state_and_get_url(request_rec *r, char *state) {
 	char *ctx = NULL;
 	char *b64 = apr_strtok(svalue, OIDCStateCookieSep, &ctx);
 	if (b64 == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: no first element found in \"%s\" cookie (%s)", OIDCStateCookieName, cookieValue);
-		return NULL;
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: no first element found in \"%s\" cookie (%s)", OIDCStateCookieName, cookieValue);
+		return FALSE;
 	}
 
 	char *calc = oidc_get_browser_state_hash(r, b64);
 	if (apr_strnatcmp(calc, state) != 0) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: calculated state from cookie does not match state parameter passed back in URL: \"%s\" != \"%s\"", state, calc);
-		return NULL;
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: calculated state from cookie does not match state parameter passed back in URL: \"%s\" != \"%s\"", state, calc);
+		return FALSE;
 	}
 
-	result = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
-	if (result == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state_and_get_url: no separator (%s) found in \"%s\" cookie (%s)", OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
-		return NULL;
+	*original_url = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
+	if (*original_url == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: no separator (%s) found in \"%s\" cookie (%s)", OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
+		return FALSE;
 	}
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state_and_get_url: original URL restored from cookie: %s", result);
-	return result;
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: \"original_url\" restored from cookie: %s", *original_url);
+
+	*issuer = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
+	if (*issuer == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: no second separator (%s) found in \"%s\" cookie (%s)", OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
+		return FALSE;
+	}
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: \"issuer\" restored from cookie: %s", *issuer);
+
+	return APR_SUCCESS;
 }
 
-char *oidc_create_state_and_set_cookie(request_rec *r, oidc_cfg *c) {
+static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url, const char *issuer) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_create_state_and_set_cookie: entering");
 
 	char *cookieValue = NULL;
-	char *url = oidc_get_current_url(r, c);
 
 	unsigned char *brnd = apr_pcalloc(r->pool, OIDCRandomLen);
 	apr_generate_random_bytes((unsigned char *) brnd, OIDCRandomLen);
 	char *b64 = apr_palloc(r->pool, apr_base64_encode_len(OIDCRandomLen) + 1);
 	apr_base64_encode(b64, (const char *)brnd, OIDCRandomLen);
 
-	char *rvalue = apr_psprintf(r->pool, "%s%s%s", b64, OIDCStateCookieSep, url);
+	char *rvalue = apr_psprintf(r->pool, "%s%s%s%s%s", b64, OIDCStateCookieSep, url, OIDCStateCookieSep, issuer);
 	oidc_encrypt_base64url_encode_string(r, &cookieValue, rvalue);
 	oidc_set_cookie(r, OIDCStateCookieName, cookieValue);
 
 	return oidc_get_browser_state_hash(r, b64);
 }
 
-void oidc_redirect(request_rec *r, oidc_cfg *c) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_redirect: entering");
-
+static void oidc_authorization_request(request_rec *r, oidc_cfg *cfg, struct oidc_op_meta_t *md, const char *original_url) {
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authorization_request: entering (selected=%s, original_url=%s)", md->issuer, original_url);
 	char *destination = NULL, *state = NULL;
-	char *endpoint = oidc_get_endpoint(r, &c->authorization_endpoint_url, "OIDCAuthorizationEndpoint");
-	if (endpoint == NULL) return;
-	state = oidc_create_state_and_set_cookie(r, c);
-	destination = apr_psprintf(r->pool, "%s%sresponse_type=%s&scope=%s&client_id=%s&state=%s&redirect_uri=%s", endpoint, (strchr(endpoint, '?') != NULL ? "&" : "?"), "code", oidc_escape_string(r, c->scope), oidc_escape_string(r, c->client_id), oidc_escape_string(r, state), oidc_escape_string(r, apr_uri_unparse(r->pool, &c->redirect_uri, 0)));
+	state = oidc_create_state_and_set_cookie(r, original_url, md->issuer);
+	destination = apr_psprintf(r->pool, "%s%sresponse_type=%s&scope=%s&client_id=%s&state=%s&redirect_uri=%s", md->authorization_endpoint_url, (strchr(md->authorization_endpoint_url, '?') != NULL ? "&" : "?"), "code", oidc_escape_string(r, md->scope), oidc_escape_string(r, md->client_id), oidc_escape_string(r, state), oidc_escape_string(r, apr_uri_unparse(r->pool, &cfg->redirect_uri, 0)));
 	apr_table_add(r->headers_out, "Location", destination);
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_redirect: adding outgoing header: Location: %s", destination);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authorization_request: adding outgoing header: Location: %s", destination);
 
 }
 
@@ -720,11 +810,60 @@ const char*oidc_request_state_get(request_rec *r, const char *key) {
 	return value;
 }
 
+static int oidc_http_sendstring(request_rec *r, const char *c_s, int success_rvalue) {
+	ap_set_content_type(r, "text/html");
+	conn_rec *c = r->connection;
+	apr_bucket *b;
+	apr_bucket_brigade *bb = apr_brigade_create(r->pool, c->bucket_alloc);
+	b = apr_bucket_transient_create(c_s, strlen(c_s), c->bucket_alloc);
+	APR_BRIGADE_INSERT_TAIL(bb, b);
+	b = apr_bucket_eos_create(c->bucket_alloc);
+	APR_BRIGADE_INSERT_TAIL(bb, b);
+	if (ap_pass_brigade(r->output_filters, bb) != APR_SUCCESS)
+		return HTTP_INTERNAL_SERVER_ERROR;
+	return success_rvalue;
+}
+
+static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
+	int rc = HTTP_UNAUTHORIZED;
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: entering");
+
+	apr_array_header_t *arr = NULL;
+
+	if (oidc_metadata_list(r, cfg, &arr) == APR_SUCCESS) {
+		const char *s = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
+				"<html>\n"
+				"	<head>\n"
+				"		<meta http-equiv=\"Content-Type\" content=\"text/html;charset=UTF-8\"/>\n"
+				"		<title>OpenID Connect OP Discovery</title>\n"
+				"	</head>\n"
+				"	<body>\n"
+				"		<h3>Select your Identity Provider:</h3>\n"
+				"		<ul>\n";
+
+		int i;
+		for (i = 0; i < arr->nelts; i++) {
+			const char *issuer = ((const char**)arr->elts)[i];
+			// TODO: html escape (especially & character)
+			s = apr_psprintf(r->pool, "%s<li><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></li>\n", s, apr_uri_unparse(r->pool, &cfg->redirect_uri, 0), OIDC_OP_PARAM_NAME, oidc_escape_string(r, issuer), OIDC_RT_PARAM_NAME, oidc_escape_string(r, oidc_get_current_url(r, cfg)), issuer);
+		}
+		s = apr_psprintf(r->pool, "%s"
+				"		</ul>\n"
+				"	</body>\n"
+				"</html>\n", s);
+
+		rc = oidc_http_sendstring(r, s, HTTP_UNAUTHORIZED);
+	}
+
+	return rc;
+}
+
 int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: entering");
 
-	char *code = NULL, *state = NULL;
+	char *code = NULL, *state = NULL, *issuer = NULL, *original_url = NULL;
 
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
@@ -733,56 +872,21 @@ int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: incoming request: \"%s\", session->remote_user=%s, ap_is_initial_req(r)=%d", r->parsed_uri.path, session->remote_user, ap_is_initial_req(r));
 
+	// TODO: cleanup...
+	struct oidc_op_meta_t md_static;
+	md_static.authorization_endpoint_url = oidc_get_endpoint(r, &c->authorization_endpoint_url, "OIDCAuthorizationEndpoint");
+	md_static.client_id = c->client_id;
+	md_static.client_secret = c->client_secret;
+	md_static.issuer = c->issuer;
+	md_static.scope = c->scope;
+	md_static.ssl_validate_server = c->ssl_validate_server;
+	md_static.token_endpoint_auth = c->token_endpoint_auth;
+	md_static.token_endpoint_url = oidc_get_endpoint(r, &c->token_endpoint_url, "OIDCTokenEndpointAuth");
+	md_static.userinfo_endpoint_url = oidc_get_endpoint(r, &c->userinfo_endpoint_url, "OIDCUserInfoEndpoint");
+
 	if (ap_is_initial_req(r)) {
 
-		// check that the request path matches the configured redirect URI, otherwise a regular
-		// protected URL can't have a code= parameter without it being interpreted as an OIDC callback
-		if ( (oidc_request_matches_redirect_uri(r, c) == TRUE) && (oidc_get_code_and_state(r, &code, &state) == TRUE) ) {
-
-			// initial request to redirect_uri with code & state parameters
-
-			char *original_url = oidc_check_state_and_get_url(r, state);
-
-			if (original_url == NULL) return HTTP_UNAUTHORIZED;
-
-			char *id_token = NULL, *access_token = NULL, *response = NULL;
-			char *remoteUser = NULL;
-			apr_time_t expires;
-			apr_json_value_t *attrs = NULL;
-
-			if (oidc_resolve_code(r, c, d, code, &remoteUser, &attrs, &id_token, &access_token, &expires)) {
-
-				oidc_resolve_userinfo(r, c, d, &response, access_token);
-
-				if (response != NULL) {
-					// now id_token attributes are overwritten in attrs...
-					apr_status_t status = apr_json_decode(&attrs, response, strlen(response), r->pool);
-					if (status != APR_SUCCESS) {
-						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: could not decode JSON from UserInfo endpoint response successfully");
-						return HTTP_UNAUTHORIZED;
-					}
-					if ( (attrs == NULL) || (attrs->type != APR_JSON_OBJECT) ) {
-						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: UserInfo endpoint response did not contain a JSON object");
-						return HTTP_UNAUTHORIZED;
-					}
-				}
-
-				session->remote_user = remoteUser;
-				session->expiry = expires;
-				oidc_session_set(r, session, "id_token", id_token);
-				oidc_session_set(r, session, "attributes", response);
-				oidc_session_save(r, session);
-
-				r->user = remoteUser;
-				apr_table_add(r->headers_out, "Location", original_url);
-
-				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: session created and stored, redirecting to original url: %s", original_url);
-
-				return HTTP_MOVED_TEMPORARILY;
-
-			} // else: resolving the "code" failed; an error will have been reported and we'll return HTTP_UNAUTHORIZED by default flow
-
-		} else if (session->remote_user != NULL)  {
+		if (session->remote_user != NULL)  {
 
 			// initial request to application url and we have a session
 			if (d->scrub_request_headers) oidc_scrub_request_headers(r, c, d);
@@ -807,31 +911,115 @@ int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 
 			return OK;
 
-		} else {
+		// see if the request path matches the configured redirect URI, so it can require special handling
+		} else if (oidc_request_matches_redirect_uri(r, c) == TRUE) {
 
-			// initial request to application URL but we have no session
-			oidc_redirect(r, c);
+			// check for code/state, otherwise a protected URL can't have a code= parameter without it being interpreted as an OIDC callback
+			if (oidc_get_code_and_state(r, &code, &state) == TRUE) {
+				// initial request to redirect_uri with code & state parameters
 
-			return HTTP_MOVED_TEMPORARILY;
+				if (oidc_check_state(r, state, &original_url, &issuer) != APR_SUCCESS) {
+					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: unable to restore state: returning HTTP 500");
+					return HTTP_INTERNAL_SERVER_ERROR;
+				}
 
-		}
+				// TODO: unify with authorization request, discovery near the end, and static/config stuff
+				struct oidc_op_meta_t *md = NULL;
+				if (c->provider_metadata_dir != NULL) {
+					// try and get metadata from the metadata directories for the selected OP
+					if ( (oidc_metadata_get(r, c, issuer, &md) != APR_SUCCESS) || (md == NULL) ) {
+						// no luck
+						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: no provider metadata found for selected OP: returning HTTP 500");
+						return HTTP_INTERNAL_SERVER_ERROR;
+					}
+				} else {
+					md = &md_static;
+				}
 
+				char *id_token = NULL, *access_token = NULL, *response = NULL;
+				char *remoteUser = NULL;
+				apr_time_t expires;
+				apr_json_value_t *attrs = NULL;
+
+				if (oidc_resolve_code(r, c, d, md, code, &remoteUser, &attrs, &id_token, &access_token, &expires)) {
+
+					oidc_resolve_userinfo(r, c, d, md, &response, access_token);
+
+					if (response != NULL) {
+						// now id_token attributes are overwritten in attrs...
+						apr_status_t status = apr_json_decode(&attrs, response, strlen(response), r->pool);
+						if (status != APR_SUCCESS) {
+							ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: could not decode JSON from UserInfo endpoint response successfully");
+							return HTTP_UNAUTHORIZED;
+						}
+						if ( (attrs == NULL) || (attrs->type != APR_JSON_OBJECT) ) {
+							ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: UserInfo endpoint response did not contain a JSON object");
+							return HTTP_UNAUTHORIZED;
+						}
+					}
+
+					session->remote_user = remoteUser;
+					session->expiry = expires;
+					oidc_session_set(r, session, "id_token", id_token);
+					oidc_session_set(r, session, "attributes", response);
+					oidc_session_save(r, session);
+
+					r->user = remoteUser;
+					apr_table_add(r->headers_out, "Location", original_url);
+
+					ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: session created and stored, redirecting to original url: %s", original_url);
+
+					return HTTP_MOVED_TEMPORARILY;
+
+				} else {
+
+					// resolving the "code" failed; an error will have been reported
+					return HTTP_UNAUTHORIZED;
+
+				}
+
+			// no code/state params, but this could be an OP selection request
+			} else if (oidc_get_provider_selection(r, &issuer, &original_url)) {
+
+				struct oidc_op_meta_t *md = NULL;
+
+				// try and get metadata from the metadata directories for the selected OP
+				if ( (oidc_metadata_get(r, c, issuer, &md) == APR_SUCCESS) && (md != NULL) ) {
+
+					// got it
+					oidc_authorization_request(r, c, md, original_url);
+					return HTTP_MOVED_TEMPORARILY;
+				}
+
+				// no luck
+				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: no provider metadata found for selected OP: returning HTTP 500");
+				return HTTP_INTERNAL_SERVER_ERROR;
+
+			} // else: initial request, no session, url=redirect_uri: hit the default flow for unauthorized users (cq. discovery)
+
+		} // else: initial request, no session, url!=redirect_uri: hit the default flow for unauthorized users (cq. discovery)
+
+	// else: not an initial request
 	} else if (session->remote_user != NULL)  {
 
 		// sub-request and we have a session (headers will have been scrubbed and set already)
 		r->user = (char *)session->remote_user;
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "recycling user '%s' from initial request for sub request", r->user);
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: recycling user '%s' from initial request for sub request", r->user);
 
 		return OK;
 
-	} else {
-
-		// sub-request and we have no session
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "unable to recycle user from initial request for sub request... (fail now, but should we have redirected?)");
-
 	}
 
-	return HTTP_UNAUTHORIZED;
+	// TODO: shouldn't we use an explicit redirect to the discovery endpoint (maybe a "discovery" param to the redirect_uri)?
+
+	// initial or sub request but no session
+	if (c->provider_metadata_dir != NULL) return oidc_discovery(r, c);
+
+	// static config, no discovery
+	oidc_authorization_request(r, c, &md_static, oidc_get_current_url(r, c));
+
+	return HTTP_MOVED_TEMPORARILY;
+
 }
 
 #define OIDC_OAUTH20_VALIDATION_GRANT_TYPE "urn:pingidentity.com:oauth2:grant_type:validate_bearer"
@@ -850,7 +1038,7 @@ static char *oidc_oauth20_resolve_access_token (request_rec *r, oidc_cfg *c, con
 		validateURL.query = apr_psprintf(r->pool, "grant_type=%s&token=%s", OIDC_OAUTH20_VALIDATION_GRANT_TYPE, token);
 	}
 
-	return oidc_http_call(r, c, apr_uri_unparse(r->pool, &validateURL, 0), postfields, (apr_strnatcmp(c->token_endpoint_auth, "client_secret_basic") == 0) ? apr_psprintf(r->pool, "%s:%s", c->validate_client_id, c->validate_client_secret) : NULL, NULL);
+	return oidc_http_call(r, apr_uri_unparse(r->pool, &validateURL, 0), postfields, (apr_strnatcmp(c->token_endpoint_auth, "client_secret_basic") == 0) ? apr_psprintf(r->pool, "%s:%s", c->validate_client_id, c->validate_client_secret) : NULL, NULL, c->ssl_validate_server);
 }
 
 int oidc_check_userid_oauth20(request_rec *r, oidc_cfg *c) {
@@ -1006,6 +1194,8 @@ const command_rec oidc_config_cmds[] = {
 		AP_INIT_TAKE1("OIDCValidateClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, validate_client_id), RSRC_CONF, "Client identifier used in calls to OAuth 2.0 Authorization server validation calls."),
 		AP_INIT_TAKE1("OIDCValidateClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, validate_client_secret), RSRC_CONF, "Client secret used in calls to OAuth 2.0 Authorization server validation calls."),
 		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_string_slot,  (void*)APR_OFFSETOF(oidc_cfg, cache_dir), RSRC_CONF, "Directory used for file-based caching."),
+		AP_INIT_TAKE1("OIDCProviderMetadataDir", oidc_set_string_slot,  (void*)APR_OFFSETOF(oidc_cfg, provider_metadata_dir), RSRC_CONF, "Directory that contains OP metadata files."),
+		AP_INIT_TAKE1("OIDCClientMetadataDir", oidc_set_string_slot,  (void*)APR_OFFSETOF(oidc_cfg, client_metadata_dir), RSRC_CONF, "Directory that contains client configuration files."),
 
 		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, authn_header), ACCESS_CONF|OR_AUTHCFG, "Specify the HTTP header variable to set with the name of the OIDC authenticated user.  By default no headers are added."),
 		AP_INIT_TAKE1("OIDCScrubRequestHeaders", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, scrub_request_headers), ACCESS_CONF, "Scrub OIDC user name and ID_TOKEN attribute headers from the user's request."),

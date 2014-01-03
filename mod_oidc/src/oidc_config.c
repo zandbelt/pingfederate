@@ -197,6 +197,8 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->validate_client_id = NULL;
 	c->validate_client_secret = NULL;
 	c->cache_dir = NULL;
+	c->provider_metadata_dir = NULL;
+	c->client_metadata_dir = NULL;
 	return c;
 }
 
@@ -236,6 +238,8 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->validate_client_id = add->validate_client_id != NULL ? add->validate_client_id : base->validate_client_id;
 	c->validate_client_secret = add->validate_client_secret != NULL ? add->validate_client_secret : base->validate_client_secret;
 	c->cache_dir = add->cache_dir != NULL ? add->cache_dir : base->cache_dir;
+	c->provider_metadata_dir = add->provider_metadata_dir != NULL ? add->provider_metadata_dir : base->provider_metadata_dir;
+	c->client_metadata_dir = add->client_metadata_dir != NULL ? add->client_metadata_dir : base->client_metadata_dir;
 	return c;
 }
 
@@ -357,10 +361,12 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 
 	// TODO: maybe there's a different way to initialize post-config stuff per server rec?
 	server_rec *sp = s;
+	apr_status_t rc = APR_SUCCESS;
 	while (sp != NULL) {
-		oidc_crypto_init(pool, sp);
-		oidc_cache_init(pool, sp);
-		oidc_session_init(pool, sp);
+		if ((rc = oidc_crypto_init(pool, sp)) != APR_SUCCESS) return rc;
+		if ((rc = oidc_cache_init(pool, sp)) != APR_SUCCESS) return rc;
+		if ((rc = oidc_metadata_init(pool, sp)) != APR_SUCCESS) return rc;
+		if ((rc = oidc_session_init(pool, sp)) != APR_SUCCESS) return rc;
 		sp = sp->next;
 	}
 

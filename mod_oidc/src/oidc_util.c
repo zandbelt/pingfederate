@@ -268,13 +268,13 @@ size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream)
 //       OK: Mac OS X 10.9.1, MacPorts 2.2.0, Apache 2.2.25, OpenSSL 1.0.1e, Curl 7.32.0
 //       ERR: Ubuntu 13.10: Apache 2.4.6,  OpenSSL 1.0.1e, Curl 7.32.0
 //       ERR: Ubuntu 12.04: Apache 2.2.22, OpenSSL 1.0.1,  Curl 7.22.0
-char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *postfields, const char *basic_auth, const char *bearer_token) {
+char *oidc_http_call(request_rec *r, const char *url, const char *postfields, const char *basic_auth, const char *bearer_token, int ssl_validate_server) {
 	char curlError[CURL_ERROR_SIZE];
 	oidc_curl_buffer curlBuffer;
 	CURL *curl;
 	char *rv = NULL;
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_http_call: entering");
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_http_call: entering, url=%s, postfields=%s, basic_auth=%s, bearer_token=%s, ssl_validate_server=%d", url, postfields, basic_auth, bearer_token, ssl_validate_server);
 
 	curl = curl_easy_init();
 	if (curl == NULL) {
@@ -299,8 +299,8 @@ char *oidc_http_call(request_rec *r, oidc_cfg *c, const char *url, const char *p
 	curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP|CURLPROTO_HTTPS);
 #endif
 
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, (c->ssl_validate_server != FALSE ? 1L : 0L));
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, (c->ssl_validate_server != FALSE ? 2L : 0L));
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, (ssl_validate_server != FALSE ? 1L : 0L));
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, (ssl_validate_server != FALSE ? 2L : 0L));
 
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod_oidc 1.0");
 
