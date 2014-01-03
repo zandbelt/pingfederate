@@ -797,7 +797,9 @@ int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 			oidc_session_get(r, session, "attributes", &attributes);
 
 			apr_json_value_t *attrs = NULL;
-			apr_status_t status = apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
+			if (attributes != NULL) {
+				apr_status_t status = apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
+			}
 
 			oidc_set_attribute_headers(r, c, attrs);
 			oidc_request_state_set(r, "attributes", (const char *)attrs);
