@@ -231,7 +231,7 @@ char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c) {
 	if (print_port)
 		port_str = apr_psprintf(r->pool, ":%u", port);
 	url = apr_pstrcat(r->pool, scheme, "://",
-		r->server->server_hostname,
+		apr_table_get(r->headers_in, "Host"),
 		port_str, r->uri,
 		(r->args != NULL && *r->args != '\0' ? "?" : ""),
 		r->args, NULL);
