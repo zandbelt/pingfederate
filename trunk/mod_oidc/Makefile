@@ -1,4 +1,5 @@
 MY_APXS=/opt/local/apache2/bin/apxs
+MY_CFLAGS=-DOIDC_DEBUG=APLOG_INFO
 MY_LDFLAGS=-lcurl
 
 MY_SOURCES = \
@@ -9,6 +10,7 @@ MY_SOURCES = \
 	src/oidc_authz.c \
 	src/oidc_session.c \
 	src/oidc_cache.c \
+	src/oidc_metadata.c \
 	src/apr_json_decode.c
 
 MY_MODULE = src/mod_oidc.la
