@@ -88,32 +88,43 @@ const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *a
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
-const char *oidc_set_url(apr_pool_t *pool, apr_uri_t *uri, const char *url) {
-	if (url == NULL) {
-		memset(uri, '\0', sizeof(apr_uri_t));
-		return NULL;
+const char *oidc_set_crypto_passphrase(cmd_parms *cmd, void *struct_ptr, const char *arg) {
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	if (ap_set_string_slot(cmd, cfg, arg) == NULL) {
+		if (oidc_crypto_init(cfg, cmd->server) == APR_SUCCESS) {
+			return "oidc_crypto_init failed";
+		}
 	}
-	if (apr_uri_parse(pool, url, uri) != APR_SUCCESS) {
-		return apr_psprintf(pool, "oidc_set_url: URL '%s' could not be parsed!", url);
-	}
-	if (uri->port == 0) uri->port = apr_uri_port_of_scheme(uri->scheme);
-	if (uri->hostname == NULL) return apr_psprintf(pool, "oidc_set_url: hostname in URL '%s' parsed to NULL!", url);
 	return NULL;
 }
-/*
-const char *oidc_set_uri_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
+
+const char *oidc_set_url_slot(cmd_parms *cmd, void *ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-	int offset = (int)(long)cmd->info;
-	apr_uri_t *p = (apr_uri_t *)((unsigned char *)cfg + offset);
-	return oidc_set_url(cmd->pool, p, arg);
+	apr_uri_t url;
+	if (apr_uri_parse(cmd->pool, arg, &url) != APR_SUCCESS) {
+		return apr_psprintf(cmd->pool, "oidc_set_url_slot: URL '%s' could not be parsed!", arg);
+	}
+	return ap_set_string_slot(cmd, cfg, arg);
 }
-*/
 
 // TODO: it's not really a syntax error... (could be fixed at runtime but then we'd have to restart the server)
-const char *oidc_set_metadata_dir(cmd_parms *cmd, void *ptr, const char *arg) {
+const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-	if (oidc_metadata_dir_check(cmd->pool, cmd->server, arg) != APR_SUCCESS)
-		return "OIDCMetadataDir contained a value that could not be verified as an accessible directory";
+
+	char s_err[128];
+	apr_dir_t *dir;
+	apr_status_t rc = APR_SUCCESS;
+
+	/* ensure the directory exists */
+	if ((rc = apr_dir_open(&dir, arg, cmd->pool)) != APR_SUCCESS) {
+		return apr_psprintf(cmd->pool, "could not access directory '%s' (%s)", arg,  apr_strerror(rc, s_err, sizeof(s_err)));
+	}
+
+	/* and cleanup... */
+	if ((rc = apr_dir_close(dir)) != APR_SUCCESS) {
+		return apr_psprintf(cmd->pool, "oidc_set_dir_slot: could not close directory '%s' (%s)", arg,  apr_strerror(rc, s_err, sizeof(s_err)));
+	}
+
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
@@ -212,7 +223,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->oauth.validate_endpoint_url = NULL;
 	c->oauth.validate_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
 
-	c->cache_dir = NULL;
+	apr_temp_dir_get((const char **)&c->cache_dir, pool);
 	c->metadata_dir = NULL;
 
 	c->cookie_domain = NULL;
@@ -375,15 +386,7 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 #endif /* defined(OPENSSL_THREADS) && APR_HAS_THREADS */
 	apr_pool_cleanup_register(pool, s, oidc_cleanup, apr_pool_cleanup_null);
 
-	// TODO: maybe there's a different way to initialize post-config stuff per server rec?
-	server_rec *sp = s;
-	apr_status_t rc = APR_SUCCESS;
-	while (sp != NULL) {
-		if ((rc = oidc_crypto_init(pool, sp)) != APR_SUCCESS) return rc;
-		if ((rc = oidc_cache_init(pool, sp)) != APR_SUCCESS) return rc;
-		if ((rc = oidc_session_init(pool, sp)) != APR_SUCCESS) return rc;
-		sp = sp->next;
-	}
+	oidc_session_init();
 
 	/*
 	 * Apache has a base vhost that true vhosts derive from.

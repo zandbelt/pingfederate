@@ -58,16 +58,7 @@
 
 #include "mod_oidc.h"
 
-extern module AP_MODULE_DECLARE_DATA oidc_module;
-
-apr_status_t oidc_crypto_init(apr_pool_t *pool, server_rec *s) {
-
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config, &oidc_module);
-
-	if (cfg->crypto_passphrase == NULL) {
-		// cq. base vhost with no OIDC settings
-		return APR_SUCCESS;
-	}
+apr_status_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 
 	unsigned char *key_data = (unsigned char *)cfg->crypto_passphrase;
 	int key_data_len = strlen(cfg->crypto_passphrase);

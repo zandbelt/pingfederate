@@ -73,42 +73,6 @@ typedef struct {
     apr_time_t expire;
 } oidc_cache_info_t;
 
-/*
- * initialize the cache
- */
-apr_status_t oidc_cache_init(apr_pool_t *pool, server_rec *s) {
-
-	// too bad creating a directory here does not work because of permissions..
-
-	apr_dir_t *dir;
-	const char *path = NULL;
-	apr_status_t rc;
-	char s_err[128];
-
-	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
-
-	if ((path = cfg->cache_dir) == NULL) {
-
-		/* get an OS specific temporary directory */
-		if (( rc = apr_temp_dir_get(&path, pool)) != APR_SUCCESS) {
-			ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_init: could not obtain a temporary directory 'apr_temp_dir_get' (%s)",  apr_strerror(rc, s_err, sizeof(s_err)));
-		}
-
-		cfg->cache_dir = apr_pstrdup(pool, path);
-	}
-
-	/* ensure the directory exists */
-	if ((rc = apr_dir_open(&dir, path, pool)) != APR_SUCCESS) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_init: could not access the cache directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
-	}
-
-	/* and cleanup... */
-	if ((rc = apr_dir_close(dir)) != APR_SUCCESS) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_cache_init: could not close the cache directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
-	}
-
-	return rc;
-}
 
 /*
  * prefix that distinguishes mod_oidc cache files from other files in the same directory (/tmp)
