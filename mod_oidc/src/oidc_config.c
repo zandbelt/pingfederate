@@ -65,18 +65,15 @@
 #include "mod_oidc.h"
 
 #define OIDC_DEFAULT_SSL_VALIDATE_SERVER 1
-#define OIDC_DEFAULT_REDIRECT_URI NULL
-#define OIDC_DEFAULT_AUTHORIZATION_ENDPOINT NULL
-#define OIDC_DEFAULT_TOKEN_ENDPOINT NULL
-#define OIDC_DEFAULT_USERINFO_ENDPOINT NULL
-#define OIDC_DEFAULT_COOKIE "MOD_OIDC"
+#define OIDC_DEFAULT_ENDPOINT_AUTH "client_secret_basic"
+#define OIDC_DEFAULT_SCOPE "openid"
+#define OIDC_DEFAULT_ATTRIBUTE_DELIMITER ","
+#define OIDC_DEFAULT_ATTRIBUTE_PREFIX "OIDC_ATTR_"
+
+#define OIDC_DEFAULT_COOKIE "mod-oidc"
 #define OIDC_DEFAULT_AUTHN_HEADER NULL
 #define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS NULL
 #define OIDC_DEFAULT_DIR_SCOPE NULL
-#define OIDC_DEFAULT_ATTRIBUTE_DELIMITER ","
-#define OIDC_DEFAULT_ATTRIBUTE_PREFIX "OIDC_ATTR_"
-#define OIDC_DEFAULT_SCOPE "openid"
-#define OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH "client_secret_post"
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -103,12 +100,21 @@ const char *oidc_set_url(apr_pool_t *pool, apr_uri_t *uri, const char *url) {
 	if (uri->hostname == NULL) return apr_psprintf(pool, "oidc_set_url: hostname in URL '%s' parsed to NULL!", url);
 	return NULL;
 }
-
+/*
 const char *oidc_set_uri_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	int offset = (int)(long)cmd->info;
 	apr_uri_t *p = (apr_uri_t *)((unsigned char *)cfg + offset);
 	return oidc_set_url(cmd->pool, p, arg);
+}
+*/
+
+// TODO: it's not really a syntax error... (could be fixed at runtime but then we'd have to restart the server)
+const char *oidc_set_metadata_dir(cmd_parms *cmd, void *ptr, const char *arg) {
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	if (oidc_metadata_dir_check(cmd->pool, cmd->server, arg) != APR_SUCCESS)
+		return "OIDCMetadataDir contained a value that could not be verified as an accessible directory";
+	return ap_set_string_slot(cmd, cfg, arg);
 }
 
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value) {
@@ -129,13 +135,19 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
 	return NULL;
 }
 
-const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *value) {
+const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
+
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-	if ( (apr_strnatcmp(value, "client_auth_post") != 0) && (!apr_strnatcmp(value, "client_auth_basic") != 0) ) {
-		return apr_psprintf(cmd->pool, "oidc_set_token_endpoint_auth: Invalid value (%s) for OIDCTokenEndpointAuth: must be \"client_auth_post\" or \"client_auth_basic\".", value);
+
+	if ((apr_strnatcmp(arg, "client_secret_post") == 0)
+		||
+		(apr_strnatcmp(arg, "client_secret_basic") == 0) ) {
+
+		return ap_set_string_slot(cmd, cfg, arg);
+
 	}
-	cfg->token_endpoint_auth = apr_pstrdup(cmd->pool, value);
-	return NULL;
+
+	return "parameter must be 'client_secret_post' or 'client_secret_basic'";
 }
 
 char *oidc_get_endpoint(request_rec *r, apr_uri_t *url, const char *s) {
@@ -179,26 +191,35 @@ char *oidc_get_dir_scope(request_rec *r) {
 
 void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
+
 	c->merged = FALSE;
-	c->ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
-	c->client_id = NULL;
-	c->client_secret = NULL;
+
+	c->redirect_uri = NULL;
+
+	c->provider.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
+	c->provider.issuer = NULL;
+	c->provider.authorization_endpoint_url = NULL;
+	c->provider.token_endpoint_url = NULL;
+	c->provider.token_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
+	c->provider.userinfo_endpoint_url = NULL;
+	c->provider.client_id  = NULL;
+	c->provider.client_secret = NULL;
+	c->provider.scope = OIDC_DEFAULT_SCOPE;
+
+	c->oauth.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
+	c->oauth.client_id = NULL;
+	c->oauth.client_secret = NULL;
+	c->oauth.validate_endpoint_url = NULL;
+	c->oauth.validate_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
+
+	c->cache_dir = NULL;
+	c->metadata_dir = NULL;
+
 	c->cookie_domain = NULL;
-	c->crypto_passphrase = NULL;
-	c->issuer = NULL;
-	oidc_set_url(pool, &c->authorization_endpoint_url, OIDC_DEFAULT_AUTHORIZATION_ENDPOINT);
-	oidc_set_url(pool, &c->token_endpoint_url, OIDC_DEFAULT_TOKEN_ENDPOINT);
-	c->token_endpoint_auth = OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH;
-	oidc_set_url(pool, &c->userinfo_endpoint_url, OIDC_DEFAULT_USERINFO_ENDPOINT);
-	oidc_set_url(pool, &c->redirect_uri, OIDC_DEFAULT_REDIRECT_URI);
 	c->attribute_delimiter = OIDC_DEFAULT_ATTRIBUTE_DELIMITER;
 	c->attribute_prefix = OIDC_DEFAULT_ATTRIBUTE_PREFIX;
-	c->scope = OIDC_DEFAULT_SCOPE;
-	c->validate_client_id = NULL;
-	c->validate_client_secret = NULL;
-	c->cache_dir = NULL;
-	c->provider_metadata_dir = NULL;
-	c->client_metadata_dir = NULL;
+	c->crypto_passphrase = NULL;
+
 	return c;
 }
 
@@ -206,40 +227,35 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
 	oidc_cfg *base = BASE;
 	oidc_cfg *add = ADD;
-	apr_uri_t test;
-	memset(&test, '\0', sizeof(apr_uri_t));
+
 	c->merged = TRUE;
-	c->ssl_validate_server = (add->ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->ssl_validate_server : base->ssl_validate_server);
-	c->client_id = (add->client_id != NULL) ? add->client_id : base->client_id;
-	c->client_secret = add->client_secret != NULL ? add->client_secret : base->client_secret;
-	c->crypto_passphrase = add->crypto_passphrase != NULL ? add->crypto_passphrase : base->crypto_passphrase;
-	c->issuer = add->issuer != NULL ? add->issuer : base->issuer;
-	if (memcmp(&add->authorization_endpoint_url, &test, sizeof(apr_uri_t)) == 0)
-		memcpy(&c->authorization_endpoint_url, &base->authorization_endpoint_url, sizeof(apr_uri_t));
-	else
-		memcpy(&c->authorization_endpoint_url, &add->authorization_endpoint_url, sizeof(apr_uri_t));
-	if (memcmp(&add->token_endpoint_url, &test, sizeof(apr_uri_t)) == 0)
-		memcpy(&c->token_endpoint_url, &base->token_endpoint_url, sizeof(apr_uri_t));
-	else
-		memcpy(&c->token_endpoint_url, &add->token_endpoint_url, sizeof(apr_uri_t));
-	c->token_endpoint_auth = (apr_strnatcasecmp(add->token_endpoint_auth, OIDC_DEFAULT_TOKEN_ENDPOINT_AUTH) != 0 ? add->token_endpoint_auth : base->token_endpoint_auth);
-	if (memcmp(&add->userinfo_endpoint_url, &test, sizeof(apr_uri_t)) == 0)
-		memcpy(&c->userinfo_endpoint_url, &base->userinfo_endpoint_url, sizeof(apr_uri_t));
-	else
-		memcpy(&c->userinfo_endpoint_url, &add->userinfo_endpoint_url, sizeof(apr_uri_t));
-	if (memcmp(&add->redirect_uri, &test, sizeof(apr_uri_t)) == 0)
-		memcpy(&c->redirect_uri, &base->redirect_uri, sizeof(apr_uri_t));
-	else
-		memcpy(&c->redirect_uri, &add->redirect_uri, sizeof(apr_uri_t));
-	c->cookie_domain = add->cookie_domain != NULL ? add->cookie_domain : base->cookie_domain;
-	c->attribute_delimiter = (apr_strnatcasecmp(add->attribute_delimiter, OIDC_DEFAULT_ATTRIBUTE_DELIMITER) != 0 ? add->attribute_delimiter : base->attribute_delimiter);
-	c->attribute_prefix = (apr_strnatcasecmp(add->attribute_prefix, OIDC_DEFAULT_ATTRIBUTE_PREFIX) != 0 ? add->attribute_prefix : base->attribute_prefix);
-	c->scope = (apr_strnatcasecmp(add->scope, OIDC_DEFAULT_SCOPE) != 0 ? add->scope : base->scope);
-	c->validate_client_id = add->validate_client_id != NULL ? add->validate_client_id : base->validate_client_id;
-	c->validate_client_secret = add->validate_client_secret != NULL ? add->validate_client_secret : base->validate_client_secret;
+
+	c->redirect_uri = add->redirect_uri != NULL ? add->redirect_uri : base->redirect_uri;
+
+	c->provider.ssl_validate_server = add->provider.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->provider.ssl_validate_server : base->provider.ssl_validate_server;
+	c->provider.issuer = add->provider.issuer != NULL ? add->provider.issuer : base->provider.issuer;
+	c->provider.authorization_endpoint_url = add->provider.authorization_endpoint_url != NULL ? add->provider.authorization_endpoint_url : base->provider.authorization_endpoint_url;
+	c->provider.token_endpoint_url = add->provider.token_endpoint_url != NULL ? add->provider.token_endpoint_url : base->provider.token_endpoint_url;
+	c->provider.token_endpoint_auth = add->provider.token_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ? add->provider.token_endpoint_auth : base->provider.token_endpoint_auth;
+	c->provider.userinfo_endpoint_url = add->provider.userinfo_endpoint_url != NULL ? add->provider.userinfo_endpoint_url : base->provider.userinfo_endpoint_url;
+	c->provider.client_id = add->provider.client_id != NULL ? add->provider.client_id : base->provider.client_id;
+	c->provider.client_secret = add->provider.client_secret != NULL ? add->provider.client_secret : base->provider.client_secret;
+	c->provider.scope = add->provider.scope != OIDC_DEFAULT_SCOPE ? add->provider.scope : base->provider.scope;
+
+	c->oauth.ssl_validate_server = add->oauth.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->oauth.ssl_validate_server : base->oauth.ssl_validate_server;
+	c->oauth.client_id = add->oauth.client_id != NULL ? add->oauth.client_id : base->oauth.client_id;
+	c->oauth.client_secret = add->oauth.client_secret != NULL ? add->oauth.client_secret : base->oauth.client_secret;
+	c->oauth.validate_endpoint_url = add->oauth.validate_endpoint_url != NULL ? add->oauth.validate_endpoint_url : base->oauth.validate_endpoint_url;
+	c->oauth.validate_endpoint_auth = add->oauth.validate_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ? add->oauth.validate_endpoint_auth : base->oauth.validate_endpoint_auth;
+
 	c->cache_dir = add->cache_dir != NULL ? add->cache_dir : base->cache_dir;
-	c->provider_metadata_dir = add->provider_metadata_dir != NULL ? add->provider_metadata_dir : base->provider_metadata_dir;
-	c->client_metadata_dir = add->client_metadata_dir != NULL ? add->client_metadata_dir : base->client_metadata_dir;
+	c->metadata_dir = add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
+
+	c->cookie_domain = add->cookie_domain != NULL ? add->cookie_domain : base->cookie_domain;
+	c->attribute_delimiter = add->attribute_delimiter != OIDC_DEFAULT_ATTRIBUTE_DELIMITER ? add->attribute_delimiter : base->attribute_delimiter;
+	c->attribute_prefix = add->attribute_prefix != OIDC_DEFAULT_ATTRIBUTE_PREFIX ? add->attribute_prefix : base->attribute_prefix;
+	c->crypto_passphrase = add->crypto_passphrase != NULL ? add->crypto_passphrase : base->crypto_passphrase;
+
 	return c;
 }
 
@@ -365,7 +381,6 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 	while (sp != NULL) {
 		if ((rc = oidc_crypto_init(pool, sp)) != APR_SUCCESS) return rc;
 		if ((rc = oidc_cache_init(pool, sp)) != APR_SUCCESS) return rc;
-		if ((rc = oidc_metadata_init(pool, sp)) != APR_SUCCESS) return rc;
 		if ((rc = oidc_session_init(pool, sp)) != APR_SUCCESS) return rc;
 		sp = sp->next;
 	}
