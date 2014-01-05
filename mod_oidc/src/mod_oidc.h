@@ -131,7 +131,6 @@ void oidc_request_state_set(request_rec *r, const char *key, const char *value);
 const char*oidc_request_state_get(request_rec *r, const char *key);
 
 // oidc_cache.c
-apr_status_t oidc_cache_init(apr_pool_t *pool, server_rec *s);
 apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value);
 apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, apr_time_t expiry);
 
@@ -150,10 +149,10 @@ void oidc_register_hooks(apr_pool_t *pool);
 
 const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg);
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
-//const char *oidc_set_uri_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
+const char *oidc_set_url_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
-const char *oidc_set_metadata_dir(cmd_parms *cmd, void *ptr, const char *arg);
+const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg);
 
 char *oidc_get_endpoint(request_rec *r, apr_uri_t *url, const char *s);
 char *oidc_get_dir_scope(request_rec *r);
@@ -172,7 +171,7 @@ char *oidc_url_encode(const request_rec *r, const char *str, const char *charsTo
 char *oidc_normalize_header_name(const request_rec *r, const char *str);
 
 // oidc_crypto.c
-apr_status_t oidc_crypto_init(apr_pool_t *pool, server_rec *s);
+apr_status_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s);
 unsigned char *oidc_crypto_aes_encrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len);
 unsigned char *oidc_crypto_aes_decrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len);
 
@@ -203,7 +202,7 @@ typedef struct {
 } session_rec;
 #endif
 
-apr_status_t oidc_session_init(apr_pool_t *pool, server_rec *s);
+apr_status_t oidc_session_init();
 apr_status_t oidc_session_load(request_rec *r, session_rec **z);
 apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value);
 apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value);

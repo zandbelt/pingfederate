@@ -67,33 +67,6 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
 #define OIDC_METADATA_SUFFIX_CLIENT "client"
 
 /*
- * check that a specified directory exists and is readable
- */
-apr_status_t oidc_metadata_dir_check(apr_pool_t *pool, server_rec *s, const char *path) {
-	char s_err[128];
-	apr_dir_t *dir;
-	apr_status_t rc = APR_SUCCESS;
-
-	/* test that the variable was set */
-	if (path == NULL) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: metadata directory is not set");
-		return APR_EGENERAL;
-	}
-
-	/* ensure the directory exists */
-	if ((rc = apr_dir_open(&dir, path, pool)) != APR_SUCCESS) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: could not access metadata directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
-	}
-
-	/* and cleanup... */
-	if ((rc = apr_dir_close(dir)) != APR_SUCCESS) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: could not close metadata directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
-	}
-
-	return rc;
-}
-
-/*
  * get the metadata filename for a specified issuer (cq. urlencode it)
  */
 static const char *oidc_metadata_issuer_to_filename(request_rec *r, const char *issuer) {
@@ -372,9 +345,7 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	/* find out if we need to perform SSL server certificate validation on the token_endpoint and user_info_endpoint for this provider */
 	int validate = cfg->provider.ssl_validate_server;
 	apr_json_value_t *j_ssl_validate_server = apr_hash_get(j_client->value.object, "ssl_validate_server", APR_HASH_KEY_STRING);
-	if ( (j_ssl_validate_server == NULL) || (j_ssl_validate_server->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_get: client JSON object did not contain a \"ssl_validate_server\" string");
-	} else if (strcmp(j_ssl_validate_server->value.string.p, "Off") == 0) {
+	if ( (j_ssl_validate_server != NULL) && (j_ssl_validate_server->type == APR_JSON_STRING) && (strcmp(j_ssl_validate_server->value.string.p, "Off") == 0)) {
 		validate = 0;
 	}
 
