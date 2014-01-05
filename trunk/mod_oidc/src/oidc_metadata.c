@@ -63,49 +63,32 @@
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
+#define OIDC_METADATA_SUFFIX_PROVIDER "provider"
+#define OIDC_METADATA_SUFFIX_CLIENT "client"
+
 /*
  * check that a specified directory exists and is readable
  */
-static apr_status_t oidc_metadata_dir_check(apr_pool_t *pool, server_rec *s, const char *path, const char *type) {
+apr_status_t oidc_metadata_dir_check(apr_pool_t *pool, server_rec *s, const char *path) {
 	char s_err[128];
 	apr_dir_t *dir;
 	apr_status_t rc = APR_SUCCESS;
 
 	/* test that the variable was set */
 	if (path == NULL) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: %s metadata directory is not set", type);
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: metadata directory is not set");
 		return APR_EGENERAL;
 	}
 
 	/* ensure the directory exists */
 	if ((rc = apr_dir_open(&dir, path, pool)) != APR_SUCCESS) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: could not access %s metadata directory '%s' (%s)", type, path,  apr_strerror(rc, s_err, sizeof(s_err)));
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: could not access metadata directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
 	}
 
 	/* and cleanup... */
 	if ((rc = apr_dir_close(dir)) != APR_SUCCESS) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: could not close %s metadata directory '%s' (%s)", type, path,  apr_strerror(rc, s_err, sizeof(s_err)));
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_metadata_dir_check: could not close metadata directory '%s' (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
 	}
-
-	return rc;
-}
-
-/*
- * initialize the metadata directories
- */
-apr_status_t oidc_metadata_init(apr_pool_t *pool, server_rec *s) {
-	apr_status_t rc = APR_SUCCESS;
-	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
-
-	if ( (cfg->provider_metadata_dir == NULL) && (cfg->client_metadata_dir == NULL) ) return  APR_SUCCESS;
-
-	/* check the provider metadata directory */
-	if ((rc = oidc_metadata_dir_check(pool, s, cfg->provider_metadata_dir, "provider")) != APR_SUCCESS)
-		return rc;
-
-	/* check the client metadata directory */
-	if ((rc = oidc_metadata_dir_check(pool, s, cfg->client_metadata_dir, "client")) != APR_SUCCESS)
-		return rc;
 
 	return rc;
 }
@@ -120,8 +103,10 @@ static const char *oidc_metadata_issuer_to_filename(request_rec *r, const char *
 /*
  * get the issuer from a metadata filename (cq. urldeccode it)
  */
-static const char *oidc_metadata_filename_to_issuer(request_rec *r, const char *issuer) {
-	char *result = apr_pstrdup(r->pool, issuer);
+static const char *oidc_metadata_filename_to_issuer(request_rec *r, const char *filename) {
+	char *result = apr_pstrdup(r->pool, filename);
+	char *p = strrchr(result, '.');
+	*p = '\0';
 	ap_unescape_url(result);
 	return result;
 }
@@ -129,8 +114,8 @@ static const char *oidc_metadata_filename_to_issuer(request_rec *r, const char *
 /*
  * get the full path to the metadata file for a specified issuer and directory
  */
-static const char *oidc_metadata_file_path(request_rec *r, oidc_cfg *cfg, const char *dir, const char *issuer) {
-	return apr_psprintf(r->pool, "%s/%s", dir, oidc_metadata_issuer_to_filename(r, issuer));
+static const char *oidc_metadata_file_path(request_rec *r, oidc_cfg *cfg, const char *issuer, const char *type) {
+	return apr_psprintf(r->pool, "%s/%s.%s", cfg->metadata_dir, oidc_metadata_issuer_to_filename(r, issuer), type);
 }
 
 /*
@@ -138,7 +123,7 @@ static const char *oidc_metadata_file_path(request_rec *r, oidc_cfg *cfg, const 
  */
 static const char *oidc_metadata_provider_file_path(request_rec *r, const char *issuer) {
 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
-	return oidc_metadata_file_path(r,cfg, cfg->provider_metadata_dir, issuer);
+	return oidc_metadata_file_path(r, cfg, issuer, OIDC_METADATA_SUFFIX_PROVIDER);
 }
 
 /*
@@ -146,7 +131,7 @@ static const char *oidc_metadata_provider_file_path(request_rec *r, const char *
  */
 static const char *oidc_metadata_client_file_path(request_rec *r, const char *issuer) {
 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
-	return oidc_metadata_file_path(r,cfg, cfg->client_metadata_dir, issuer);
+	return oidc_metadata_file_path(r, cfg, issuer, OIDC_METADATA_SUFFIX_CLIENT);
 }
 
 static apr_status_t oidc_metadata_file_read_json(request_rec *r, const char *path, apr_json_value_t **result) {
@@ -231,15 +216,13 @@ apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_
 	apr_status_t i;
 	char s_err[128];
 
-	// TODO: can estimate number in array based on # directory entries
-	// TODO: let's hope a client entry exists...
-
-	/* open the provider metadata directory */
-	if ((rc = apr_dir_open(&dir, cfg->provider_metadata_dir, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_list: error opening provider metadata directory '%s' (%s)", cfg->provider_metadata_dir,  apr_strerror(rc, s_err, sizeof(s_err)));
+	/* open the metadata directory */
+	if ((rc = apr_dir_open(&dir, cfg->metadata_dir, r->pool)) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_list: error opening metadata directory '%s' (%s)", cfg->metadata_dir,  apr_strerror(rc, s_err, sizeof(s_err)));
 		return rc;
 	}
 
+	// TODO: can estimate number in array based on # directory entries
 	/* allocate space in the array that will hold the list of providers */
 	*list = apr_array_make(r->pool, 5, sizeof(sizeof(const char*)));
 
@@ -248,6 +231,9 @@ apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_
 
 		/* skip "." and ".." entries */
 		if (fi.name[0] == '.') continue;
+		/* skip other non-provider entries */
+		char *ext = strrchr(fi.name, '.');
+		if ( (ext == NULL) || (strcmp(++ext, OIDC_METADATA_SUFFIX_PROVIDER) != 0) ) continue;
 
 		/* push the decoded issuer filename in to the array */
 		*(const char**)apr_array_push(*list) = oidc_metadata_filename_to_issuer(r, fi.name);
@@ -265,34 +251,34 @@ apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_
  * this fill the oidc_op_meta_t struct based on the issuer filename by reading and merging
  * contents from both provider metadata directory and client metadata directory
  */
-apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, oidc_op_meta_t **md) {
+apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, oidc_provider_t **result) {
 
 	apr_status_t rc = APR_SUCCESS;
 
 	/* pointer to the parsed JSON metadata from the provider directory */
-	apr_json_value_t *provider = NULL;
+	apr_json_value_t *j_provider = NULL;
 	/* pointer to the parsed JSON metadata from the client directory */
-	apr_json_value_t *client = NULL;
+	apr_json_value_t *j_client = NULL;
 
 	/* get the full file path to the provider metadata for this issuer */
 	const char *provider_path = oidc_metadata_provider_file_path(r, issuer);
 	/* and read the provider metadata in to the "provider" variable */
-	if ((rc = oidc_metadata_file_read_json(r, provider_path, &provider)) != APR_SUCCESS) return rc;
+	if ((rc = oidc_metadata_file_read_json(r, provider_path, &j_provider)) != APR_SUCCESS) return rc;
 
 	/* get the full file path to the client metadata for this issuer */
 	const char *client_path = oidc_metadata_client_file_path(r, issuer);
 	/* and read the client metadata in to the "client" variable */
-	if ((rc = oidc_metadata_file_read_json(r, client_path, &client)) != APR_SUCCESS) return rc;
+	if ((rc = oidc_metadata_file_read_json(r, client_path, &j_client)) != APR_SUCCESS) return rc;
 
 	/* allocate space for a parsed-and-merged metadata struct */
-	*md = apr_pcalloc(r->pool, sizeof(oidc_op_meta_t));
+	*result = apr_pcalloc(r->pool, sizeof(oidc_provider_t));
 	/* provide easy pointer */
-	oidc_op_meta_t *m = *md;
+	oidc_provider_t *provider = *result;
 
 	// PROVIDER
 
 	/* get the "issuer" from the provider metadata and double-check that it matches what we looked for */
-	apr_json_value_t *j_issuer = apr_hash_get(provider->value.object, "issuer", APR_HASH_KEY_STRING);
+	apr_json_value_t *j_issuer = apr_hash_get(j_provider->value.object, "issuer", APR_HASH_KEY_STRING);
 	if ( (j_issuer == NULL) || (j_issuer->type != APR_JSON_STRING) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain an \"issuer\" string");
 		return FALSE;
@@ -303,7 +289,7 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	}
 
 	/* verify that the provider supports the "code" flow, cq. the only one that we support for now */
-	apr_json_value_t *j_response_types_supported = apr_hash_get(provider->value.object, "response_types_supported", APR_HASH_KEY_STRING);
+	apr_json_value_t *j_response_types_supported = apr_hash_get(j_provider->value.object, "response_types_supported", APR_HASH_KEY_STRING);
 	if ( (j_response_types_supported == NULL) || (j_response_types_supported->type != APR_JSON_ARRAY) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"response_types_supported\" array; assuming that \"code\" flow is supported...");
 		// TODO: hey, this is required-by-spec stuff right?
@@ -326,21 +312,21 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	}
 
 	/* get a handle to the authorization endpoint */
-	apr_json_value_t *j_authorization_endpoint = apr_hash_get(provider->value.object, "authorization_endpoint", APR_HASH_KEY_STRING);
+	apr_json_value_t *j_authorization_endpoint = apr_hash_get(j_provider->value.object, "authorization_endpoint", APR_HASH_KEY_STRING);
 	if ( (j_authorization_endpoint == NULL) || (j_authorization_endpoint->type != APR_JSON_STRING) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain an \"authorization_endpoint\" string");
 		return FALSE;
 	}
 
 	/* get a handle to the token endpoint */
-	apr_json_value_t *j_token_endpoint = apr_hash_get(provider->value.object, "token_endpoint", APR_HASH_KEY_STRING);
+	apr_json_value_t *j_token_endpoint = apr_hash_get(j_provider->value.object, "token_endpoint", APR_HASH_KEY_STRING);
 	if ( (j_token_endpoint == NULL) || (j_token_endpoint->type != APR_JSON_STRING) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"token_endpoint\" string");
 		return FALSE;
 	}
 
 	/* get a handle to the user_info endpoint */
-	apr_json_value_t *j_userinfo_endpoint = apr_hash_get(provider->value.object, "userinfo_endpoint", APR_HASH_KEY_STRING);
+	apr_json_value_t *j_userinfo_endpoint = apr_hash_get(j_provider->value.object, "userinfo_endpoint", APR_HASH_KEY_STRING);
 	if ( (j_userinfo_endpoint == NULL) || (j_userinfo_endpoint->type != APR_JSON_STRING) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"userinfo_endpoint\" string");
 		return FALSE;
@@ -348,7 +334,7 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 
 	/* find out what type of authentication we must provide to the token endpoint (we only support post or basic) */
 	const char *auth = "client_secret_basic";
-	apr_json_value_t *j_token_endpoint_auth_methods_supported = apr_hash_get(provider->value.object, "token_endpoint_auth_methods_supported", APR_HASH_KEY_STRING);
+	apr_json_value_t *j_token_endpoint_auth_methods_supported = apr_hash_get(j_provider->value.object, "token_endpoint_auth_methods_supported", APR_HASH_KEY_STRING);
 	if ( (j_token_endpoint_auth_methods_supported == NULL) || (j_token_endpoint_auth_methods_supported->type != APR_JSON_ARRAY) ) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"token_endpoint_auth_methods_supported\" array");
 	} else {
@@ -375,17 +361,17 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	}
 
 	/* put whatever we've found out about the provider in (the provider part of) the metadata struct */
-	m->issuer = apr_pstrdup(r->pool, j_issuer->value.string.p);
-	m->authorization_endpoint_url = apr_pstrdup(r->pool, j_authorization_endpoint->value.string.p);
-	m->token_endpoint_url = apr_pstrdup(r->pool, j_token_endpoint->value.string.p);
-	m->token_endpoint_auth = apr_pstrdup(r->pool, auth);
-	m->userinfo_endpoint_url = apr_pstrdup(r->pool, j_userinfo_endpoint->value.string.p);;
+	provider->issuer = apr_pstrdup(r->pool, j_issuer->value.string.p);
+	provider->authorization_endpoint_url = apr_pstrdup(r->pool, j_authorization_endpoint->value.string.p);
+	provider->token_endpoint_url = apr_pstrdup(r->pool, j_token_endpoint->value.string.p);
+	provider->token_endpoint_auth = apr_pstrdup(r->pool, auth);
+	provider->userinfo_endpoint_url = apr_pstrdup(r->pool, j_userinfo_endpoint->value.string.p);;
 
 	// CLIENT
 
 	/* find out if we need to perform SSL server certificate validation on the token_endpoint and user_info_endpoint for this provider */
-	int validate = 1;
-	apr_json_value_t *j_ssl_validate_server = apr_hash_get(client->value.object, "ssl_validate_server", APR_HASH_KEY_STRING);
+	int validate = cfg->provider.ssl_validate_server;
+	apr_json_value_t *j_ssl_validate_server = apr_hash_get(j_client->value.object, "ssl_validate_server", APR_HASH_KEY_STRING);
 	if ( (j_ssl_validate_server == NULL) || (j_ssl_validate_server->type != APR_JSON_STRING) ) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_get: client JSON object did not contain a \"ssl_validate_server\" string");
 	} else if (strcmp(j_ssl_validate_server->value.string.p, "Off") == 0) {
@@ -393,14 +379,14 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	}
 
 	/* get a handle to the client_id we need to use for this provider */
-	apr_json_value_t *j_client_id = apr_hash_get(client->value.object, "client_id", APR_HASH_KEY_STRING);
+	apr_json_value_t *j_client_id = apr_hash_get(j_client->value.object, "client_id", APR_HASH_KEY_STRING);
 	if ( (j_client_id == NULL) || (j_client_id->type != APR_JSON_STRING) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: client JSON object did not contain a \"client_id\" string");
 		return FALSE;
 	}
 
 	/* get a handle to the client_secret we need to use for this provider */
-	apr_json_value_t *j_client_secret = apr_hash_get(client->value.object, "client_secret", APR_HASH_KEY_STRING);
+	apr_json_value_t *j_client_secret = apr_hash_get(j_client->value.object, "client_secret", APR_HASH_KEY_STRING);
 	if ( (j_client_secret == NULL) || (j_client_secret->type != APR_JSON_STRING) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: client JSON object did not contain a \"client_secret\" string");
 		return FALSE;
@@ -409,17 +395,17 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	/* find out what scopes we should be requesting from this provider */
 	// TODO: use the provider "scopes_supported" to mix-and-match with what we've configured for the client
 	// TODO: check that "openid" is always included in the configured scopes, right?
-	const char *scope = "openid";
-	apr_json_value_t *j_scope = apr_hash_get(client->value.object, "scope", APR_HASH_KEY_STRING);
+	const char *scope = cfg->provider.scope;
+	apr_json_value_t *j_scope = apr_hash_get(j_client->value.object, "scope", APR_HASH_KEY_STRING);
 	if ( (j_client_secret != NULL) && (j_client_secret->type == APR_JSON_STRING) ) {
 		scope = j_scope->value.string.p;
 	}
 
 	/* put whatever we've found out about the provider in (the client part of) the metadata struct */
-	m->ssl_validate_server = validate;
-	m->client_id = apr_pstrdup(r->pool, j_client_id->value.string.p);
-	m->client_secret = apr_pstrdup(r->pool, j_client_secret->value.string.p);
-	m->scope = apr_pstrdup(r->pool, scope);
+	provider->ssl_validate_server = validate;
+	provider->client_id = apr_pstrdup(r->pool, j_client_id->value.string.p);
+	provider->client_secret = apr_pstrdup(r->pool, j_client_secret->value.string.p);
+	provider->scope = apr_pstrdup(r->pool, scope);
 
 	return rc;
 }

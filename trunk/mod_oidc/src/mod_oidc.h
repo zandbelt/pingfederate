@@ -66,27 +66,48 @@
 #define OIDC_DEBUG APLOG_DEBUG
 #endif
 
-typedef struct oidc_cfg {
-	unsigned int merged;
+typedef struct oidc_provider_t {
+	int ssl_validate_server;
+	char *issuer;
+	char *authorization_endpoint_url;
+	char *token_endpoint_url;
+	char *token_endpoint_auth;
+	char *userinfo_endpoint_url;
+	char *client_id;
+	char *client_secret;
+	char *scope;
+} oidc_provider_t ;
+
+typedef struct oidc_oauth_t {
 	int ssl_validate_server;
 	char *client_id;
 	char *client_secret;
-	apr_uri_t redirect_uri;
-	char *issuer;
-	apr_uri_t authorization_endpoint_url;
-	apr_uri_t token_endpoint_url;
-	char *token_endpoint_auth;
-	apr_uri_t userinfo_endpoint_url;
+	char *validate_endpoint_url;
+	char *validate_endpoint_auth;
+} oidc_oauth_t;
+
+typedef struct oidc_cfg {
+	/* indicates whether this is a derived config, merged from a base one */
+	unsigned int merged;
+
+	/* the redirect URI as configured with the OpenID Connect OP's that we talk to */
+	char *redirect_uri;
+
+	/* a pointer to the (single) provider that we connect to */
+	/* NB: if metadata_dir is set, these settings will function as defaults for the metadata read from there) */
+	oidc_provider_t provider;
+	/* a pointer to the oauth server settings */
+	oidc_oauth_t oauth;
+
+	/* directory that holds the cache files (if unset, we'll try and use an OS defined one like "/tmp" */
+	char *cache_dir;
+	/* directory that holds the provider & client metadata files */
+	char *metadata_dir;
+
 	char *cookie_domain;
-	char *crypto_passphrase;
 	char *attribute_delimiter;
 	char *attribute_prefix;
-	char *scope;
-	char *validate_client_id;
-	char *validate_client_secret;
-	char *cache_dir;
-	char *provider_metadata_dir;
-	char *client_metadata_dir;
+	char *crypto_passphrase;
 	EVP_CIPHER_CTX e_ctx;
 	EVP_CIPHER_CTX d_ctx;
 } oidc_cfg;
@@ -97,18 +118,6 @@ typedef struct oidc_dir_cfg {
 	char *authn_header;
 	char *scrub_request_headers;
 } oidc_dir_cfg;
-
-typedef struct oidc_op_meta_t {
-	int ssl_validate_server;
-	char *issuer;
-	char *authorization_endpoint_url;
-	char *token_endpoint_url;
-	char *token_endpoint_auth;
-	char *userinfo_endpoint_url;
-	char *client_id;
-	char *client_secret;
-	char *scope;
-} oidc_op_meta_t;
 
 int oidc_check_user_id(request_rec *r);
 
@@ -141,9 +150,10 @@ void oidc_register_hooks(apr_pool_t *pool);
 
 const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg);
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
-const char *oidc_set_uri_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
-const char *oidc_set_token_endpoint_auth(cmd_parms *cmd, void *ptr, const char *value);
+//const char *oidc_set_uri_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
+const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
+const char *oidc_set_metadata_dir(cmd_parms *cmd, void *ptr, const char *arg);
 
 char *oidc_get_endpoint(request_rec *r, apr_uri_t *url, const char *s);
 char *oidc_get_dir_scope(request_rec *r);
@@ -167,9 +177,9 @@ unsigned char *oidc_crypto_aes_encrypt(request_rec *r, EVP_CIPHER_CTX *e, unsign
 unsigned char *oidc_crypto_aes_decrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len);
 
 // oidc_metadata.c
-apr_status_t oidc_metadata_init(apr_pool_t *pool, server_rec *s);
+apr_status_t oidc_metadata_dir_check(apr_pool_t *pool, server_rec *s, const char *path);
 apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **arr);
-apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *selected, oidc_op_meta_t **md);
+apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *selected, oidc_provider_t **provider);
 
 // oidc_session.c
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20081201
