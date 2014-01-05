@@ -1197,11 +1197,11 @@ const command_rec oidc_config_cmds[] = {
 		AP_INIT_TAKE1("OIDCAttributeDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, attribute_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued attributes in the HTTP headers."),
 		AP_INIT_TAKE1("OIDCAttributePrefix ", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, attribute_prefix), RSRC_CONF, "The prefix to use when setting attributes in the HTTP headers."),
 
-		// TODO: init oauth endpoint-auth and ssl_validate_server
 		AP_INIT_TAKE1("OIDCOAuthClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.client_id), RSRC_CONF, "Client identifier used in calls to OAuth 2.0 Authorization server validation calls."),
 		AP_INIT_TAKE1("OIDCOAuthClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.client_secret), RSRC_CONF, "Client secret used in calls to OAuth 2.0 Authorization server validation calls."),
 		AP_INIT_TAKE1("OIDCOAuthEndpoint", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, oauth.validate_endpoint_url), RSRC_CONF, "Define the OAuth AS Validation Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
 		AP_INIT_TAKE1("OIDCOAuthEndpointAuth", oidc_set_endpoint_auth_slot, (void *)APR_OFFSETOF(oidc_cfg, oauth.validate_endpoint_auth), RSRC_CONF, "Specify an authentication method for the OAuth AS Validation Endpoint (e.g.: client_auth_basic)"),
+		AP_INIT_FLAG("OIDCOAuthSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.ssl_validate_server), RSRC_CONF, "Require validation of the OAuth 2.0 AS Validation Endpoint SSL server certificate for successful authentication (On or Off)"),
 
 		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, cache_dir), RSRC_CONF, "Directory used for file-based caching."),
 		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains OP metadata files."),
