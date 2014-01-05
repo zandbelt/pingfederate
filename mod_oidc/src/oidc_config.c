@@ -91,7 +91,7 @@ const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *a
 const char *oidc_set_crypto_passphrase(cmd_parms *cmd, void *struct_ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	if (ap_set_string_slot(cmd, cfg, arg) == NULL) {
-		if (oidc_crypto_init(cfg, cmd->server) == APR_SUCCESS) {
+		if (oidc_crypto_init(cfg, cmd->server) != APR_SUCCESS) {
 			return "oidc_crypto_init failed";
 		}
 	}
