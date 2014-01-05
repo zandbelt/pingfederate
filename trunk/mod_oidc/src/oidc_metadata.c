@@ -397,7 +397,7 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	// TODO: check that "openid" is always included in the configured scopes, right?
 	const char *scope = cfg->provider.scope;
 	apr_json_value_t *j_scope = apr_hash_get(j_client->value.object, "scope", APR_HASH_KEY_STRING);
-	if ( (j_client_secret != NULL) && (j_client_secret->type == APR_JSON_STRING) ) {
+	if ( (j_scope != NULL) && (j_scope->type == APR_JSON_STRING) ) {
 		scope = j_scope->value.string.p;
 	}
 
