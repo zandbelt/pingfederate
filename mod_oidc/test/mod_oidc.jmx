@@ -397,7 +397,7 @@
               <collectionProp name="Arguments.arguments"/>
             </elementProp>
             <stringProp name="HTTPSampler.domain">${APP_SERVER}</stringProp>
-            <stringProp name="HTTPSampler.port">${APP_PATH}</stringProp>
+            <stringProp name="HTTPSampler.port">${APP_PORT}</stringProp>
             <stringProp name="HTTPSampler.connect_timeout"></stringProp>
             <stringProp name="HTTPSampler.response_timeout"></stringProp>
             <stringProp name="HTTPSampler.protocol">https</stringProp>
