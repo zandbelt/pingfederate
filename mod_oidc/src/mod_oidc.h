@@ -104,9 +104,13 @@ typedef struct oidc_cfg {
 	/* directory that holds the provider & client metadata files */
 	char *metadata_dir;
 
+	/* tell the module to strip any mod_oidc related headers that already have been set by the user-agent, normally required for secure operation */
+	int scrub_request_headers;
+
 	char *cookie_domain;
-	char *attribute_delimiter;
-	char *attribute_prefix;
+	char *claim_delimiter;
+	char *claim_prefix;
+
 	char *crypto_passphrase;
 	EVP_CIPHER_CTX e_ctx;
 	EVP_CIPHER_CTX d_ctx;
@@ -116,28 +120,30 @@ typedef struct oidc_dir_cfg {
 	char *dir_scope;
 	char *cookie;
 	char *authn_header;
-	char *scrub_request_headers;
 } oidc_dir_cfg;
 
 int oidc_check_user_id(request_rec *r);
-
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 authz_status oidc_authz_checker(request_rec *r, const char *require_args, const void *parsed_require_args);
 #else
 int oidc_auth_checker(request_rec *r);
 #endif
-
 void oidc_request_state_set(request_rec *r, const char *key, const char *value);
 const char*oidc_request_state_get(request_rec *r, const char *key);
+
+// oidc_proto.c
+int oidc_proto_authorization_request(request_rec *r, struct oidc_provider_t *provider, const char *redirect_uri, const char *state, const char *original_url);
+apr_byte_t oidc_proto_is_authorization_response(request_rec *r, oidc_cfg *cfg);
+apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_provider_t *provider, const char *id_token, char **user, apr_json_value_t **j_payload, apr_time_t *expires);
 
 // oidc_cache.c
 apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value);
 apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, apr_time_t expiry);
 
 // oidc_authz.c
-int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const require_line *const reqs, int nelts);
+int oidc_authz_worker(request_rec *r, const apr_json_value_t *const claims, const require_line *const reqs, int nelts);
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const attrs, const char *require_line);
+authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const claims, const char *require_line);
 #endif
 
 // oidc_config.c
@@ -170,6 +176,9 @@ int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char 
 char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c);
 char *oidc_url_encode(const request_rec *r, const char *str, const char *charsToEncode);
 char *oidc_normalize_header_name(const request_rec *r, const char *str);
+apr_byte_t oidc_request_matches_url(request_rec *r, const char *url);
+apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param);
+apr_byte_t oidc_get_request_parameter(request_rec *r, char *name, char **value);
 
 // oidc_crypto.c
 apr_status_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s);

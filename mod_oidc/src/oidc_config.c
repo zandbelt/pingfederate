@@ -67,12 +67,12 @@
 #define OIDC_DEFAULT_SSL_VALIDATE_SERVER 1
 #define OIDC_DEFAULT_ENDPOINT_AUTH "client_secret_basic"
 #define OIDC_DEFAULT_SCOPE "openid"
-#define OIDC_DEFAULT_ATTRIBUTE_DELIMITER ","
-#define OIDC_DEFAULT_ATTRIBUTE_PREFIX "OIDC_ATTR_"
+#define OIDC_DEFAULT_CLAIM_DELIMITER ","
+#define OIDC_DEFAULT_CLAIM_PREFIX "OIDC_CLAIM_"
 
 #define OIDC_DEFAULT_COOKIE "mod-oidc"
 #define OIDC_DEFAULT_AUTHN_HEADER NULL
-#define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS NULL
+#define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS 1
 #define OIDC_DEFAULT_DIR_SCOPE NULL
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
@@ -227,9 +227,11 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->metadata_dir = NULL;
 
 	c->cookie_domain = NULL;
-	c->attribute_delimiter = OIDC_DEFAULT_ATTRIBUTE_DELIMITER;
-	c->attribute_prefix = OIDC_DEFAULT_ATTRIBUTE_PREFIX;
+	c->claim_delimiter = OIDC_DEFAULT_CLAIM_DELIMITER;
+	c->claim_prefix = OIDC_DEFAULT_CLAIM_PREFIX;
 	c->crypto_passphrase = NULL;
+
+	c->scrub_request_headers = OIDC_DEFAULT_SCRUB_REQUEST_HEADERS;
 
 	return c;
 }
@@ -263,9 +265,11 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->metadata_dir = add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
 
 	c->cookie_domain = add->cookie_domain != NULL ? add->cookie_domain : base->cookie_domain;
-	c->attribute_delimiter = add->attribute_delimiter != OIDC_DEFAULT_ATTRIBUTE_DELIMITER ? add->attribute_delimiter : base->attribute_delimiter;
-	c->attribute_prefix = add->attribute_prefix != OIDC_DEFAULT_ATTRIBUTE_PREFIX ? add->attribute_prefix : base->attribute_prefix;
+	c->claim_delimiter = add->claim_delimiter != OIDC_DEFAULT_CLAIM_DELIMITER ? add->claim_delimiter : base->claim_delimiter;
+	c->claim_prefix = add->claim_prefix != OIDC_DEFAULT_CLAIM_PREFIX ? add->claim_prefix : base->claim_prefix;
 	c->crypto_passphrase = add->crypto_passphrase != NULL ? add->crypto_passphrase : base->crypto_passphrase;
+
+	c->scrub_request_headers = add->scrub_request_headers != OIDC_DEFAULT_SCRUB_REQUEST_HEADERS ? add->scrub_request_headers : base->scrub_request_headers;
 
 	return c;
 }
@@ -275,7 +279,6 @@ void *oidc_create_dir_config(apr_pool_t *pool, char *path) {
 	c->cookie = OIDC_DEFAULT_COOKIE;
 	c->dir_scope = OIDC_DEFAULT_DIR_SCOPE;
 	c->authn_header = OIDC_DEFAULT_AUTHN_HEADER;
-	c->scrub_request_headers = OIDC_DEFAULT_SCRUB_REQUEST_HEADERS;
 	return(c);
 }
 
@@ -293,11 +296,7 @@ void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD) {
 		add->authn_header : base->authn_header);
 	if (add->authn_header != NULL && apr_strnatcasecmp(add->authn_header, "Off") == 0)
 		c->authn_header = NULL;
-	c->scrub_request_headers = (add->scrub_request_headers != OIDC_DEFAULT_SCRUB_REQUEST_HEADERS ?
-		 add->scrub_request_headers :
-		 base->scrub_request_headers);
-	if (add->scrub_request_headers != NULL && apr_strnatcasecmp(add->scrub_request_headers, "Off") == 0)
-		c->scrub_request_headers = NULL;
+
 	return(c);
 }
 

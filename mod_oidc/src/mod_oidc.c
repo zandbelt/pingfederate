@@ -46,29 +46,6 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
- *
- * TODO: separate out in oidc_proto with nice functions for oidc_proto_is_authorization_response, oidc_is_discovery_response etc.
- *
- * mod_oidc is an Apache authentication/authorization module that allows an Apache server
- * to operate as an OpenID Connect Relying Party, i.e. requires users to authenticate to the
- * Apache hosted content through an external OpenID Connect Identity Provider using the OpenID
- * Connect Basic Client profile (cq. a backchannel flow aka. "code" flow).
- *
- * It sets the REMOTE_USER variable to the id_token sub claim, other id_token claims
- * are passed in HTTP headers, together with those (optionally) obtained from the user info endpoint
- * 
- * It allows for authorization rules (based on Requires primitive) that can do matching against the
- * set of claims provided in the id_token/userinfo.
- *
- * Additionally it can operate as an OAuth 2.0 Resource Server to a PingFederate OAuth 2.0
- * Authorization Server, cq. validate Bearer access_tokens against PingFederate.
- * In that case it sets the REMOTE_USER variable to the "Username" claim and matches the claims
- * in the intro-spected access_token against the Requires primitive.
- *
- * It implements server-side caching across different Apache processes through file storage in a temp directory.
- *
- *
  * Initially based on mod_auth_cas.c:
  * https://github.com/Jasig/mod_auth_cas
  *
@@ -78,104 +55,7 @@
  * session handling: Apache 2.4 mod_session.c
  * session handling backport: http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
  *
- *
- *
- * Example config for using Google Apps as your OpenID OP:
- * (running on localhost and https://localhost/example registerd as redirect_uri for the client)
- *
- * ==========================================================
- * LoadModule oidc_module modules/mod_oidc.so
- *
- * OIDCClientID <your-client-id-administered-through-the-google-api-console>
- * OIDCClientSecret <your-client-secret-administered-through-the-google-api-console>
- * OIDCIssuer accounts.google.com
- * OIDCAuthorizationEndpoint https://accounts.google.com/o/oauth2/auth?hd=<your-domain>&approval_prompt=force
- * OIDCRedirectURI https://localhost/example
- * OIDCTokenEndpoint https://accounts.google.com/o/oauth2/token
- * OIDCCryptoPassphrase <some-generated-password>
- * OIDCUserInfoEndpoint https://www.googleapis.com/oauth2/v3/userinfo
- * OIDCScope "openid email profile"
- *
- * <Location /example/>
- *    Authtype openid-connect
- *    require valid-user
- * </Location>
- * ==========================================================
- *
- *
- *
- * Another example using multiple OpenID Connect providers, which triggers OP discovery first:
- *
- * OIDCProviderMetadataDir points to a directory that contains a number of files that each
- * contain (standard) OpenID Connect Discovery OP JSON metadata where each name of the file is
- * the urlencoded issuer name of the OP that is decribed by the metadata in that file.
- *
- * OIDCClientMetadataDir points to a directory that contains a number of files that each
- * contain mod_oidc specific JSON metadata (vaguely based on the OpenID Connect Client Registration
- * specification) and the filename is the urlencoded issuer name of the OP that this client is registered with.
- *
- * Sample client metdata for issuer https://localhost:9031, so client metadata filename is:
- * "https%3a%2f%2fmacbook%3a9031"
- * ==========================================================
- * {
- *   "ssl_validate_server" : "Off",
- *   "client_id" : "ac_oic_client",
- *   "client_secret" : "abc123DEFghijklmnop4567rstuvwxyzZYXWUT8910SRQPOnmlijhoauthplaygroundapplication",
- *   "scope" : "openid email profile",
- * }
- * ==========================================================
- *
- * ==========================================================
- * LoadModule oidc_module modules/mod_oidc.so
- *
- * OIDCProviderMetadataDir <somewhere>/metadata/provider
- * OIDCClientMetadataDir <somewhere>/metadata/client
- *
- * OIDCRedirectURI https://localhost/example/
- * OIDCCryptoPassphrase <somestring>
- *
- * <Location /example/>
- *    Authtype openid-connect
- *    require valid-user
- * </Location>
- * ==========================================================
- *
- *
- *
- * Another example config for using PingFederate as your OpenID OP and/or OAuth 2.0 Authorization
- * server, based on the OAuth 2.0 PlayGround 3.x default configuration:
- * (running on localhost and https://localhost/example/ registerd as redirect_uri for the client "ac_oic_client")
- *
- * ==========================================================
- * LoadModule oidc_module modules/mod_oidc.so
- *
- * OIDCSSLValidateServer Off
- * OIDCClientID ac_oic_client
- * OIDCClientSecret abc123DEFghijklmnop4567rstuvwxyzZYXWUT8910SRQPOnmlijhoauthplaygroundapplication
- * OIDCIssuer https://localhost:9031
- * OIDCAuthorizationEndpoint https://localhost:9031/as/authorization.oauth2
- * OIDCTokenEndpoint https://localhost:9031/as/token.oauth2
- * OIDCUserInfoEndpoint https://localhost:9031/idp/userinfo.openid
- *
- * OIDCValidateClientID rs_client
- * OIDCValidateClientSecret 2Federate
- *
- * OIDCRedirectURI https://localhost/example/
- * OIDCCryptoPassphrase <somestring>
- * OIDCScope "openid email profile"
- *
- * <Location /example/>
- *    Authtype openid-connect
- *    #require valid-user
- *    require attribute sub:joe
- * </Location>
- *
- * <Location /example2>
- *    Authtype oauth20
- *    #require valid-user
- *    require attribute Username:joe
- * </Location>
- * ==========================================================
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  *
  **************************************************************************/
 
@@ -198,6 +78,12 @@
 #include "mod_oidc.h"
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
+
+#define OIDC_CLAIMS_SESSION_KEY "claims"
+#define OIDC_IDTOKEN_SESSION_KEY "id_token"
+
+#define OIDC_OP_PARAM_NAME "oidc_provider"
+#define OIDC_RT_PARAM_NAME "oidc_return"
 
 // TODO: require SSL
 
@@ -273,6 +159,8 @@ void oidc_scrub_request_headers(request_rec *r, const oidc_cfg *const c, const o
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_scrub_request_headers: entering");
 
+	if (c->scrub_request_headers == 0) return;
+
 	const apr_table_t *dirty_headers;
 	const char *log_fmt;
 	const apr_array_header_t *h;
@@ -282,7 +170,7 @@ void oidc_scrub_request_headers(request_rec *r, const oidc_cfg *const c, const o
 	r->headers_in =
 		oidc_scrub_headers(
 			r->pool,
-			c->attribute_prefix,
+			c->claim_prefix,
 			d->authn_header,
 			r->headers_in,
 			&dirty_headers);
@@ -342,187 +230,21 @@ apr_byte_t oidc_get_code_and_state(request_rec *r, char **code, char **state) {
 	return TRUE;
 }
 
-#define OIDC_OP_PARAM_NAME "oidc_provider"
-#define OIDC_RT_PARAM_NAME "oidc_return"
+/*
+ * find out whether the request is a response from the IDP discovery page
+ */
+static apr_byte_t oidc_is_discovery_response(request_rec *r, oidc_cfg *cfg) {
 
-// TODO: factor this out against oidc_get_code_and_state...
-static apr_byte_t oidc_get_provider_selection(request_rec *r, char **selection, char **original_url) {
+	/* see if this is a call to the configured redirect_uri and the OIDC_OP_PARAM_NAME and OIDC_RT_PARAM_NAME parameters are present */
+	return ((oidc_request_matches_url(r, cfg->redirect_uri) == TRUE)
+			&& oidc_request_has_parameter(r, OIDC_OP_PARAM_NAME)
+			&& oidc_request_has_parameter(r, OIDC_RT_PARAM_NAME));
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_provider_selection: entering");
-
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
-
-	*selection = NULL;
-
-	char *tokenizer_ctx, *p, *args, *rv = NULL;
-	const char *k_idp_param = apr_psprintf(r->pool, "%s=", OIDC_OP_PARAM_NAME);
-	const size_t k_idp_param_sz = strlen(k_idp_param);
-	const char *k_return_param = apr_psprintf(r->pool, "%s=", OIDC_RT_PARAM_NAME);
-	const size_t k_return_param_sz = strlen(k_return_param);
-
-	if (r->args == NULL || strlen(r->args) == 0) return FALSE;
-
-	args = apr_pstrndup(r->pool, r->args, strlen(r->args));
-
-	p = apr_strtok(args, "&", &tokenizer_ctx);
-	do {
-		if (p && strncmp(p, k_idp_param, k_idp_param_sz) == 0) {
-			*selection = apr_pstrdup(r->pool, p + k_idp_param_sz);
-			ap_unescape_url(*selection);
-		}
-		if (p && strncmp(p, k_return_param, k_return_param_sz) == 0) {
-			*original_url = apr_pstrdup(r->pool, p + k_return_param_sz);
-			ap_unescape_url(*original_url);
-		}
-		p = apr_strtok(NULL, "&", &tokenizer_ctx);
-	} while (p);
-
-	if ( (*selection == NULL) || (*original_url == NULL) ) {
-		if (*selection != NULL) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_provider_selection: \"%s\" parameter found at redirect_uri, but no \"%s\" parameter...", OIDC_OP_PARAM_NAME, OIDC_RT_PARAM_NAME);
-		}
-		if (*original_url != NULL) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_provider_selection: \"%s\" parameter found at redirect_uri, but no \"%s\" parameter...", OIDC_RT_PARAM_NAME, OIDC_OP_PARAM_NAME);
-		}
-		return FALSE;
-	}
-
-	return TRUE;
 }
 
-// TODO: split out checks into separate functions, maybe id_token handling in its own file
-static int oidc_parse_id_token(request_rec *r, oidc_provider_t *provider, const char *id_token, char **user, apr_json_value_t **attrs, apr_time_t *expires) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_parse_id_token: entering");
-
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
-
-	const char *s = id_token;
-	char *p = strchr(s, '.');
-	if (p == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "could not find first \".\" in id_token");
-		return FALSE;
-	}
-	*p = '\0';
-
-	char *dheader = NULL;
-	oidc_base64url_decode(r, &dheader, s, 1);
-	apr_json_value_t *header = NULL;
-	apr_status_t status = apr_json_decode(&header, dheader, strlen(dheader), r->pool);
-	if (status != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "could not decode header from id_token successfully");
-		return FALSE;
-	}
-	if ( (header ==NULL) || (header->type != APR_JSON_OBJECT) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "header from id_token did not contain a JSON object");
-		return FALSE;
-	}
-
-	s = ++p;
-	p = strchr(s, '.');
-	if (p == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "could not find second \".\" in id_token");
-		return FALSE;
-	}
-	*p = '\0';
-
-	char *dpayload = NULL;
-	oidc_base64url_decode(r, &dpayload, s, 1);
-	status = apr_json_decode(attrs, dpayload, strlen(dpayload), r->pool);
-	apr_json_value_t *payload = *attrs;
-	if (status != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "could not decode payload from id_token successfully");
-		return FALSE;
-	}
-	if ( (payload ==NULL) || (payload->type != APR_JSON_OBJECT) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "payload from id_token did not contain a JSON object");
-		return FALSE;
-	}
-
-	s = ++p;
-	char *signature = apr_pstrdup(r->pool, s);
-
-	apr_json_value_t *iss = apr_hash_get(payload->value.object, "iss", APR_HASH_KEY_STRING);
-	if ( (iss == NULL) || (iss->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON object did not contain an \"iss\" string");
-		return FALSE;
-	}
-	if (strcmp(provider->issuer, iss->value.string.p) != 0) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Configured issuer (%s) does not match received \"iss\" value in id_token (%s)", provider->issuer, iss->value.string.p);
-		return FALSE;
-	}
-
-	apr_json_value_t *exp = apr_hash_get(payload->value.object, "exp", APR_HASH_KEY_STRING);
-	if ( (exp == NULL) || (exp->type != APR_JSON_LONG) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON object did not contain an \"exp\" number");
-		return FALSE;
-	}
-	if (apr_time_sec(apr_time_now()) > exp->value.lnumber) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "id_token expired");
-		return FALSE;
-	}
-	*expires = apr_time_from_sec(exp->value.lnumber);
-
-	apr_json_value_t *aud = apr_hash_get(payload->value.object, "aud", APR_HASH_KEY_STRING);
-	if ( aud != NULL) {
-		if (aud->type == APR_JSON_STRING) {
-			if (strcmp(aud->value.string.p, provider->client_id) != 0) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "configured client_id (%s) did not match the JSON \"aud\" entry (%s)", provider->client_id, aud->value.string.p);
-				return FALSE;
-			}
-		} else if (aud->type == APR_JSON_ARRAY) {
-
-			apr_json_value_t *azp = apr_hash_get(payload->value.object, "azp", APR_HASH_KEY_STRING);
-			if (azp == NULL) {
-				ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "\"aud\" is an array, but \"azp\" claim is not present; that is a spec violation...");
-				//TODO: mitre.org does not yet do this..
-				//return FALSE;
-			}
-			int i;
-			for (i = 0; i < aud->value.array->nelts; i++) {
-				apr_json_value_t *elem = APR_ARRAY_IDX(aud->value.array, i, apr_json_value_t *);
-				if (elem->type != APR_JSON_STRING) {
-					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Unhandled in-array JSON object type [%d]", elem->type);
-					continue;
-				}
-				if (strcmp(elem->value.string.p, provider->client_id) == 0) {
-					break;
-				}
-			}
-			if (i == aud->value.array->nelts) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "configured client_id (%s) could not be found in the JSON \"aud\" array object", provider->client_id);
-				return FALSE;
-			}
-		} else {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON \"aud\" object is not a string nor an array");
-			return FALSE;
-		}
-	} else {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON object did not contain an \"aud\" element");
-		return FALSE;
-	}
-
-	apr_json_value_t *azp = apr_hash_get(payload->value.object, "azp", APR_HASH_KEY_STRING);
-	if ( (azp != NULL) && (azp->type != APR_JSON_STRING) ) {
-		if (strcmp(azp->value.string.p, provider->client_id) != 0) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "\"azp\" claim (%s) is not equal to configured client_id (%s)", azp->value.string.p, provider->client_id);
-			return FALSE;
-		}
-	}
-
-	apr_json_value_t *username = apr_hash_get(payload->value.object, "sub", APR_HASH_KEY_STRING);
-	if ( (username == NULL) || (username->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "response JSON object did not contain a \"sub\" string");
-		return FALSE;
-	}
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_parse_id_token: valid id_token for user \"%s\" (expires in %" APR_SIZE_T_FMT " seconds)", username->value.string.p, exp->value.lnumber - apr_time_sec(apr_time_now()));
-
-	*user = apr_pstrdup(r->pool, username->value.string.p);
-
-	return TRUE;
-}
-
+/*
+ * printout a JSON string value
+ */
 apr_byte_t oidc_json_string_print(request_rec *r, apr_json_value_t *result, const char *key, const char *log) {
 	apr_json_value_t *value = apr_hash_get(result->value.object, key, APR_HASH_KEY_STRING);
 	if (value != NULL) {
@@ -536,15 +258,35 @@ apr_byte_t oidc_json_string_print(request_rec *r, apr_json_value_t *result, cons
 	return FALSE;
 }
 
-apr_byte_t oidc_json_error_check(request_rec *r, apr_json_value_t *result, const char *log) {
-	if (oidc_json_string_print(r, result, "error", log) == TRUE) {
-		oidc_json_string_print(r, result, "error_description", log);
+/*
+ * decode a json string from an endpoint call response and check for errors
+ */
+apr_byte_t oidc_decode_json_response(request_rec *r, const char *response, apr_json_value_t **result, const char *log) {
+
+	/* first do the actual decoding */
+	if (apr_json_decode(result, response, strlen(response), r->pool) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_decode_json_response: could not decode response successfully");
 		return FALSE;
 	}
+
+	/* convenience helper pointer */
+	apr_json_value_t *json = *result;
+
+	/* check that we've got really a JSON object */
+	if ( (json ==NULL) || (json->type != APR_JSON_OBJECT) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_decode_json_response: response did not contain a JSON object");
+		return FALSE;
+	}
+
+	if (oidc_json_string_print(r, json, "error", log) == TRUE) {
+		oidc_json_string_print(r, json, "error_description", log);
+		return FALSE;
+	}
+
 	return TRUE;
 }
 
-apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_dir_cfg *d, oidc_provider_t *provider, char *code, char **user, apr_json_value_t **attrs, char **s_id_token, char **s_access_token, apr_time_t *expires) {
+static apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char *code, char **user, apr_json_value_t **j_idtoken_payload, char **s_id_token, char **s_access_token, apr_time_t *expires) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_code: entering");
 
@@ -560,22 +302,10 @@ apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_dir_cfg *d, oid
 	if (response == NULL)
 		return FALSE;
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_code(): response = %s", response);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_code: response = %s", response);
 
 	apr_json_value_t *result = NULL;
-	apr_status_t status = apr_json_decode(&result, response, strlen(response), r->pool);
-
-	if (status != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_resolve_code: could not decode response successfully");
-		return FALSE;
-	}
-
-	if ( (result ==NULL) || (result->type != APR_JSON_OBJECT) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_resolve_code: response did not contain a JSON object");
-		return FALSE;
-	}
-
-	if (oidc_json_error_check(r, result, "oidc_resolve_code") == FALSE) return FALSE;
+	if (oidc_decode_json_response(r, response, &result, "oidc_resolve_code") == FALSE) return FALSE;
 
 	// at_hash is optional
 
@@ -585,7 +315,7 @@ apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_dir_cfg *d, oid
 		return FALSE;
 	}
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_code(): returned access_token: %s", access_token->value.string.p);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_code: returned access_token: %s", access_token->value.string.p);
 	*s_access_token = apr_pstrdup(r->pool, access_token->value.string.p);
 
 	apr_json_value_t *token_type = apr_hash_get(result->value.object, "token_type", APR_HASH_KEY_STRING);
@@ -607,13 +337,28 @@ apr_byte_t oidc_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_dir_cfg *d, oid
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_code: returned id_token: %s", id_token->value.string.p);
 	*s_id_token = apr_pstrdup(r->pool, id_token->value.string.p);
 
-	return oidc_parse_id_token(r, provider, id_token->value.string.p, user, attrs, expires);
+	return oidc_proto_parse_idtoken(r, provider, id_token->value.string.p, user, j_idtoken_payload, expires);
 }
 
-static apr_byte_t oidc_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_dir_cfg *d, oidc_provider_t *provider, char **attributes, char *access_token) {
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_userinfo: entering, endpoint=%s", provider->userinfo_endpoint_url);
-	*attributes = (provider->userinfo_endpoint_url != NULL) ? oidc_http_call(r,  provider->userinfo_endpoint_url, NULL, 0, access_token, provider->ssl_validate_server) : apr_pstrdup(r->pool, "");
-	return TRUE;
+/*
+ * get claims from the OP UserInfo endpoint using the provided access_token
+ */
+static apr_byte_t oidc_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char **response, char *access_token) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_userinfo: entering, endpoint=%s, access_token=%s", provider->userinfo_endpoint_url, access_token);
+
+	/* only do this if an actual endpoint was set */
+	if (provider->userinfo_endpoint_url == NULL) return FALSE;
+
+	/* get the JSON response */
+	*response = oidc_http_call(r,  provider->userinfo_endpoint_url, NULL, 0, access_token, provider->ssl_validate_server);
+
+	/* see if we got any data back at all */
+	if (*response == NULL) return FALSE;
+
+	/* we may have received an error response */
+	apr_json_value_t *result = NULL;
+	return oidc_decode_json_response(r, *response, &result, "oidc_resolve_userinfo");
 }
 
 #define OIDCStateCookieName  "oidc-state"
@@ -732,74 +477,6 @@ static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url, c
 	return oidc_get_browser_state_hash(r, b64);
 }
 
-static void oidc_authorization_request(request_rec *r, oidc_cfg *cfg, struct oidc_provider_t *provider, const char *original_url) {
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_authorization_request: entering (selected=%s, original_url=%s)",
-			provider->issuer, original_url);
-	char *destination = NULL, *state = NULL;
-	state = oidc_create_state_and_set_cookie(r, original_url, provider->issuer);
-	destination =
-			apr_psprintf(r->pool,
-					"%s%sresponse_type=%s&scope=%s&client_id=%s&state=%s&redirect_uri=%s",
-					provider->authorization_endpoint_url,
-					(strchr(provider->authorization_endpoint_url, '?') != NULL ?
-							"&" : "?"), "code",
-					oidc_escape_string(r, provider->scope),
-					oidc_escape_string(r, provider->client_id),
-					oidc_escape_string(r, state),
-					oidc_escape_string(r, cfg->redirect_uri));
-	apr_table_add(r->headers_out, "Location", destination);
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_authorization_request: adding outgoing header: Location: %s",
-			destination);
-}
-
-apr_byte_t oidc_request_matches_redirect_uri(request_rec *r, oidc_cfg *c) {
-	char *p1 = r->parsed_uri.path;
-	apr_uri_t url;
-	apr_uri_parse(r->pool, c->redirect_uri, &url);
-	char *p2 = url.path;
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_request_matches_redirect_uri: comparing \"%s\"==\"%s\"", p1, p2);
-	return (apr_strnatcmp(p1, p2) == 0) ? TRUE : FALSE;
-}
-
-static void oidc_set_attribute_headers(request_rec *r,  oidc_cfg *c, apr_json_value_t *attrs) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_attribute_headers: entering");
-
-	apr_hash_index_t *hi;
-	for (hi = apr_hash_first(r->pool, attrs->value.object); hi; hi = apr_hash_next(hi)) {
-		const char *k; apr_json_value_t *v;
-		apr_hash_this(hi, (const void**)&k, NULL, (void**)&v);
-		//if (strstr(skip, apr_pstrcat(r->pool, k, ",", NULL))) continue;
-		if (v->type == APR_JSON_STRING) {
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_attribute_headers: setting attribute %s=%s", k, v->value.string.p);
-			apr_table_set(r->headers_in, apr_psprintf(r->pool, "%s%s", c->attribute_prefix, oidc_normalize_header_name(r, k)), v->value.string.p);
-		} else if (v->type == APR_JSON_ARRAY) {
-			char *csvs = apr_pstrdup(r->pool, "");
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_attribute_headers: parsing attribute array %s (#%d)", k, v->value.array->nelts);
-			int i = 0;
-			for (i = 0; i < v->value.array->nelts; i++) {
-				apr_json_value_t *elem = APR_ARRAY_IDX(v->value.array, i, apr_json_value_t *);
-				if (elem->type == APR_JSON_STRING) {
-					// TODO: escape the delimiter in the values (maybe reuse/extract url-formatted code from oidc_session_identity_encode)
-					if (apr_strnatcmp(csvs, "") != 0) {
-						csvs = apr_psprintf(r->pool, "%s%s%s", csvs, c->attribute_delimiter, elem->value.string.p);
-					} else {
-						csvs = apr_psprintf(r->pool, "%s", elem->value.string.p);
-					}
-				} else {
-					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_set_attribute_headers: unhandled in-array JSON object type [%d] when parsing attributes", elem->type);
-				}
-			}
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_attribute_headers: setting multi-valued attribute %s=%s", k, csvs);
-			apr_table_set(r->headers_in, apr_psprintf(r->pool, "%s%s", c->attribute_prefix, oidc_normalize_header_name(r, k)), csvs);
-		} else {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_set_attribute_headers: unhandled JSON object type [%d] when parsing attributes", v->type);
-		}
-	}
-}
-
 #define MOD_OIDC_USERDATA_KEY "mod_oidc_state"
 
 apr_table_t *oidc_request_state(request_rec *rr) {
@@ -838,6 +515,9 @@ static int oidc_http_sendstring(request_rec *r, const char *c_s, int success_rva
 	return success_rvalue;
 }
 
+/*
+ * present the user with an OP selection screen
+ */
 static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 	int rc = HTTP_UNAUTHORIZED;
 
@@ -875,153 +555,317 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 	return rc;
 }
 
+/*
+ * authenticate the user to the selected OP, if the OP is not selected yet, do discovery first
+ */
+static int oidc_authenticate_user(request_rec *r, oidc_cfg *c, oidc_provider_t *provider, const char *original_url) {
+
+	if (provider == NULL) {
+
+		// TODO: shouldn't we use an explicit redirect to the discovery endpoint (maybe a "discovery" param to the redirect_uri)?
+		if (c->metadata_dir != NULL) return oidc_discovery(r, c);
+
+		/* we're not using multiple OP's configured in a metadata directory, pick the statically configured OP */
+		provider = &c->provider;
+	}
+
+	/* create state that restores the context when the authorization response comes in; cryptographically bind it to the browser */
+	const char *state = oidc_create_state_and_set_cookie(r, original_url, provider->issuer);
+
+	/* send off to the OpenID Connect Provider */
+	return oidc_proto_authorization_request(r, provider, c->redirect_uri, state, original_url);
+}
+
+/*
+ * set an HTTP header to pass information to the application
+ */
+static void oidc_set_app_header(request_rec *r, const char *s_key, const char *s_value, const char *claim_prefix) {
+
+	/* construct the header name */
+	const char *s_name = apr_psprintf(r->pool, "%s%s", claim_prefix, oidc_normalize_header_name(r, s_key));
+
+	/* do some logging about this event */
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_application_header: setting header %s=%s", s_name, s_value);
+
+	/* now set the actual header name/value */
+	apr_table_set(r->headers_in, s_name, s_value);
+}
+
+/*
+ * set the user/claims information from the session in HTTP headers passed on to the application
+ */
+static void oidc_set_app_headers(request_rec *r, const apr_json_value_t *j_attrs, const char *authn_header, const char *claim_prefix, const char *claim_delimiter) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_app_headers: entering");
+
+	apr_json_value_t *j_value = NULL;
+	apr_hash_index_t *hi = NULL;
+	const char *s_key = NULL;
+
+	/* set the user authentication HTTP header if set and required */
+	if (  (r->user != NULL) && (authn_header != NULL) ) apr_table_set(r->headers_in, authn_header, r->user);
+
+	/* if not attributes are set, nothing needs to be done */
+	if (j_attrs == NULL) {
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_app_headers: no attributes to set (j_attrs=NULL)");
+		return;
+	}
+
+	/* loop over the claims in the JSON structure */
+	for (hi = apr_hash_first(r->pool, j_attrs->value.object); hi; hi = apr_hash_next(hi)) {
+
+		/* get the next key/value entry */
+		apr_hash_this(hi, (const void**)&s_key, NULL, (void**)&j_value);
+
+		/* check if it is a single value string */
+		if (j_value->type == APR_JSON_STRING) {
+
+			/* set the single string in the application header whose name is based on the key and the prefix */
+			oidc_set_app_header(r, s_key, j_value->value.string.p, claim_prefix);
+
+		/* check if it is a multi-value string */
+		} else if (j_value->type == APR_JSON_ARRAY) {
+
+			/* some logging about what we're going to do */
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_app_headers: parsing attribute array %s (#%d)", s_key, j_value->value.array->nelts);
+
+			/* string to hold the concatenated array string values */
+			char *s_concat = apr_pstrdup(r->pool, "");
+			int i = 0;
+
+			/* loop over the array */
+			for (i = 0; i < j_value->value.array->nelts; i++) {
+
+				/* get the current element */
+				apr_json_value_t *elem = APR_ARRAY_IDX(j_value->value.array, i, apr_json_value_t *);
+
+				/* check if it is a string */
+				if (elem->type == APR_JSON_STRING) {
+
+					/* concatenate the string to the s_concat value using the configured separator char */
+					// TODO: escape the delimiter in the values (maybe reuse/extract url-formatted code from oidc_session_identity_encode)
+					if (apr_strnatcmp(s_concat, "") != 0) {
+						s_concat = apr_psprintf(r->pool, "%s%s%s", s_concat, claim_delimiter, elem->value.string.p);
+					} else {
+						s_concat = apr_psprintf(r->pool, "%s", elem->value.string.p);
+					}
+
+				} else {
+
+					/* don't know how to handle a non-string array element */
+					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_set_app_headers: unhandled in-array JSON object type [%d] when parsing attributes", elem->type);
+				}
+			}
+
+			/* set the concatenated string */
+			oidc_set_app_header(r, s_key, s_concat, claim_prefix);
+
+		} else {
+
+			/* no string and no array, so unclear how to handle this */
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_set_app_headers: unhandled JSON object type [%d] when parsing attributes", j_value->type);
+		}
+	}
+}
+
+/*
+ * handle the case where we have identified an existing authentication session for a user
+ */
+static int oidc_handle_existing_session(request_rec *r, const oidc_cfg *const cfg, session_rec *session) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_handle_existing_session: entering");
+
+	const char *s_attrs = NULL;
+	apr_json_value_t *j_attrs = NULL;
+
+	/* get a handle to the director config */
+	oidc_dir_cfg *dir_cfg = ap_get_module_config(r->per_dir_config, &oidc_module);
+
+	/*
+	 * we're going to pass the information that we have to the application,
+	 * but first we need to scrub the headers that we're going to use for security reasons
+	 */
+	oidc_scrub_request_headers(r, cfg, dir_cfg);
+
+	/* get the string-encoded attributes from the session */
+	oidc_session_get(r, session, OIDC_CLAIMS_SESSION_KEY, &s_attrs);
+
+	/* decode the string-encoded attributes in to a JSON structure */
+	if ( (s_attrs != NULL) && (apr_json_decode(&j_attrs, s_attrs, strlen(s_attrs), r->pool) != APR_SUCCESS) ) {
+
+		// whoops, attributes have been corrupted
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: unable to parse string-encoded claims stored in the session: returning HTTP 500");
+
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	/* pass the user/claims in the session to the application by setting the appropriate headers */
+	// TODO: combine already resolved attrs from id_token with those from user_info endpoint
+	oidc_set_app_headers(r, j_attrs, dir_cfg->authn_header, cfg->claim_prefix, cfg->claim_delimiter);
+
+	/* set the attributes JSON structure in the request state so it is available for authz purposes later on */
+	oidc_request_state_set(r, OIDC_CLAIMS_SESSION_KEY, (const char *)j_attrs);
+
+	/* return all "user authenticated" status */
+	return OK;
+}
+
+/*
+ * handle an OpenID Connect Authorization Response from the OP
+ */
+int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c, session_rec *session) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_handle_authorization_response: entering");
+
+	/* inialize local variables */
+	char *code = NULL, *state = NULL;
+	char *issuer = NULL, *original_url = NULL;
+
+	/* by now we're pretty sure they exist */
+	oidc_get_request_parameter(r, "code", &code);
+	oidc_get_request_parameter(r, "state", &state);
+
+	/* check the state parameter against what we stored in a cookie */
+	if (oidc_check_state(r, state, &original_url, &issuer) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_authorization_response: unable to restore state: returning HTTP 500");
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	/* by default we'll assume that we're dealing with a single statically configured OP */
+	struct oidc_provider_t *provider = &c->provider;
+
+	/* unless a metadata directory was configured, so we'll try and get the provider settings from there */
+	if (c->metadata_dir != NULL) {
+
+		/* try and get metadata from the metadata directory for the OP that sent this response */
+		if ( (oidc_metadata_get(r, c, issuer, &provider) != APR_SUCCESS) || (provider == NULL) ) {
+
+			// no luck
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_authorization_response: no provider metadata found for selected OP: returning HTTP 500");
+			return HTTP_INTERNAL_SERVER_ERROR;
+		}
+	}
+
+	char *id_token = NULL, *access_token = NULL, *response = NULL;
+	char *remoteUser = NULL;
+	apr_time_t expires;
+	apr_json_value_t *j_idtoken_payload = NULL;
+
+	// TODO: put oidc_resolve_code and oidc_resolve_userinfo in to oidc_proto.c
+
+	/* resolve the code against the token endpoint of the OP */
+	if (oidc_resolve_code(r, c, provider, code, &remoteUser, &j_idtoken_payload, &id_token, &access_token, &expires) == FALSE) {
+		/* errors have already been reported */
+		return HTTP_UNAUTHORIZED;
+	}
+
+	/* set the resolved stuff in the session */
+	session->remote_user = remoteUser;
+	session->expiry = expires;
+	oidc_session_set(r, session, OIDC_IDTOKEN_SESSION_KEY, id_token);
+
+	/* optionally resolve additional claims against the userinfo endpoint */
+	if (oidc_resolve_userinfo(r, c, provider, &response, access_token) == TRUE) {
+
+		/* we got back claims from the userinfo endpoint, try and decode them */
+		apr_json_value_t *attrs = NULL;
+		if (apr_json_decode(&attrs, response, strlen(response), r->pool) != APR_SUCCESS) {
+
+			/* something went wrong, but it is not fatal; try and continue without the additional claims */
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_authorization_response: could not decode JSON from UserInfo endpoint response successfully");
+		} else if ( (attrs == NULL) || (attrs->type != APR_JSON_OBJECT) ) {
+
+			/* something went wrong, but it is not fatal; try and continue without the additional claims */
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_authorization_response: UserInfo endpoint response did not contain a JSON object");
+		} else {
+
+			/* succesfully decoded a set claims from the response so we can store them in the session context safely now */
+			oidc_session_set(r, session, OIDC_CLAIMS_SESSION_KEY, response);
+		}
+	}
+
+	/* store the session */
+	oidc_session_save(r, session);
+
+	/* not sure whether this is required, but it won't hurt */
+	r->user = remoteUser;
+
+	/* now we've authenticated the user so go back to the URL that he originally tried to access */
+	apr_table_add(r->headers_out, "Location", original_url);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_handle_authorization_response: session created and stored, redirecting to original url: %s", original_url);
+	return HTTP_MOVED_TEMPORARILY;
+}
+
+/*
+ * main routine: handle OpenID Connect authentication
+ */
 int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: entering");
 
-	char *code = NULL, *state = NULL, *issuer = NULL, *original_url = NULL;
-
-	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-
+	/* load the session from the request state; this will be a new "empty" session if no state exists */
 	session_rec *session = NULL;
 	oidc_session_load(r, &session);
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: incoming request: \"%s?%s\", session->remote_user=%s, ap_is_initial_req(r)=%d", r->parsed_uri.path, r->args, session->remote_user, ap_is_initial_req(r));
+	/* log some stuff about the incoming HTTP request */
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: incoming request: \"%s?%s\", r->user=%s, session->remote_user=%s, ap_is_initial_req(r)=%d", r->parsed_uri.path, r->args, r->user, session->remote_user, ap_is_initial_req(r));
 
+	/* check if this is a sub-request or an initial request */
 	if (ap_is_initial_req(r)) {
 
+		/* initial request, now check if we have an existing session */
 		if (session->remote_user != NULL)  {
 
-			// initial request to application url and we have a session
-			if (d->scrub_request_headers) oidc_scrub_request_headers(r, c, d);
-
+			/* set the user in the main request for further (incl. sub-request) processing */
 			r->user = (char *)session->remote_user;
-			if (d->authn_header != NULL) {
-				apr_table_set(r->headers_in, d->authn_header, session->remote_user);
+
+			/* this is initial request and we already have a session */
+			return oidc_handle_existing_session(r, c, session);
+
+		// see if this is an authorization response from the provider
+		} else if (oidc_proto_is_authorization_response(r, c)) {
+
+			// yup, handle the authorization response
+			return oidc_handle_authorization_response(r, c, session);
+
+		// or may be it is a discovery response
+		} else if (oidc_is_discovery_response(r, c)) {
+
+			/* yes, get the response parameters */
+			char *issuer = NULL, *original_url = NULL;
+			oidc_get_request_parameter(r, OIDC_OP_PARAM_NAME, &issuer);
+			oidc_get_request_parameter(r, OIDC_RT_PARAM_NAME, &original_url);
+
+			// try and get metadata from the metadata directories for the selected OP
+			oidc_provider_t *provider = NULL;
+			if ( (oidc_metadata_get(r, c, issuer, &provider) == APR_SUCCESS) && (provider != NULL) ) {
+
+				// now we've got a selected OP, send the user there to authenticate
+				return oidc_authenticate_user(r, c, provider, original_url);
 			}
 
-			// TODO: combine already resolved attrs from id_token with those from user_info endpoint
-			const char *attributes = NULL;
-			oidc_session_get(r, session, "attributes", &attributes);
+			// something went wrong, log that
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: no provider metadata found for selected OP: returning HTTP 500");
+			return HTTP_INTERNAL_SERVER_ERROR;
+		}
 
-			if (attributes != NULL) {
-				apr_json_value_t *attrs = NULL;
-				apr_status_t status = apr_json_decode(&attrs, attributes, strlen(attributes), r->pool);
-				if ((status == APR_SUCCESS) && (attrs != NULL)) {
-					oidc_set_attribute_headers(r, c, attrs);
-					oidc_request_state_set(r, "attributes", (const char *)attrs);
-				}
-			}
-
-			return OK;
-
-		// see if the request path matches the configured redirect URI, so it can require special handling
-		} else if (oidc_request_matches_redirect_uri(r, c) == TRUE) {
-
-			// check for code/state, otherwise a protected URL can't have a code= parameter without it being interpreted as an OIDC callback
-			if (oidc_get_code_and_state(r, &code, &state) == TRUE) {
-				// initial request to redirect_uri with code & state parameters
-
-				if (oidc_check_state(r, state, &original_url, &issuer) != APR_SUCCESS) {
-					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: unable to restore state: returning HTTP 500");
-					return HTTP_INTERNAL_SERVER_ERROR;
-				}
-
-				// TODO: unify with authorization request, discovery near the end, and static/config stuff
-				struct oidc_provider_t *provider = &c->provider;
-				if (c->metadata_dir != NULL) {
-					// try and get metadata from the metadata directories for the selected OP
-					if ( (oidc_metadata_get(r, c, issuer, &provider) != APR_SUCCESS) || (provider == NULL) ) {
-						// no luck
-						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: no provider metadata found for selected OP: returning HTTP 500");
-						return HTTP_INTERNAL_SERVER_ERROR;
-					}
-				}
-
-				char *id_token = NULL, *access_token = NULL, *response = NULL;
-				char *remoteUser = NULL;
-				apr_time_t expires;
-				apr_json_value_t *attrs = NULL;
-
-				if (oidc_resolve_code(r, c, d, provider, code, &remoteUser, &attrs, &id_token, &access_token, &expires)) {
-
-					oidc_resolve_userinfo(r, c, d, provider, &response, access_token);
-
-					if (response != NULL) {
-						// now id_token attributes are overwritten in attrs...
-						apr_status_t status = apr_json_decode(&attrs, response, strlen(response), r->pool);
-						if (status != APR_SUCCESS) {
-							ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: could not decode JSON from UserInfo endpoint response successfully");
-							return HTTP_UNAUTHORIZED;
-						}
-						if ( (attrs == NULL) || (attrs->type != APR_JSON_OBJECT) ) {
-							ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_userid_openid_connect: UserInfo endpoint response did not contain a JSON object");
-							return HTTP_UNAUTHORIZED;
-						}
-					}
-
-					session->remote_user = remoteUser;
-					session->expiry = expires;
-					oidc_session_set(r, session, "id_token", id_token);
-					oidc_session_set(r, session, "attributes", response);
-					oidc_session_save(r, session);
-
-					r->user = remoteUser;
-					apr_table_add(r->headers_out, "Location", original_url);
-
-					ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: session created and stored, redirecting to original url: %s", original_url);
-
-					return HTTP_MOVED_TEMPORARILY;
-
-				} else {
-
-					// resolving the "code" failed; an error will have been reported
-					return HTTP_UNAUTHORIZED;
-
-				}
-
-			// no code/state params, but this could be an OP selection request
-			} else if (oidc_get_provider_selection(r, &issuer, &original_url)) {
-
-				oidc_provider_t *provider = NULL;
-
-				// try and get metadata from the metadata directories for the selected OP
-				if ( (oidc_metadata_get(r, c, issuer, &provider) == APR_SUCCESS) && (provider != NULL) ) {
-
-					// got it
-					oidc_authorization_request(r, c, provider, original_url);
-					return HTTP_MOVED_TEMPORARILY;
-				}
-
-				// no luck
-				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: no provider metadata found for selected OP: returning HTTP 500");
-				return HTTP_INTERNAL_SERVER_ERROR;
-
-			} // else: initial request, no session, url=redirect_uri: hit the default flow for unauthorized users (cq. discovery)
-
-		} // else: initial request, no session, url!=redirect_uri: hit the default flow for unauthorized users (cq. discovery)
+		/*
+		 * else: initial request, no session and no authorization/discovery response
+		 *       hit the default flow for unauthenticated users
+		 */
 
 	// else: not an initial request
 	} else if (session->remote_user != NULL)  {
 
-		// sub-request and we have a session (headers will have been scrubbed and set already)
+		// this is a sub-request and we have a session (headers will have been scrubbed and set already)
 		r->user = (char *)session->remote_user;
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: recycling user '%s' from initial request for sub request", r->user);
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_userid_openid_connect: recycling user '%s' from initial request for sub-request", r->user);
 
 		return OK;
-
 	}
 
-	// TODO: shouldn't we use an explicit redirect to the discovery endpoint (maybe a "discovery" param to the redirect_uri)?
-
-	// initial or sub request but no session
-	if (c->metadata_dir != NULL) return oidc_discovery(r, c);
-
-	// static config, no discovery
-	oidc_authorization_request(r, c, &c->provider, oidc_get_current_url(r, c));
-
-	return HTTP_MOVED_TEMPORARILY;
-
+	/* no session (regardless of whether it is main or sub-request), go and authenticate the user */
+	return oidc_authenticate_user(r, c, NULL, oidc_get_current_url(r, c));
 }
 
 #define OIDC_OAUTH20_VALIDATION_GRANT_TYPE "urn:pingidentity.com:oauth2:grant_type:validate_bearer"
@@ -1112,7 +956,7 @@ int oidc_check_userid_oauth20(request_rec *r, oidc_cfg *c) {
 		token = apr_hash_get(result->value.object, "access_token", APR_HASH_KEY_STRING);
 	}
 
-	oidc_request_state_set(r, "attributes", (const char *)token);
+	oidc_request_state_set(r, OIDC_CLAIMS_SESSION_KEY, (const char *)token);
 
 	// TODO: user attribute header settings & scrubbing ?
 
@@ -1127,46 +971,59 @@ int oidc_check_userid_oauth20(request_rec *r, oidc_cfg *c) {
 	return OK;
 }
 
+/*
+ * generic Apache authentication hook for this module: dispatches to OpenID Connect or OAuth 2.0 specific routines
+ */
 int oidc_check_user_id(request_rec *r) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_user_id: entering");
 
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
+	/* see if any authentication has been defined at all */
 	if (ap_auth_type(r) == NULL)
 		return DECLINED;
 
+	/* see if we've configed OpenID Connect user authentication for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect") == 0)
 		return oidc_check_userid_openid_connect(r, c);
 
+	/* see if we've configed OAuth 2.0 access control for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "oauth20") == 0)
 		return oidc_check_userid_oauth20(r, c);
 
+	/* this is not for us but for some other handler */
 	return DECLINED;
 }
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
+/*
+ * generic Apache >=2.4 authorization hook for this module
+ * handles both OpenID Connect or OAuth 2.0 in the same way, based on the claims stored in the session
+ */
 authz_status oidc_authz_checker(request_rec *r, const char *require_args, const void *parsed_require_args) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authz_checker: entering");
-
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
-	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, "attributes");
+	/* get the set of claims from the request state (they've been set in the authentication part earlier */
+	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, OIDC_CLAIMS_SESSION_KEY);
 
+	/* dispatch to the >=2.4 specific authz routine */
 	return oidc_authz_worker24(r, attrs, require_args);
 }
 #else
+/*
+ * generic Apache <2.4 authorization hook for this module
+ * handles both OpenID Connect or OAuth 2.0 in the same way, based on the claims stored in the session
+ */
 int oidc_auth_checker(request_rec *r) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_auth_checker: entering");
-
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
-	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, "attributes");
-	const apr_array_header_t *const reqs_arr = ap_requires(r);
-	const require_line *const reqs = reqs_arr ? (require_line *) reqs_arr->elts : NULL;
+	/* get the set of claims from the request state (they've been set in the authentication part earlier */
+	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, OIDC_CLAIMS_SESSION_KEY);
 
+	/* get the Require statemetns */
+	const apr_array_header_t *const reqs_arr = ap_requires(r);
+
+	/* see if we have any */
+	const require_line *const reqs = reqs_arr ? (require_line *) reqs_arr->elts : NULL;
 	if (!reqs_arr) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 				"No require statements found, "
@@ -1174,6 +1031,7 @@ int oidc_auth_checker(request_rec *r) {
 		return DECLINED;
 	}
 
+	/* dispatch to the <2.4 specific authz routine */
 	return oidc_authz_worker(r, attrs, reqs, reqs_arr->nelts);
 }
 #endif
@@ -1194,8 +1052,8 @@ const command_rec oidc_config_cmds[] = {
 		AP_INIT_TAKE1("OIDCRedirectURI", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, redirect_uri), RSRC_CONF, "Define the Redirect URI (e.g.: https://localhost:9031/protected/return/uri"),
 		AP_INIT_TAKE1("OIDCCookieDomain", oidc_set_cookie_domain, NULL, RSRC_CONF, "Specify domain element for OIDC session cookie."),
 		AP_INIT_TAKE1("OIDCCryptoPassphrase", oidc_set_crypto_passphrase, (void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase), RSRC_CONF, "Passphrase used for AES crypto on cookies and state."),
-		AP_INIT_TAKE1("OIDCAttributeDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, attribute_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued attributes in the HTTP headers."),
-		AP_INIT_TAKE1("OIDCAttributePrefix ", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, attribute_prefix), RSRC_CONF, "The prefix to use when setting attributes in the HTTP headers."),
+		AP_INIT_TAKE1("OIDCClaimDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued claims in the HTTP headers."),
+		AP_INIT_TAKE1("OIDCClaimPrefix ", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_prefix), RSRC_CONF, "The prefix to use when setting claims in the HTTP headers."),
 
 		AP_INIT_TAKE1("OIDCOAuthClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.client_id), RSRC_CONF, "Client identifier used in calls to OAuth 2.0 Authorization server validation calls."),
 		AP_INIT_TAKE1("OIDCOAuthClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.client_secret), RSRC_CONF, "Client secret used in calls to OAuth 2.0 Authorization server validation calls."),
@@ -1205,9 +1063,9 @@ const command_rec oidc_config_cmds[] = {
 
 		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, cache_dir), RSRC_CONF, "Directory used for file-based caching."),
 		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains OP metadata files."),
+		AP_INIT_FLAG("OIDCScrubRequestHeaders", oidc_set_flag_slot, (void *) APR_OFFSETOF(oidc_cfg, scrub_request_headers), RSRC_CONF, "Scrub user name and claim headers from the user's request."),
 
 		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, authn_header), ACCESS_CONF|OR_AUTHCFG, "Specify the HTTP header variable to set with the name of the OIDC authenticated user.  By default no headers are added."),
-		AP_INIT_TAKE1("OIDCScrubRequestHeaders", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, scrub_request_headers), ACCESS_CONF, "Scrub OIDC user name and ID_TOKEN attribute headers from the user's request."),
 		AP_INIT_TAKE1("OIDCDirScope", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, dir_scope), ACCESS_CONF|OR_AUTHCFG, "Define the OpenID Connect scope."),
 		AP_INIT_TAKE1("OIDCCookie", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, cookie), ACCESS_CONF|OR_AUTHCFG, "Define the cookie name for HTTP sessions"),
 		{ NULL }
