@@ -270,7 +270,7 @@ static apr_byte_t oidc_proto_parse_idtoken_header(request_rec *r, const char *s_
 /*
  * check whether the provided string is a valid id_token and return its parsed contents
  */
-apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_provider_t *provider, const char *id_token, char **user, apr_json_value_t **j_payload, apr_time_t *expires) {
+static apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_provider_t *provider, const char *id_token, char **user, apr_json_value_t **j_payload, apr_time_t *expires) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_parse_idtoken: entering");
 
@@ -323,4 +323,127 @@ apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_provider_t *provider, c
 	/* since we've made it so far, we may as well say it is a valid id_token */
 	return TRUE;
 }
+
+/*
+ * printout a JSON string value
+ */
+static apr_byte_t oidc_proto_json_string_print(request_rec *r, apr_json_value_t *result, const char *key, const char *log) {
+	apr_json_value_t *value = apr_hash_get(result->value.object, key, APR_HASH_KEY_STRING);
+	if (value != NULL) {
+		if (value->type == APR_JSON_STRING) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "%s: response contained a \"%s\" key with string value: \"%s\"", log, key, value->value.string.p);
+		} else {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "%s: response contained an \"%s\" key but no string value", log, key);
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/*
+ * decode a json string from an endpoint call response and check for errors
+ */
+static apr_byte_t oidc_proto_decode_json_response(request_rec *r, const char *response, apr_json_value_t **result, const char *log) {
+
+	/* first do the actual decoding */
+	if (apr_json_decode(result, response, strlen(response), r->pool) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_decode_json_response: could not decode response successfully");
+		return FALSE;
+	}
+
+	/* convenience helper pointer */
+	apr_json_value_t *json = *result;
+
+	/* check that we've got really a JSON object */
+	if ( (json ==NULL) || (json->type != APR_JSON_OBJECT) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_decode_json_response: response did not contain a JSON object");
+		return FALSE;
+	}
+
+	if (oidc_proto_json_string_print(r, json, "error", log) == TRUE) {
+		oidc_proto_json_string_print(r, json, "error_description", log);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+/*
+ * resolves the code received from the OP in to an access_token and id_token and returns the parsed contents
+ */
+apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char *code, char **user, apr_json_value_t **j_idtoken_payload, char **s_id_token, char **s_access_token, apr_time_t *expires) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_resolve_code: entering");
+
+	char *postfields = apr_psprintf(r->pool,
+			"grant_type=authorization_code&code=%s&redirect_uri=%s",
+			oidc_escape_string(r, code),
+			oidc_escape_string(r, cfg->redirect_uri)
+	);
+	if ((apr_strnatcmp(provider->token_endpoint_auth, "client_secret_post")) == 0) {
+		postfields = apr_psprintf(r->pool, "%s&client_id=%s&client_secret=%s", postfields, oidc_escape_string(r, provider->client_id), oidc_escape_string(r, provider->client_secret));
+	}
+	const char *response = oidc_http_call(r, provider->token_endpoint_url, postfields, (apr_strnatcmp(provider->token_endpoint_auth, "client_secret_basic") == 0) ? apr_psprintf(r->pool, "%s:%s", provider->client_id, provider->client_secret) : NULL, NULL, provider->ssl_validate_server);
+	if (response == NULL)
+		return FALSE;
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_resolve_code: response = %s", response);
+
+	apr_json_value_t *result = NULL;
+	if (oidc_proto_decode_json_response(r, response, &result, "oidc_proto_resolve_code") == FALSE) return FALSE;
+
+	// at_hash is optional
+
+	apr_json_value_t *access_token = apr_hash_get(result->value.object, "access_token", APR_HASH_KEY_STRING);
+	if ( (access_token == NULL) || (access_token->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_resolve_code: response JSON object did not contain an access_token string");
+		return FALSE;
+	}
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_resolve_code: returned access_token: %s", access_token->value.string.p);
+	*s_access_token = apr_pstrdup(r->pool, access_token->value.string.p);
+
+	apr_json_value_t *token_type = apr_hash_get(result->value.object, "token_type", APR_HASH_KEY_STRING);
+	if ( (token_type == NULL) || (token_type->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_resolve_code: response JSON object did not contain a token_type string");
+		return FALSE;
+	}
+	if ((apr_strnatcmp(token_type->value.string.p, "Bearer") != 0) && (provider->userinfo_endpoint_url != NULL)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_resolve_code: token_type is \"%s\" and UserInfo endpoint is set: can only deal with Bearer authentication against the UserInfo endpoint!", token_type->value.string.p);
+		//return FALSE;
+	}
+
+	apr_json_value_t *id_token = apr_hash_get(result->value.object, "id_token", APR_HASH_KEY_STRING);
+	if ( (id_token == NULL) || (id_token->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_resolve_code: response JSON object did not contain an id_token string");
+		return FALSE;
+	}
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_resolve_code: returned id_token: %s", id_token->value.string.p);
+	*s_id_token = apr_pstrdup(r->pool, id_token->value.string.p);
+
+	return oidc_proto_parse_idtoken(r, provider, id_token->value.string.p, user, j_idtoken_payload, expires);
+}
+
+/*
+ * get claims from the OP UserInfo endpoint using the provided access_token
+ */
+apr_byte_t oidc_proto_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char **response, char *access_token) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_resolve_userinfo: entering, endpoint=%s, access_token=%s", provider->userinfo_endpoint_url, access_token);
+
+	/* only do this if an actual endpoint was set */
+	if (provider->userinfo_endpoint_url == NULL) return FALSE;
+
+	/* get the JSON response */
+	*response = oidc_http_call(r,  provider->userinfo_endpoint_url, NULL, 0, access_token, provider->ssl_validate_server);
+
+	/* see if we got any data back at all */
+	if (*response == NULL) return FALSE;
+
+	/* we may have received an error response */
+	apr_json_value_t *result = NULL;
+	return oidc_proto_decode_json_response(r, *response, &result, "oidc_resolve_userinfo");
+}
+
 
