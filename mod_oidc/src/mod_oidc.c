@@ -77,49 +77,55 @@
 
 #include "mod_oidc.h"
 
-extern module AP_MODULE_DECLARE_DATA oidc_module;
-
-#define OIDC_CLAIMS_SESSION_KEY "claims"
-#define OIDC_IDTOKEN_SESSION_KEY "id_token"
-
-#define OIDC_OP_PARAM_NAME "oidc_provider"
-#define OIDC_RT_PARAM_NAME "oidc_return"
-
 // TODO: require SSL
 
-apr_table_t *oidc_scrub_headers(
-		apr_pool_t *p,
-		const char *const attr_prefix,
-		const char *const authn_header,
-		const apr_table_t *const headers,
-		const apr_table_t **const dirty_headers_ptr
-		) {
-	const apr_array_header_t *const h = apr_table_elts(headers);
-	const int prefix_len = attr_prefix ? strlen(attr_prefix) : 0;
+extern module AP_MODULE_DECLARE_DATA oidc_module;
 
-	/* Each header from the headers table is put in one of these two
-	   buckets. If the header would be interpreted as an OIDC attribute,
-	   and it wasn't set by this module, then it gets put in the dirty
-	   bucket. */
-	apr_table_t *clean_headers = apr_table_make(p, h->nelts);
-	apr_table_t *dirty_headers =
-		dirty_headers_ptr ? apr_table_make(p, h->nelts) : NULL;
+/* key for storing the claims in the session context */
+#define OIDC_CLAIMS_SESSION_KEY "claims"
+/* key for storing the id_token in the session context */
+#define OIDC_IDTOKEN_SESSION_KEY "id_token"
 
-	/* Loop state */
+/* parameter name of the OP provider selection in the discovery response */
+#define OIDC_OP_PARAM_NAME "oidc_provider"
+/* parameter name of the original URL in the discovery response */
+#define OIDC_RT_PARAM_NAME "oidc_return"
+
+/* name of the cookie that binds the state in the authorization request/response to the browser */
+#define OIDCStateCookieName  "oidc-state"
+/* separator used to distinghuish different values in the state cookie */
+#define OIDCStateCookieSep  " "
+
+/* the (global) key for the mod_oidc related state that is stored in the request userdata context */
+#define MOD_OIDC_USERDATA_KEY "mod_oidc_state"
+
+/*
+ * clean any suspicious headers in the HTTP request sent by the user agent
+ */
+static void oidc_scrub_request_headers(request_rec *r, const char *claim_prefix,  const char *authn_header) {
+
+	const int prefix_len = claim_prefix ? strlen(claim_prefix) : 0;
+
+	/* get an array representation of the incoming HTTP headers */
+	const apr_array_header_t *const h = apr_table_elts(r->headers_in);
+
+	/* table to keep the non-suspicous headers */
+	apr_table_t *clean_headers = apr_table_make(r->pool, h->nelts);
+
+	/* loop over the incoming HTTP headers */
 	const apr_table_entry_t *const e = (const apr_table_entry_t *)h->elts;
 	int i;
-
 	for (i = 0; i < h->nelts; i++) {
 		const char *const k = e[i].key;
 
-		/* Is this header's name equivalent to the header that OIDC
-		 * would set for the authenticated user? */
+		 /* is this header's name equivalent to the header that OIDC would set for the authenticated user? */
 		const int authn_header_matches =
 			(k != NULL) &&
 			authn_header &&
 			(oidc_strnenvcmp(k, authn_header, -1) == 0);
 
-		/* Would this header be interpreted as a OIDC attribute? Note
+		/*
+		 * would this header be interpreted as a OIDC attribute? Note
 		 * that prefix_len will be zero if no attr_prefix is defined,
 		 * so this will always be false. Also note that we do not
 		 * scrub headers if the prefix is empty because every header
@@ -128,106 +134,18 @@ apr_table_t *oidc_scrub_headers(
 		const int prefix_matches =
 			(k != NULL) &&
 			prefix_len &&
-			(oidc_strnenvcmp(k, attr_prefix, prefix_len) == 0);
+			(oidc_strnenvcmp(k, claim_prefix, prefix_len) == 0);
 
-		/* Is this header a spoofed OIDCAuthNHeader or a spoofed OIDC
-		 * attribute header? */
-		const int should_scrub = prefix_matches || authn_header_matches;
-
-		/* If it's a spoofed header, put it in the dirty bucket. If it
-		 * is not, put it in the clean bucket. */
-		apr_table_t *const target =
-			should_scrub ? dirty_headers : clean_headers;
-
-		/* The target might be the dirty_headers table, and if the
-		 * caller doesn't want to see the dirty headers, then we
-		 * should skip that work. */
-		if (target) {
-			apr_table_addn(target, k, e[i].val);
+		/* add to the clean_headers if non-suspicious, skip and report otherwise */
+		if (!prefix_matches && !authn_header_matches) {
+			apr_table_addn(clean_headers, k, e[i].val);
+		} else {
+			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "oidc_scrub_request_headers: scrubbed suspicious request header (%s: %.32s)", k, e[i].val);
 		}
 	}
 
-	/* If the caller wants the dirty headers, then give them a
-	 * pointer. */
-	if (dirty_headers_ptr) {
-		*dirty_headers_ptr = dirty_headers;
-	}
-	return clean_headers;
-}
-
-void oidc_scrub_request_headers(request_rec *r, const oidc_cfg *const c, const oidc_dir_cfg *const d) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_scrub_request_headers: entering");
-
-	if (c->scrub_request_headers == 0) return;
-
-	const apr_table_t *dirty_headers;
-	const char *log_fmt;
-	const apr_array_header_t *h;
-	const apr_table_entry_t *e;
-	int i;
-
-	r->headers_in =
-		oidc_scrub_headers(
-			r->pool,
-			c->claim_prefix,
-			d->authn_header,
-			r->headers_in,
-			&dirty_headers);
-
-	log_fmt = "oidc_scrub_request_headers: scrubbed suspicious request header (%s: %.32s)";
-	h = apr_table_elts(dirty_headers);
-	e = (const apr_table_entry_t *)h->elts;
-	for (i = 0; i < h->nelts; i++) {
-		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, log_fmt, e[i].key, e[i].val);
-	}
-}
-
-apr_byte_t oidc_get_code_and_state(request_rec *r, char **code, char **state) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_code_and_state: entering");
-
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
-
-	*code = NULL;
-	*state = NULL;
-
-	char *tokenizer_ctx, *p, *args, *rv = NULL;
-	const char *k_code_param = "code=";
-	const size_t k_code_param_sz = strlen(k_code_param);
-	const char *k_state_param = "state=";
-	const size_t k_state_param_sz = strlen(k_state_param);
-
-	if (r->args == NULL || strlen(r->args) == 0) return FALSE;
-
-	args = apr_pstrndup(r->pool, r->args, strlen(r->args));
-
-	p = apr_strtok(args, "&", &tokenizer_ctx);
-	do {
-		if (p && strncmp(p, k_code_param, k_code_param_sz) == 0) {
-			*code = apr_pstrdup(r->pool, p + k_code_param_sz);
-			ap_unescape_url(*code);
-		}
-		if (p && strncmp(p, k_state_param, k_state_param_sz) == 0) {
-			*state = apr_pstrdup(r->pool, p + k_state_param_sz);
-			ap_unescape_url(*state);
-		}
-		p = apr_strtok(NULL, "&", &tokenizer_ctx);
-	} while (p);
-
-	if ( (*code == NULL) || (*state == NULL) ) {
-		if (*code != NULL) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_code_and_state: \"code\" parameter found at redirect_uri, but no \"state\" parameter...");
-		}
-		if (*state != NULL) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_code_and_state: \"state\" parameter found at redirect_uri, but no \"code\" parameter...");
-		}
-		return FALSE;
-	}
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_code_and_state: returning, code=%s and state=%s", *code, *state);
-
-	return TRUE;
+	/* overwrite the incoming headrs with the clean result */
+	r->headers_in = clean_headers;
 }
 
 /*
@@ -239,16 +157,10 @@ static apr_byte_t oidc_is_discovery_response(request_rec *r, oidc_cfg *cfg) {
 	return ((oidc_request_matches_url(r, cfg->redirect_uri) == TRUE)
 			&& oidc_request_has_parameter(r, OIDC_OP_PARAM_NAME)
 			&& oidc_request_has_parameter(r, OIDC_RT_PARAM_NAME));
-
 }
 
-#define OIDCStateCookieName  "oidc-state"
-#define OIDCStateCookieSep  " "
-#define OIDCSHA1Len 20
-#define OIDCRandomLen 32
-
 /*
- * Calculates a hash value based on request fingerprint plus a provided state string.
+ * calculates a hash value based on request fingerprint plus a provided state string.
  */
 char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
 
@@ -286,43 +198,57 @@ char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
 	apr_sha1_update(&sha1, state, strlen(state));
 
 	/* finalize the hash input and calculate the resulting hash output */
-	unsigned char hash[OIDCSHA1Len];
+	const int sha1_len = 20;
+	unsigned char hash[sha1_len];
 	apr_sha1_final(hash, &sha1);
 
 	/* base64 encode the resulting hash and return it */
-	char *result = apr_palloc(r->pool, apr_base64_encode_len(OIDCSHA1Len) + 1);
-	apr_base64_encode(result, (const char *) hash, OIDCSHA1Len);
+	char *result = apr_palloc(r->pool, apr_base64_encode_len(sha1_len) + 1);
+	apr_base64_encode(result, (const char *) hash, sha1_len);
 	return result;
 }
 
-static apr_status_t oidc_check_state(request_rec *r, char *state, char **original_url, char **issuer) {
+/*
+ * see if the state that came back from the OP matches what we've stored in the cookie
+ */
+static int oidc_check_state(request_rec *r, char *state, char **original_url, char **issuer) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: entering");
 
+	/* get the state cookie value first */
 	char *cookieValue = oidc_get_cookie(r, OIDCStateCookieName);
 	if (cookieValue == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: no \"%s\" cookie found", OIDCStateCookieName);
 		return FALSE;
 	}
 
-	// clear oidc-state cookie
+	/* clear state cookie because we don't need it anymore */
 	oidc_set_cookie(r, OIDCStateCookieName, "");
 
+	/* decrypt the state obtained from the cookie */
 	char *svalue;
 	oidc_base64url_decode_decrypt_string(r, &svalue, cookieValue);
+
+	/* context to iterate over the entries in the decrypted state cookie value */
 	char *ctx = NULL;
+
+	/* first get the base64-encoded random value */
 	char *b64 = apr_strtok(svalue, OIDCStateCookieSep, &ctx);
 	if (b64 == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: no first element found in \"%s\" cookie (%s)", OIDCStateCookieName, cookieValue);
 		return FALSE;
 	}
 
+	/* calculate the hash of the browser fingerprint concatenated with the random value */
 	char *calc = oidc_get_browser_state_hash(r, b64);
+
+	/* compare the calculated hash with the value provided in the authorization response */
 	if (apr_strnatcmp(calc, state) != 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: calculated state from cookie does not match state parameter passed back in URL: \"%s\" != \"%s\"", state, calc);
 		return FALSE;
 	}
 
+	/* since we're ok, get the orginal URL as the next value in the decrypted cookie */
 	*original_url = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
 	if (*original_url == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: no separator (%s) found in \"%s\" cookie (%s)", OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
@@ -330,6 +256,7 @@ static apr_status_t oidc_check_state(request_rec *r, char *state, char **origina
 	}
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: \"original_url\" restored from cookie: %s", *original_url);
 
+	/* lastly, get the issuer as the third and last value stored in the cookie */
 	*issuer = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
 	if (*issuer == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_state: no second separator (%s) found in \"%s\" cookie (%s)", OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
@@ -337,62 +264,108 @@ static apr_status_t oidc_check_state(request_rec *r, char *state, char **origina
 	}
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: \"issuer\" restored from cookie: %s", *issuer);
 
-	return APR_SUCCESS;
+	/* we've made it */
+	return TRUE;
 }
 
+/*
+ * create a state parameter to be passed in an authorization request to an OP
+ * and set a cookie in the browser that is cryptograpically bound to that
+ */
 static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url, const char *issuer) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_create_state_and_set_cookie: entering");
 
+	/* length of the random input included in the state */
+	const int randomLen = 32;
 	char *cookieValue = NULL;
 
-	unsigned char *brnd = apr_pcalloc(r->pool, OIDCRandomLen);
-	apr_generate_random_bytes((unsigned char *) brnd, OIDCRandomLen);
-	char *b64 = apr_palloc(r->pool, apr_base64_encode_len(OIDCRandomLen) + 1);
-	apr_base64_encode(b64, (const char *)brnd, OIDCRandomLen);
+	/* generate a 32-byte random base64-encoded value */
+	unsigned char *brnd = apr_pcalloc(r->pool, randomLen);
+	apr_generate_random_bytes((unsigned char *) brnd, randomLen);
+	char *b64 = apr_palloc(r->pool, apr_base64_encode_len(randomLen) + 1);
+	apr_base64_encode(b64, (const char *)brnd, randomLen);
 
+	/*
+	 * create a cookie consisting of 3 elements:
+	 * random value, original URL and issuer separated by a defined separator
+	 */
 	char *rvalue = apr_psprintf(r->pool, "%s%s%s%s%s", b64, OIDCStateCookieSep, url, OIDCStateCookieSep, issuer);
+
+	/* encrypt the resulting value and set it as a cookie */
 	oidc_encrypt_base64url_encode_string(r, &cookieValue, rvalue);
 	oidc_set_cookie(r, OIDCStateCookieName, cookieValue);
 
+	/* return a hash value that fingerprints the browser concatenated with the random input */
 	return oidc_get_browser_state_hash(r, b64);
 }
 
-#define MOD_OIDC_USERDATA_KEY "mod_oidc_state"
+/*
+ * get the mod_oidc related context from the (userdata in the) request
+ */
+static apr_table_t *oidc_request_state(request_rec *rr) {
 
-apr_table_t *oidc_request_state(request_rec *rr) {
+	/* our state is always stored in the main request */
 	request_rec *r = (rr->main != NULL) ? rr->main : rr;
+
+	/* our state is a table, get it */
 	apr_table_t *state = NULL;
 	apr_pool_userdata_get((void **)&state, MOD_OIDC_USERDATA_KEY, r->pool);
+
+	/* if it does not exist, we'll create a new table */
 	if (state == NULL) {
 		state = apr_table_make(r->pool, 5);
 		apr_pool_userdata_set(state, MOD_OIDC_USERDATA_KEY, NULL, r->pool);
 	}
+
+	/* return the resulting table, always non-null now */
 	return state;
 }
 
+/*
+ * set a name/value pair in the mod_oidc-specific request context
+ */
 void oidc_request_state_set(request_rec *r, const char *key, const char *value) {
+
+	/* get a handle to the global state, which is a table */
 	apr_table_t *state = oidc_request_state(r);
+
+	/* put the name/value pair in that table */
 	apr_table_setn(state, key, value);
 }
 
+/*
+ * get a name/value pair from the mod_oidc-specific request context
+ */
 const char*oidc_request_state_get(request_rec *r, const char *key) {
+
+	/* get a handle to the global state, which is a table */
 	apr_table_t *state = oidc_request_state(r);
-	const char *value = apr_table_get(state, key);
-	return value;
+
+	/* return the value from the table */
+	return apr_table_get(state, key);
 }
 
-static int oidc_http_sendstring(request_rec *r, const char *c_s, int success_rvalue) {
-	ap_set_content_type(r, "text/html");
+/*
+ * sends HTML content to the user agent
+ */
+static int oidc_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
+
 	conn_rec *c = r->connection;
 	apr_bucket *b;
+
+	/* set the context type header to HTML */
+	ap_set_content_type(r, "text/html");
+
+	/* do some magic copied from somewhere */
 	apr_bucket_brigade *bb = apr_brigade_create(r->pool, c->bucket_alloc);
-	b = apr_bucket_transient_create(c_s, strlen(c_s), c->bucket_alloc);
+	b = apr_bucket_transient_create(html, strlen(html), c->bucket_alloc);
 	APR_BRIGADE_INSERT_TAIL(bb, b);
 	b = apr_bucket_eos_create(c->bucket_alloc);
 	APR_BRIGADE_INSERT_TAIL(bb, b);
 	if (ap_pass_brigade(r->output_filters, bb) != APR_SUCCESS)
 		return HTTP_INTERNAL_SERVER_ERROR;
+
 	return success_rvalue;
 }
 
@@ -400,40 +373,45 @@ static int oidc_http_sendstring(request_rec *r, const char *c_s, int success_rva
  * present the user with an OP selection screen
  */
 static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
-	int rc = HTTP_UNAUTHORIZED;
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: entering");
 
-	apr_array_header_t *arr = NULL;
-
+	/* obtain the URL we're currently accessing, to be stored in the state/session */
 	char *current_url = oidc_get_current_url(r, cfg);
 
-	if (oidc_metadata_list(r, cfg, &arr) == APR_SUCCESS) {
-		const char *s = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
-				"<html>\n"
-				"	<head>\n"
-				"		<meta http-equiv=\"Content-Type\" content=\"text/html;charset=UTF-8\"/>\n"
-				"		<title>OpenID Connect OP Discovery</title>\n"
-				"	</head>\n"
-				"	<body>\n"
-				"		<h3>Select your Identity Provider:</h3>\n"
-				"		<ul>\n";
+	/* get a list of all providers configured in the metadata directory */
+	apr_array_header_t *arr = NULL;
+	if (oidc_metadata_list(r, cfg, &arr) != APR_SUCCESS) HTTP_UNAUTHORIZED;
 
-		int i;
-		for (i = 0; i < arr->nelts; i++) {
-			const char *issuer = ((const char**)arr->elts)[i];
-			// TODO: html escape (especially & character)
-			s = apr_psprintf(r->pool, "%s<li><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></li>\n", s, cfg->redirect_uri, OIDC_OP_PARAM_NAME, oidc_escape_string(r, issuer), OIDC_RT_PARAM_NAME, oidc_escape_string(r, current_url), issuer);
-		}
-		s = apr_psprintf(r->pool, "%s"
-				"		</ul>\n"
-				"	</body>\n"
-				"</html>\n", s);
+	/* assemble a where-are-you-from IDP discovery HTML page */
+	const char *s = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
+			"<html>\n"
+			"	<head>\n"
+			"		<meta http-equiv=\"Content-Type\" content=\"text/html;charset=UTF-8\"/>\n"
+			"		<title>OpenID Connect OP Discovery</title>\n"
+			"	</head>\n"
+			"	<body>\n"
+			"		<h3>Select your Identity Provider:</h3>\n"
+			"		<ul>\n";
 
-		rc = oidc_http_sendstring(r, s, HTTP_UNAUTHORIZED);
+	/* list all configured providers in there */
+	int i;
+	for (i = 0; i < arr->nelts; i++) {
+		const char *issuer = ((const char**)arr->elts)[i];
+		// TODO: html escape (especially & character)
+
+		/* point back to the redirect_uri, where the selection is handled, with an IDP selection and return_to URL */
+		s = apr_psprintf(r->pool, "%s<li><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></li>\n", s, cfg->redirect_uri, OIDC_OP_PARAM_NAME, oidc_escape_string(r, issuer), OIDC_RT_PARAM_NAME, oidc_escape_string(r, current_url), issuer);
 	}
 
-	return rc;
+	/* footer */
+	s = apr_psprintf(r->pool, "%s"
+			"		</ul>\n"
+			"	</body>\n"
+			"</html>\n", s);
+
+	/* now send the HTML contents to the user agent */
+	return oidc_http_sendstring(r, s, HTTP_UNAUTHORIZED);
 }
 
 /*
@@ -566,7 +544,9 @@ static int oidc_handle_existing_session(request_rec *r, const oidc_cfg *const cf
 	 * we're going to pass the information that we have to the application,
 	 * but first we need to scrub the headers that we're going to use for security reasons
 	 */
-	oidc_scrub_request_headers(r, cfg, dir_cfg);
+	if (cfg->scrub_request_headers != 0) {
+		oidc_scrub_request_headers(r, cfg->claim_prefix, dir_cfg->authn_header);
+	}
 
 	/* get the string-encoded attributes from the session */
 	oidc_session_get(r, session, OIDC_CLAIMS_SESSION_KEY, &s_attrs);
@@ -607,7 +587,7 @@ int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c, session_rec 
 	oidc_get_request_parameter(r, "state", &state);
 
 	/* check the state parameter against what we stored in a cookie */
-	if (oidc_check_state(r, state, &original_url, &issuer) != APR_SUCCESS) {
+	if (oidc_check_state(r, state, &original_url, &issuer) == FALSE) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_authorization_response: unable to restore state: returning HTTP 500");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
