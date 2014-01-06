@@ -134,7 +134,8 @@ const char*oidc_request_state_get(request_rec *r, const char *key);
 // oidc_proto.c
 int oidc_proto_authorization_request(request_rec *r, struct oidc_provider_t *provider, const char *redirect_uri, const char *state, const char *original_url);
 apr_byte_t oidc_proto_is_authorization_response(request_rec *r, oidc_cfg *cfg);
-apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_provider_t *provider, const char *id_token, char **user, apr_json_value_t **j_payload, apr_time_t *expires);
+apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char *code, char **user, apr_json_value_t **j_idtoken_payload, char **s_id_token, char **s_access_token, apr_time_t *expires);
+apr_byte_t oidc_proto_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char **response, char *access_token);
 
 // oidc_cache.c
 apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value);
