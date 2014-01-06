@@ -63,10 +63,12 @@
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
+/* the name of the remote-user attribute in the session  */
 #define OIDC_SESSION_REMOTE_USER_KEY "remote-user"
+/* the name of the session expiry attribute in the session */
 #define OIDC_SESSION_EXPIRY_KEY      "oidc-expiry"
 
-// stuff copied from:
+// compatibility stuff copied from:
 // http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
 #define T_ESCAPE_URLENCODED    (64)
 
@@ -299,62 +301,122 @@ static apr_status_t oidc_session_identity_encode(request_rec * r, session_rec * 
 
 }
 
-static apr_status_t oidc_session_load_pool(request_rec *r, session_rec *z) {
+/* load the session from the cache using the cookie as the index */
+static apr_status_t oidc_session_load_cache(request_rec *r, session_rec *z) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
+
+	/* get the cookie that should be our uuid/key */
 	char *uuid = oidc_get_cookie(r, d->cookie);
-	if (uuid != NULL) oidc_cache_get(r, uuid, &z->encoded);
-	return APR_SUCCESS;
+
+	/* get the string-encoded session from the cache based on the key */
+	if (uuid != NULL) return oidc_cache_get(r, uuid, &z->encoded);
+
+	return APR_EGENERAL;
 }
 
-static apr_status_t oidc_session_save_pool(request_rec *r, session_rec *z) {
+/*
+ * save the session to the cache using a cookie for the index
+ */
+static apr_status_t oidc_session_save_cache(request_rec *r, session_rec *z) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
+
+	/* convert the uuid to a string */
 	char key[APR_UUID_FORMATTED_LENGTH + 1];
 	apr_uuid_format((char *)&key, z->uuid);
+
+	/* set the uuid in the cookie */
 	oidc_set_cookie(r, d->cookie, key);
+
+	/* store the string-encoded session in the cache */
 	oidc_cache_set(r, key, z->encoded, z->expiry);
+
 	return APR_SUCCESS;
 }
 
+/*
+ * session initialization, nothing needed for this pre-2.4 part
+ */
 apr_status_t oidc_session_init() {
 	return APR_SUCCESS;
 }
 
+/*
+ * load the session from the request context, create a new one if no luck
+ */
 apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
+
+	/* first see if this is a sub-request and it was set already in the main request */
 	if (((*zz) = (session_rec *)oidc_request_state_get(r, "session")) != NULL) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_session_load: loading session from request state");
 		return APR_SUCCESS;
 	}
+
+	/* allocate space for the session object and fill it */
 	session_rec *z = (*zz = apr_pcalloc(r->pool, sizeof(session_rec)));
 	z->pool = r->pool;
+
+	/* get a new uuid for this session */
 	z->uuid = (apr_uuid_t *) apr_pcalloc(z->pool, sizeof(apr_uuid_t));
 	apr_uuid_get(z->uuid);
+
 	z->remote_user = NULL;
 	z->encoded = NULL;
 	z->entries = apr_table_make(z->pool, 10);
-	apr_status_t rc = oidc_session_load_pool(r, z);
-	// TODO: return proper response (creation is handled in this function already); no need to decode and set user if loading did not succeed
+
+	/* load the session from the cache */
+	apr_status_t rc = oidc_session_load_cache(r, z);
+
+	/* see if it worked out */
 	if (rc == APR_SUCCESS) {
-		rc = oidc_session_identity_decode(r, z);
+
+		/* yup, now decode the info */
+		if ((rc = oidc_session_identity_decode(r, z)) == APR_SUCCESS)
+
+				/* and set the remote_user explicitly */
+				z->remote_user = apr_table_get(z->entries, OIDC_SESSION_REMOTE_USER_KEY);
 	}
-	z->remote_user = apr_table_get(z->entries, OIDC_SESSION_REMOTE_USER_KEY);
+
+	/* store this session in the request context, so it is available to sub-requests */
 	oidc_request_state_set(r, "session", (const char *)z);
+
 	return rc;
 }
 
+/*
+ * save a session to the cache
+ */
 apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
-	// temporary? workaround for remote_user pool (set in main module...)
+
+	/* first set the remote_user key */
 	apr_table_set(z->entries, OIDC_SESSION_REMOTE_USER_KEY, z->remote_user);
+
+	/* encode the actual state in to the encoded string */
 	oidc_session_identity_encode(r, z);
+
+	/* store this session in the request context, so it is available to sub-requests as a quicker-than-file-backend cache */
 	oidc_request_state_set(r, "session", (const char *)z);
-	return oidc_session_save_pool(r, z);
+
+	/* store the session in the cache */
+	return oidc_session_save_cache(r, z);
 }
 
+/*
+ * get a value from the session based on the name from a name/value pair
+ */
 apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value) {
+
+	/* just return the value for the key */
 	*value = apr_table_get(z->entries, key);
+
 	return OK;
 }
 
+/*
+ * set a name/value key pair in the session
+ */
 apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value) {
+
+	/* only set it if non-NULL, otherwise delete the entry */
 	if (value) {
 		apr_table_set(z->entries, key, value);
 	} else {
@@ -364,6 +426,10 @@ apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, c
 }
 
 #else
+
+/*
+ * use Apache 2.4 session handling
+ */
 
 #include <apr_optional.h>
 

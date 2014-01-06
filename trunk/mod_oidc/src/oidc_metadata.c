@@ -195,9 +195,9 @@ apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_
 		return rc;
 	}
 
-	// TODO: can estimate number in array based on # directory entries
-	/* allocate space in the array that will hold the list of providers */
+	/* allocate some space in the array that will hold the list of providers */
 	*list = apr_array_make(r->pool, 5, sizeof(sizeof(const char*)));
+	/* BTW: we could estimate the number in the array based on # directory entries... */
 
 	/* loop over the entries in the provider metadata directory */
 	while (apr_dir_read(&fi, APR_FINFO_NAME, dir) == APR_SUCCESS) {

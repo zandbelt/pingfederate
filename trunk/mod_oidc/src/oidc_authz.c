@@ -46,6 +46,8 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
+ * mostly copied from mod_auth_cas
+ *
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
@@ -55,24 +57,22 @@
 
 #include "mod_oidc.h"
 
-//extern module AP_MODULE_DECLARE_DATA oidc_module;
+#define OIDC_AUTHZ_CLAIM_MATCH 0
+#define OIDC_AUTHZ_CLAIM_NO_MATCH 1
 
-#define OIDC_ATTR_MATCH 0
-#define OIDC_ATTR_NO_MATCH 1
+#define OIDC_REQUIRE_NAME "claim"
 
-#define OIDC_ATTRIBUTE_NAME "attribute"
-
-int oidc_authz_match_attribute(const char *const attr_spec, const apr_json_value_t *const attributes, struct request_rec *r) {
+static int oidc_authz_match_claim(const char *const attr_spec, const apr_json_value_t *const claims, struct request_rec *r) {
 
 	apr_hash_index_t *hi;
 	const void *key;
 	apr_ssize_t klen;
 	void *hval;
 
-	if (attributes == NULL) return OIDC_ATTR_NO_MATCH;
+	if (claims == NULL) return OIDC_AUTHZ_CLAIM_NO_MATCH;
 
-	/* Loop over all of the user attributes */
-	for (hi = apr_hash_first(r->pool, attributes->value.object); hi; hi = apr_hash_next(hi)) {
+	/* Loop over all of the user claims */
+	for (hi = apr_hash_first(r->pool, claims->value.object); hi; hi = apr_hash_next(hi)) {
         apr_hash_this(hi, &key, &klen, &hval);
 
 		const char *attr_c = (const char *)key;
@@ -88,7 +88,7 @@ int oidc_authz_match_attribute(const char *const attr_spec, const apr_json_value
 		}
 
 
-		/* The match is a success if we walked the whole attribute
+		/* The match is a success if we walked the whole claim
 		 * name and the attr_spec is at a colon. */
 		if (!(*attr_c) && (*spec_c) == ':') {
 			const apr_json_value_t *val;
@@ -101,38 +101,38 @@ int oidc_authz_match_attribute(const char *const attr_spec, const apr_json_value
 			if (val->type == APR_JSON_STRING) {
 
 				if (apr_strnatcmp(val->value.string.p, spec_c) == 0) {
-					return OIDC_ATTR_MATCH;
+					return OIDC_AUTHZ_CLAIM_MATCH;
 				}
 
 
 			} else if (val->type == APR_JSON_ARRAY) {
 
-				/* Compare the attribute values */
+				/* Compare the claim values */
 				int i = 0;
 				for (i = 0; i < val->value.array->nelts; i++) {
 
 					apr_json_value_t *elem = APR_ARRAY_IDX(val->value.array, i, apr_json_value_t *);
 
 					if (elem->type != APR_JSON_STRING) {
-						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_attribute: unhandled in-array JSON object type [%d]", elem->type);
+						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_claim: unhandled in-array JSON object type [%d]", elem->type);
 						continue;
 					}
 
-					/* Approximately compare the attribute value (ignoring
+					/* Approximately compare the claim value (ignoring
 					 * whitespace). At this point, spec_c points to the
 					 * NULL-terminated value pattern. */
 					if (apr_strnatcmp(elem->value.string.p, spec_c) == 0) {
-						return OIDC_ATTR_MATCH;
+						return OIDC_AUTHZ_CLAIM_MATCH;
 					}
 				}
 
 			} else {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_attribute: unhandled JSON object type [%d]", val->type);
+				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_claim: unhandled JSON object type [%d]", val->type);
 				continue;
 			}
 
 		}
-		/* The match is a success is we walked the whole attribute
+		/* The match is a success is we walked the whole claim
 		 * name and the attr_spec is a tilde (denotes a PCRE match). */
 //		else if (!(*attr_c) && (*spec_c) == '~') {
 //			const apr_json_value_t *val;
@@ -150,10 +150,10 @@ int oidc_authz_match_attribute(const char *const attr_spec, const apr_json_value
 //				continue;
 //			}
 //
-//			/* Compare the attribute values */
+//			/* Compare the claim values */
 //			val = attr->values;
 //			for ( ; val; val = val->next) {
-//				/* PCRE-compare the attribute value. At this point, spec_c
+//				/* PCRE-compare the claim value. At this point, spec_c
 //				 * points to the NULL-terminated value pattern. */
 //				if (0 == pcre_exec(preg, NULL, val->value, (int)strlen(val->value), 0, 0, NULL, 0)) {
 //					pcre_free(preg);
@@ -164,7 +164,7 @@ int oidc_authz_match_attribute(const char *const attr_spec, const apr_json_value
 //			pcre_free(preg);
 //		}
 	}
-	return OIDC_ATTR_NO_MATCH;
+	return OIDC_AUTHZ_CLAIM_NO_MATCH;
 }
 
 int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const require_line *const reqs, int nelts) {
@@ -187,20 +187,20 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 			continue;
 		}
 
-		/* ignore if it's not a "Require attribute ..." */
+		/* ignore if it's not a "Require claim ..." */
 		requirement = reqs[i].requirement;
 
 		token = ap_getword_white(r->pool, &requirement);
 
-		if (apr_strnatcasecmp(token, OIDC_ATTRIBUTE_NAME) != 0) {
+		if (apr_strnatcasecmp(token, OIDC_REQUIRE_NAME) != 0) {
 			continue;
 		}
 
-		/* OK, we have a "Require attribute" to satisfy */
+		/* OK, we have a "Require claim" to satisfy */
 		have_oauthattr = 1;
 
-		/* If we have an applicable attribute, but no
-		 * attributes were sent in the request, then we can
+		/* If we have an applicable claim, but no
+		 * claims were sent in the request, then we can
 		 * just stop looking here, because it's not
 		 * satisfiable. The code after this loop will give the
 		 * appropriate response. */
@@ -208,45 +208,45 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 			break;
 		}
 
-		/* Iterate over the attribute specification strings in this
+		/* Iterate over the claim specification strings in this
 		 * require directive searching for a specification that
-		 * matches one of the attributes. */
+		 * matches one of the claims. */
 		while (*requirement) {
 			token = ap_getword_conf(r->pool, &requirement);
 			count_oauthattr++;
 
 			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				     "oidc_authz_worker: evaluating attribute specification: %s",
+				     "oidc_authz_worker: evaluating claim specification: %s",
 				     token);
 
-			if (oidc_authz_match_attribute(token, attrs, r) ==
-					OIDC_ATTR_MATCH) {
+			if (oidc_authz_match_claim(token, attrs, r) ==
+					OIDC_AUTHZ_CLAIM_MATCH) {
 
-				/* If *any* attribute matches, then
+				/* If *any* claim matches, then
 				 * authorization has succeeded and all
 				 * of the others are ignored. */
 				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					      "oidc_authz_worker: require attribute "
+					      "oidc_authz_worker: require claim "
 					      "'%s' matched", token);
 				return OK;
 			}
 		}
 	}
 
-	/* If there weren't any "Require attribute" directives,
+	/* If there weren't any "Require claim" directives,
 	 * we're irrelevant.
 	 */
 	if (!have_oauthattr) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			      "oidc_authz_worker: no attribute statements found, not performing authz.");
+			      "oidc_authz_worker: no claim statements found, not performing authz.");
 		return DECLINED;
 	}
-	/* If there was a "Require attribute", but no actual attributes,
+	/* If there was a "Require claim", but no actual claims,
 	 * that's cause to warn the admin of an iffy configuration.
 	 */
 	if (count_oauthattr == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-			      "oidc_authz_worker: 'require attribute' missing specification(s) in configuration. Declining.");
+			      "oidc_authz_worker: 'require claim' missing specification(s) in configuration. Declining.");
 		return DECLINED;
 	}
 
@@ -277,13 +277,13 @@ authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const 
 		count_oauthattr++;
 
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_authz_worker24: evaluating attribute specification: %s",
+				"oidc_authz_worker24: evaluating claim specification: %s",
 				w);
 
-		if (oidc_authz_match_attribute(w, attrs, r) == OIDC_ATTR_MATCH) {
+		if (oidc_authz_match_claim(w, attrs, r) == OIDC_AUTHZ_CLAIM_MATCH) {
 
 			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_authz_worker24: require attribute "
+					"oidc_authz_worker24: require claim "
 							"'%s' matched", w);
 			return AUTHZ_GRANTED;
 		}
@@ -291,7 +291,7 @@ authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const 
 
 	if (count_oauthattr == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_authz_worker24: 'require attribute' missing specification(s) in configuration. Denying.");
+				"oidc_authz_worker24: 'require claim' missing specification(s) in configuration. Denying.");
 	}
 
 	return AUTHZ_DENIED;

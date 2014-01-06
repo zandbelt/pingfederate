@@ -347,6 +347,15 @@
           </RegexExtractor>
           <hashTree/>
         </hashTree>
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Set Fake Header" enabled="true">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="" elementType="Header">
+              <stringProp name="Header.name">OIDC_CLAIM_BOGUS</stringProp>
+              <stringProp name="Header.value">bogus</stringProp>
+            </elementProp>
+          </collectionProp>
+        </HeaderManager>
+        <hashTree/>
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Authenticated Application Access" enabled="true">
           <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
             <collectionProp name="Arguments.arguments"/>
@@ -370,7 +379,7 @@
         <hashTree>
           <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert User Logged In" enabled="true">
             <collectionProp name="Asserion.test_strings">
-              <stringProp name="1852615063">\[OIDC_ATTR_sub\] =&gt; ${USERNAME}</stringProp>
+              <stringProp name="-1682027846">\[OIDC_CLAIM_sub\] =&gt; ${USERNAME}</stringProp>
             </collectionProp>
             <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
             <boolProp name="Assertion.assume_success">false</boolProp>
@@ -406,7 +415,7 @@
           <hashTree>
             <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert User Logged In" enabled="true">
               <collectionProp name="Asserion.test_strings">
-                <stringProp name="1852615063">\[OIDC_ATTR_sub\] =&gt; ${USERNAME}</stringProp>
+                <stringProp name="-1682027846">\[OIDC_CLAIM_sub\] =&gt; ${USERNAME}</stringProp>
               </collectionProp>
               <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
               <boolProp name="Assertion.assume_success">false</boolProp>

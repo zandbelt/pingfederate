@@ -339,14 +339,11 @@ out:
 
 void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_cookie: entering");
-
 	char *headerString, *currentCookies;
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
 	if (apr_strnatcmp(cookieValue, "") == 0) headerString = apr_psprintf(r->pool, "%s;expires=0;Max-Age=0", headerString);
 	/* use r->err_headers_out so we always print our headers (even on 302 redirect) - headers_out only prints on 2xx responses */
-	// TODO: warn about length > some_rather_arbitrary_max_cookie_length
 	apr_table_add(r->err_headers_out, "Set-Cookie", headerString);
 	if ((currentCookies = (char *) apr_table_get(r->headers_in, "Cookie")) == NULL)
 		apr_table_add(r->headers_in, "Cookie", headerString);
@@ -361,8 +358,6 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 char *oidc_get_cookie(request_rec *r, char *cookieName) {
 	char *cookie, *tokenizerCtx, *rv = NULL;
 	apr_byte_t cookieFound = FALSE;
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_cookie: entering");
 
 	char *cookies = apr_pstrdup(r->pool, (char *) apr_table_get(r->headers_in, "Cookie"));
 	if (cookies != NULL) {
@@ -413,3 +408,41 @@ char *oidc_normalize_header_name(const request_rec *r, const char *str)
         return ns;
 }
 
+apr_byte_t oidc_request_matches_url(request_rec *r, const char *url) {
+	apr_uri_t uri;
+	apr_uri_parse(r->pool, url, &uri);
+	apr_byte_t rc = (apr_strnatcmp(r->parsed_uri.path, uri.path) == 0) ? TRUE : FALSE;
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_request_matches_url: comparing \"%s\"==\"%s\" (%d)", r->parsed_uri.path, uri.path, rc);
+	return rc;
+}
+
+apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param) {
+	const char *option1 = apr_psprintf(r->pool, "%s=", param);
+	const char *option2 = apr_psprintf(r->pool, "&%s=", param);
+	return ( (strstr(r->args, option1) == r->args) || (strstr(r->args, option2) != NULL) );
+}
+
+// TODO: we should really check with ? and & and avoid any <bogus>code= stuff to trigger true
+apr_byte_t oidc_get_request_parameter(request_rec *r, char *name, char **value) {
+	char *tokenizer_ctx, *p, *args, *rv = NULL;
+	const char *k_param = apr_psprintf(r->pool, "%s=", name);
+	const size_t k_param_sz = strlen(k_param);
+
+	*value = NULL;
+
+	if (r->args == NULL || strlen(r->args) == 0) return FALSE;
+
+	/* not sure why we do this, but better be safe than sorry */
+	args = apr_pstrndup(r->pool, r->args, strlen(r->args));
+
+	p = apr_strtok(args, "&", &tokenizer_ctx);
+	do {
+		if (p && strncmp(p, k_param, k_param_sz) == 0) {
+			*value = apr_pstrdup(r->pool, p + k_param_sz);
+			ap_unescape_url(*value);
+		}
+		p = apr_strtok(NULL, "&", &tokenizer_ctx);
+	} while (p);
+
+	return (*value != NULL ? TRUE : FALSE);
+}
