@@ -375,11 +375,11 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 			"<html>\n"
 			"	<head>\n"
 			"		<meta http-equiv=\"Content-Type\" content=\"text/html;charset=UTF-8\"/>\n"
-			"		<title>OpenID Connect OP Discovery</title>\n"
+			"		<title>OpenID Connect Provider Discovery</title>\n"
 			"	</head>\n"
 			"	<body>\n"
-			"		<h3>Select your Identity Provider:</h3>\n"
-			"		<ul>\n";
+			"		<center>\n"
+			"			<h3>Select your OpenID Connect Identity Provider</h3>\n";
 
 	/* list all configured providers in there */
 	int i;
@@ -388,12 +388,12 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 		// TODO: html escape (especially & character)
 
 		/* point back to the redirect_uri, where the selection is handled, with an IDP selection and return_to URL */
-		s = apr_psprintf(r->pool, "%s<li><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></li>\n", s, cfg->redirect_uri, OIDC_OP_PARAM_NAME, oidc_escape_string(r, issuer), OIDC_RT_PARAM_NAME, oidc_escape_string(r, current_url), issuer);
+		s = apr_psprintf(r->pool, "%s<p><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></p>\n", s, cfg->redirect_uri, OIDC_OP_PARAM_NAME, oidc_escape_string(r, issuer), OIDC_RT_PARAM_NAME, oidc_escape_string(r, current_url), issuer);
 	}
 
 	/* footer */
 	s = apr_psprintf(r->pool, "%s"
-			"		</ul>\n"
+			"		</center>\n"
 			"	</body>\n"
 			"</html>\n", s);
 
