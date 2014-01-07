@@ -208,9 +208,8 @@ unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg, unsigned c
 unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg, unsigned char *ciphertext, int *len);
 
 // oidc_metadata.c
-apr_status_t oidc_metadata_dir_check(apr_pool_t *pool, server_rec *s, const char *path);
-apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **arr);
-apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *selected, oidc_provider_t **provider);
+apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **arr);
+apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *selected, oidc_provider_t **provider);
 
 // oidc_session.c
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20081201

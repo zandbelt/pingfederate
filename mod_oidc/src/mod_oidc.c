@@ -368,7 +368,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 
 	/* get a list of all providers configured in the metadata directory */
 	apr_array_header_t *arr = NULL;
-	if (oidc_metadata_list(r, cfg, &arr) != APR_SUCCESS) HTTP_UNAUTHORIZED;
+	if (oidc_metadata_list(r, cfg, &arr) == FALSE) HTTP_UNAUTHORIZED;
 
 	/* assemble a where-are-you-from IDP discovery HTML page */
 	const char *s = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
@@ -599,7 +599,7 @@ static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c, sessi
 	if (c->metadata_dir != NULL) {
 
 		/* try and get metadata from the metadata directory for the OP that sent this response */
-		if ( (oidc_metadata_get(r, c, issuer, &provider) != APR_SUCCESS) || (provider == NULL) ) {
+		if ( (oidc_metadata_get(r, c, issuer, &provider) == FALSE) || (provider == NULL) ) {
 
 			// no luck
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_authorization_response: no provider metadata found for selected OP: returning HTTP 500");
@@ -669,14 +669,14 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
 	/* try and get metadata from the metadata directories for the selected OP */
 	oidc_provider_t *provider = NULL;
-	if ( (oidc_metadata_get(r, c, issuer, &provider) == APR_SUCCESS) && (provider != NULL) ) {
+	if ( (oidc_metadata_get(r, c, issuer, &provider) == TRUE) && (provider != NULL) ) {
 
 		/* now we've got a selected OP, send the user there to authenticate */
 		return oidc_authenticate_user(r, c, provider, original_url);
 	}
 
 	/* something went wrong, log that */
-	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: no provider metadata found for selected OP: returning HTTP 500");
+	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: no valid provider metadata found for selected OP: returning HTTP 500");
 
 	return HTTP_INTERNAL_SERVER_ERROR;
 }

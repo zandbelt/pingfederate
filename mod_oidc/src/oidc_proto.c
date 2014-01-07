@@ -389,7 +389,7 @@ apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_provider_
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_resolve_code: response JSON object did not contain a token_type string");
 		return FALSE;
 	}
-	if ((apr_strnatcmp(token_type->value.string.p, "Bearer") != 0) && (provider->userinfo_endpoint_url != NULL)) {
+	if ((apr_strnatcasecmp(token_type->value.string.p, "Bearer") != 0) && (provider->userinfo_endpoint_url != NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_resolve_code: token_type is \"%s\" and UserInfo endpoint is set: can only deal with Bearer authentication against the UserInfo endpoint!", token_type->value.string.p);
 		//return FALSE;
 	}
