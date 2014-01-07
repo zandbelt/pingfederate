@@ -4,6 +4,7 @@ MY_LDFLAGS=-lcurl
 
 MY_SOURCES = \
 	src/mod_oidc.c \
+	src/oidc_oauth.c \
 	src/oidc_proto.c \
 	src/oidc_crypto.c \
 	src/oidc_config.c \

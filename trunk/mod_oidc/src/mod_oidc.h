@@ -66,6 +66,24 @@
 #define OIDC_DEBUG APLOG_DEBUG
 #endif
 
+/* key for storing the claims in the session context */
+#define OIDC_CLAIMS_SESSION_KEY "claims"
+/* key for storing the id_token in the session context */
+#define OIDC_IDTOKEN_SESSION_KEY "id_token"
+
+/* parameter name of the OP provider selection in the discovery response */
+#define OIDC_OP_PARAM_NAME "oidc_provider"
+/* parameter name of the original URL in the discovery response */
+#define OIDC_RT_PARAM_NAME "oidc_return"
+
+/* name of the cookie that binds the state in the authorization request/response to the browser */
+#define OIDCStateCookieName  "oidc-state"
+/* separator used to distinghuish different values in the state cookie */
+#define OIDCStateCookieSep  " "
+
+/* the (global) key for the mod_oidc related state that is stored in the request userdata context */
+#define MOD_OIDC_USERDATA_KEY "mod_oidc_state"
+
 typedef struct oidc_provider_t {
 	int ssl_validate_server;
 	char *issuer;
@@ -132,6 +150,9 @@ int oidc_auth_checker(request_rec *r);
 void oidc_request_state_set(request_rec *r, const char *key, const char *value);
 const char*oidc_request_state_get(request_rec *r, const char *key);
 
+// oidc_oauth
+int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c);
+
 // oidc_proto.c
 int oidc_proto_authorization_request(request_rec *r, struct oidc_provider_t *provider, const char *redirect_uri, const char *state, const char *original_url);
 apr_byte_t oidc_proto_is_authorization_response(request_rec *r, oidc_cfg *cfg);
@@ -180,6 +201,7 @@ char *oidc_normalize_header_name(const request_rec *r, const char *str);
 apr_byte_t oidc_request_matches_url(request_rec *r, const char *url);
 apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param);
 apr_byte_t oidc_get_request_parameter(request_rec *r, char *name, char **value);
+apr_byte_t oidc_util_check_json_error(request_rec *r, apr_json_value_t *json);
 
 // oidc_crypto.c
 unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg, unsigned char *plaintext, int *len);

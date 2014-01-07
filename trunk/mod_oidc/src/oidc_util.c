@@ -466,3 +466,30 @@ apr_byte_t oidc_get_request_parameter(request_rec *r, char *name, char **value) 
 
 	return (*value != NULL ? TRUE : FALSE);
 }
+
+/*
+ * printout a JSON string value
+ */
+static apr_byte_t oidc_util_json_string_print(request_rec *r, apr_json_value_t *result, const char *key, const char *log) {
+	apr_json_value_t *value = apr_hash_get(result->value.object, key, APR_HASH_KEY_STRING);
+	if (value != NULL) {
+		if (value->type == APR_JSON_STRING) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "%s: response contained a \"%s\" key with string value: \"%s\"", log, key, value->value.string.p);
+		} else {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "%s: response contained an \"%s\" key but no string value", log, key);
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/*
+ * check a JSON object for "error" results and printout
+ */
+apr_byte_t oidc_util_check_json_error(request_rec *r, apr_json_value_t *json) {
+	if (oidc_util_json_string_print(r, json, "error", "oidc_util_check_json_error") == TRUE) {
+		oidc_util_json_string_print(r, json, "error_description", "oidc_util_check_json_error");
+		return TRUE;
+	}
+	return FALSE;
+}
