@@ -107,16 +107,16 @@ static const char *oidc_metadata_client_file_path(request_rec *r, const char *is
 	return oidc_metadata_file_path(r, cfg, issuer, OIDC_METADATA_SUFFIX_CLIENT);
 }
 
-static apr_status_t oidc_metadata_file_read_json(request_rec *r, const char *path, apr_json_value_t **result) {
+static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path, apr_json_value_t **result) {
 	apr_file_t *fd;
-	apr_status_t rc = APR_SUCCESS;
+	apr_status_t rc;
 	char s_err[128];
 	apr_finfo_t finfo;
 
 	/* open the JSON file if it exists */
 	if ((rc = apr_file_open(&fd, path, APR_FOPEN_READ|APR_FOPEN_BUFFERED, APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: no JSON file found at: \"%s\"", path);
-		return rc;
+		return FALSE;
 	}
 
 	/* the file exists, now lock it */
@@ -128,7 +128,7 @@ static apr_status_t oidc_metadata_file_read_json(request_rec *r, const char *pat
 
 	/* get the file info so we know its size */
 	if ((rc = apr_file_info_get(&finfo, APR_FINFO_SIZE, fd)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: error calling apr_file_info_get on JSON file: \"%s\"", path);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: error calling apr_file_info_get on JSON file: \"%s\" (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
 		goto error_close;
 	}
 
@@ -159,40 +159,42 @@ static apr_status_t oidc_metadata_file_read_json(request_rec *r, const char *pat
 	if ((rc = apr_json_decode(result, buf, strlen(buf), r->pool)) != APR_SUCCESS) {
 		/* something went wrong */
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: JSON parsing (%s) returned an error: (%d)", path, rc);
-	} else if ( (*result == NULL) || ((*result)->type != APR_JSON_OBJECT) ) {
-		/* oops, no JSON */
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: parsed JSON from (%s) did not contain a JSON object", path);
-		rc = APR_EGENERAL;
-	} else {
-		/* log succesful metadata retrieval */
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_file_read_json: JSON parsed from file \"%s\"", path);
+		return FALSE;
 	}
 
-	return rc;
+	if ( (*result == NULL) || ((*result)->type != APR_JSON_OBJECT) ) {
+		/* oops, no JSON */
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: parsed JSON from (%s) did not contain a JSON object", path);
+		return FALSE;
+	}
+
+	/* log succesful metadata retrieval */
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_file_read_json: JSON parsed from file \"%s\"", path);
+
+	return TRUE;
 
 error_close:
 	apr_file_unlock(fd);
 	apr_file_close(fd);
 
-	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: return error status (%d) (%s)", rc,  apr_strerror(rc, s_err, sizeof(s_err)));
+	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: return error");
 
-	return rc;
+	return FALSE;
 }
 
 /*
  * get a list of configured OIDC providers based on the entries in the provider metadata directory
  */
-apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **list) {
-	apr_status_t rc = APR_SUCCESS;
+apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **list) {
+	apr_status_t rc;
 	apr_dir_t *dir;
 	apr_finfo_t fi;
-	apr_status_t i;
 	char s_err[128];
 
 	/* open the metadata directory */
 	if ((rc = apr_dir_open(&dir, cfg->metadata_dir, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_list: error opening metadata directory '%s' (%s)", cfg->metadata_dir,  apr_strerror(rc, s_err, sizeof(s_err)));
-		return rc;
+		return FALSE;
 	}
 
 	/* allocate some space in the array that will hold the list of providers */
@@ -215,7 +217,7 @@ apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_
 	/* we're done, cleanup now */
 	apr_dir_close(dir);
 
-	return APR_SUCCESS;
+	return TRUE;
 }
 
 /*
@@ -224,9 +226,7 @@ apr_status_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_
  * this fill the oidc_op_meta_t struct based on the issuer filename by reading and merging
  * contents from both provider metadata directory and client metadata directory
  */
-apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, oidc_provider_t **result) {
-
-	apr_status_t rc = APR_SUCCESS;
+apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, oidc_provider_t **result) {
 
 	/* pointer to the parsed JSON metadata from the provider directory */
 	apr_json_value_t *j_provider = NULL;
@@ -236,12 +236,12 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	/* get the full file path to the provider metadata for this issuer */
 	const char *provider_path = oidc_metadata_provider_file_path(r, issuer);
 	/* and read the provider metadata in to the "provider" variable */
-	if ((rc = oidc_metadata_file_read_json(r, provider_path, &j_provider)) != APR_SUCCESS) return rc;
+	if (oidc_metadata_file_read_json(r, provider_path, &j_provider) == FALSE) return FALSE;
 
 	/* get the full file path to the client metadata for this issuer */
 	const char *client_path = oidc_metadata_client_file_path(r, issuer);
 	/* and read the client metadata in to the "client" variable */
-	if ((rc = oidc_metadata_file_read_json(r, client_path, &j_client)) != APR_SUCCESS) return rc;
+	if (oidc_metadata_file_read_json(r, client_path, &j_client) == FALSE) return FALSE;
 
 	/* allocate space for a parsed-and-merged metadata struct */
 	*result = apr_pcalloc(r->pool, sizeof(oidc_provider_t));
@@ -363,6 +363,8 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 		return FALSE;
 	}
 
+	// TODO: something with client_secret_expires_at...
+
 	/* find out what scopes we should be requesting from this provider */
 	// TODO: use the provider "scopes_supported" to mix-and-match with what we've configured for the client
 	// TODO: check that "openid" is always included in the configured scopes, right?
@@ -378,6 +380,6 @@ apr_status_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer
 	provider->client_secret = apr_pstrdup(r->pool, j_client_secret->value.string.p);
 	provider->scope = apr_pstrdup(r->pool, scope);
 
-	return rc;
+	return TRUE;
 }
 

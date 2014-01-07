@@ -99,7 +99,7 @@ static apr_byte_t oidc_oauth_get_bearer_token(request_rec *r, const char **acces
 	}
 
 	/* look for the Bearer keyword */
-	if (strcasecmp(ap_getword(r->pool, &auth_line, ' '), "Bearer")) {
+	if (apr_strnatcasecmp(ap_getword(r->pool, &auth_line, ' '), "Bearer")) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_oauth_get_bearer_token: client used unsupported authentication scheme: %s", r->uri);
 		return FALSE;
 	}
