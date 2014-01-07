@@ -93,7 +93,7 @@ apr_status_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 	/* initialize the decoding context */
 	EVP_CIPHER_CTX_init(&cfg->d_ctx);
 	if (!EVP_DecryptInit_ex(&cfg->d_ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_crypto_init: EVP_EncryptInit_ex on the decrypt context failed!");
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s, "oidc_crypto_init: EVP_DecryptInit_ex on the decrypt context failed!");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
