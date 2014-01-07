@@ -123,7 +123,7 @@ int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char 
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	int crypted_len = strlen(src) + 1;
 	unsigned char *crypted = oidc_crypto_aes_encrypt(r, c, (unsigned char *)src, &crypted_len);
-	if (crypted != NULL) {
+	if (crypted == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_encrypt_base64url_encode_string: oidc_crypto_aes_encrypt failed");
 		return -1;
 	}
