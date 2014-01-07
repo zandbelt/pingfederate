@@ -68,6 +68,10 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
 
 // TODO: always padded now, do we need an option to remove the padding?
 int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_len) {
+	if ( (src == NULL) || (src_len <= 0) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_base64url_encode: not encoding anything; src=NULL and/or src_len<1");
+		return -1;
+	}
 	int enc_len = apr_base64_encode_len(src_len);
 	char *enc = apr_palloc(r->pool, enc_len);
 	apr_base64_encode(enc, (const char *)src, src_len);
@@ -84,6 +88,10 @@ int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_l
 
 // TODO: check base64url decoding/encoding code...
 int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding) {
+	if (src == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_base64url_decode: not encoding anything; src=NULL");
+		return -1;
+	}
 	char *dec = apr_pstrdup(r->pool, src);
 	int i = 0;
 	while (dec[i] != '\0') {
