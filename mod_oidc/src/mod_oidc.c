@@ -522,7 +522,7 @@ static void oidc_set_app_headers(request_rec *r, const apr_json_value_t *j_attrs
 		} else {
 
 			/* no string and no array, so unclear how to handle this */
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_set_app_headers: unhandled JSON object type [%d] when parsing attributes", j_value->type);
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_set_app_headers: unhandled JSON object type [%d] for key \"%s\" when parsing claims", j_value->type, s_key);
 		}
 	}
 }

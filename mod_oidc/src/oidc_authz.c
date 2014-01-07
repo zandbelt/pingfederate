@@ -104,6 +104,11 @@ static int oidc_authz_match_claim(const char *const attr_spec, const apr_json_va
 					return OIDC_AUTHZ_CLAIM_MATCH;
 				}
 
+			} else if (val->type == APR_JSON_BOOLEAN) {
+
+				if (apr_strnatcmp(val->value.boolean ? "true" : "false", spec_c) == 0) {
+					return OIDC_AUTHZ_CLAIM_MATCH;
+				}
 
 			} else if (val->type == APR_JSON_ARRAY) {
 
@@ -113,21 +118,30 @@ static int oidc_authz_match_claim(const char *const attr_spec, const apr_json_va
 
 					apr_json_value_t *elem = APR_ARRAY_IDX(val->value.array, i, apr_json_value_t *);
 
-					if (elem->type != APR_JSON_STRING) {
-						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_claim: unhandled in-array JSON object type [%d]", elem->type);
-						continue;
-					}
+					if (elem->type == APR_JSON_STRING) {
 
-					/* Approximately compare the claim value (ignoring
-					 * whitespace). At this point, spec_c points to the
-					 * NULL-terminated value pattern. */
-					if (apr_strnatcmp(elem->value.string.p, spec_c) == 0) {
-						return OIDC_AUTHZ_CLAIM_MATCH;
+						/* Approximately compare the claim value (ignoring
+						 * whitespace). At this point, spec_c points to the
+						 * NULL-terminated value pattern. */
+						if (apr_strnatcmp(elem->value.string.p, spec_c) == 0) {
+							return OIDC_AUTHZ_CLAIM_MATCH;
+						}
+
+					} else if  (elem->type == APR_JSON_BOOLEAN) {
+
+						if (apr_strnatcmp(elem->value.boolean ? "true" : "false", spec_c) == 0) {
+							return OIDC_AUTHZ_CLAIM_MATCH;
+						}
+
+					} else {
+
+						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_claim: unhandled in-array JSON object type [%d] for key \"%s\"", elem->type, (const char *)key);
+						continue;
 					}
 				}
 
 			} else {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_claim: unhandled JSON object type [%d]", val->type);
+				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_claim: unhandled JSON object type [%d] for key \"%s\"", val->type, (const char *)key);
 				continue;
 			}
 
