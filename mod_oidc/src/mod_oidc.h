@@ -112,8 +112,9 @@ typedef struct oidc_cfg {
 	char *claim_prefix;
 
 	char *crypto_passphrase;
-	EVP_CIPHER_CTX e_ctx;
-	EVP_CIPHER_CTX d_ctx;
+
+	EVP_CIPHER_CTX *encrypt_ctx;
+	EVP_CIPHER_CTX *decrypt_ctx;
 } oidc_cfg;
 
 typedef struct oidc_dir_cfg {
@@ -156,7 +157,6 @@ void oidc_register_hooks(apr_pool_t *pool);
 
 const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg);
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
-const char *oidc_set_crypto_passphrase(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_url_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
@@ -182,9 +182,8 @@ apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param);
 apr_byte_t oidc_get_request_parameter(request_rec *r, char *name, char **value);
 
 // oidc_crypto.c
-apr_status_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s);
-unsigned char *oidc_crypto_aes_encrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len);
-unsigned char *oidc_crypto_aes_decrypt(request_rec *r, EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len);
+unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg, unsigned char *plaintext, int *len);
+unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg, unsigned char *ciphertext, int *len);
 
 // oidc_metadata.c
 apr_status_t oidc_metadata_dir_check(apr_pool_t *pool, server_rec *s, const char *path);
