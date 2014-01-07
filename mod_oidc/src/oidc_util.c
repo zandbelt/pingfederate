@@ -437,9 +437,10 @@ apr_byte_t oidc_request_matches_url(request_rec *r, const char *url) {
 }
 
 apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param) {
+	if (r->args == NULL) return FALSE;
 	const char *option1 = apr_psprintf(r->pool, "%s=", param);
 	const char *option2 = apr_psprintf(r->pool, "&%s=", param);
-	return ( (strstr(r->args, option1) == r->args) || (strstr(r->args, option2) != NULL) );
+	return ( (strstr(r->args, option1) == r->args) || (strstr(r->args, option2) != NULL) ) ? TRUE : FALSE;
 }
 
 // TODO: we should really check with ? and & and avoid any <bogus>code= stuff to trigger true
