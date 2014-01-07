@@ -78,11 +78,11 @@
 #include "mod_oidc.h"
 
 // TODO: complete documenting oidc_authz.c, oidc_config.c and oidc_util.c
-// TODO: support a separate discovery page
 // TODO: support dynamic client registration
-// TODO: fix the http_call SSL error on Ubuntu?
 // TODO: improve logging and consistency and completeness in logging
+// TODO: sort out all urlencode/decode stuff (get proper routines from somewhere)
 // TODO: require SSL
+// TODO: fix the http_call SSL error on Ubuntu?
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -365,6 +365,20 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 
 	/* obtain the URL we're currently accessing, to be stored in the state/session */
 	char *current_url = oidc_get_current_url(r, cfg);
+
+	/* see if there's an external discovery page configured */
+	if (cfg->discover_url != NULL) {
+
+		/* yes, assemble the paramters for external discovery */
+		char *url = apr_psprintf(r->pool, "%s%s%s=%s", cfg->discover_url, strchr(cfg->discover_url, '?') != NULL ? "&" : "?", OIDC_RT_PARAM_NAME, oidc_escape_string(r, current_url));
+
+		/* log what we're about to do */
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: redirecting to external discovery page: %s", url);
+
+		/* do the actual redirect to an external discovery page */
+		apr_table_add(r->headers_out, "Location", url);
+		return HTTP_MOVED_TEMPORARILY;
+	}
 
 	/* get a list of all providers configured in the metadata directory */
 	apr_array_header_t *arr = NULL;
@@ -824,6 +838,7 @@ const command_rec oidc_config_cmds[] = {
 		AP_INIT_TAKE1("OIDCClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.client_secret), RSRC_CONF, "Client secret used in calls to OpenID Connect OP."),
 
 		AP_INIT_TAKE1("OIDCRedirectURI", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, redirect_uri), RSRC_CONF, "Define the Redirect URI (e.g.: https://localhost:9031/protected/return/uri"),
+		AP_INIT_TAKE1("OIDCDiscoverURL", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, discover_url), RSRC_CONF, "Defines an external IDP Discovery page"),
 		AP_INIT_TAKE1("OIDCCookieDomain", oidc_set_cookie_domain, NULL, RSRC_CONF, "Specify domain element for OIDC session cookie."),
 		AP_INIT_TAKE1("OIDCCryptoPassphrase", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase), RSRC_CONF, "Passphrase used for AES crypto on cookies and state."),
 		AP_INIT_TAKE1("OIDCClaimDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued claims in the HTTP headers."),

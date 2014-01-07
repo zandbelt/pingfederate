@@ -196,6 +196,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->merged = FALSE;
 
 	c->redirect_uri = NULL;
+	c->discover_url = NULL;
 
 	c->provider.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
 	c->provider.issuer = NULL;
@@ -234,6 +235,7 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->merged = TRUE;
 
 	c->redirect_uri = add->redirect_uri != NULL ? add->redirect_uri : base->redirect_uri;
+	c->discover_url = add->discover_url != NULL ? add->discover_url : base->discover_url;
 
 	c->provider.ssl_validate_server = add->provider.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->provider.ssl_validate_server : base->provider.ssl_validate_server;
 	c->provider.issuer = add->provider.issuer != NULL ? add->provider.issuer : base->provider.issuer;
