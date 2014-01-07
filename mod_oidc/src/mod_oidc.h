@@ -110,6 +110,8 @@ typedef struct oidc_cfg {
 
 	/* the redirect URI as configured with the OpenID Connect OP's that we talk to */
 	char *redirect_uri;
+	/* (optional) external OP discovery page */
+	char *discover_url;
 
 	/* a pointer to the (single) provider that we connect to */
 	/* NB: if metadata_dir is set, these settings will function as defaults for the metadata read from there) */
