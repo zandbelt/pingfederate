@@ -77,6 +77,11 @@
 
 #include "mod_oidc.h"
 
+// TODO: complete documenting oidc_authz.c, oidc_config.c and oidc_util.c
+// TODO: document & reorganize the OAuth 2.0 stuff in mod_oidc.c
+// TODO: support dynamic client registration
+// TODO: fix the http_call SSL error on Ubuntu?
+// TODO: improve logging and consistency and completeness in logging
 // TODO: require SSL
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
@@ -910,7 +915,7 @@ const command_rec oidc_config_cmds[] = {
 
 		AP_INIT_TAKE1("OIDCRedirectURI", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, redirect_uri), RSRC_CONF, "Define the Redirect URI (e.g.: https://localhost:9031/protected/return/uri"),
 		AP_INIT_TAKE1("OIDCCookieDomain", oidc_set_cookie_domain, NULL, RSRC_CONF, "Specify domain element for OIDC session cookie."),
-		AP_INIT_TAKE1("OIDCCryptoPassphrase", oidc_set_crypto_passphrase, (void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase), RSRC_CONF, "Passphrase used for AES crypto on cookies and state."),
+		AP_INIT_TAKE1("OIDCCryptoPassphrase", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase), RSRC_CONF, "Passphrase used for AES crypto on cookies and state."),
 		AP_INIT_TAKE1("OIDCClaimDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued claims in the HTTP headers."),
 		AP_INIT_TAKE1("OIDCClaimPrefix ", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_prefix), RSRC_CONF, "The prefix to use when setting claims in the HTTP headers."),
 
