@@ -469,6 +469,11 @@ static void oidc_set_app_headers(request_rec *r, const apr_json_value_t *j_attrs
 			/* set the single string in the application header whose name is based on the key and the prefix */
 			oidc_set_app_header(r, s_key, j_value->value.string.p, claim_prefix);
 
+		} else if (j_value->type == APR_JSON_BOOLEAN) {
+
+			/* set boolean value in the application header whose name is based on the key and the prefix */
+			oidc_set_app_header(r, s_key, j_value->value.boolean ? "1" : "0", claim_prefix);
+
 		/* check if it is a multi-value string */
 		} else if (j_value->type == APR_JSON_ARRAY) {
 
@@ -496,10 +501,18 @@ static void oidc_set_app_headers(request_rec *r, const apr_json_value_t *j_attrs
 						s_concat = apr_psprintf(r->pool, "%s", elem->value.string.p);
 					}
 
+				} else if (elem->type == APR_JSON_BOOLEAN) {
+
+					if (apr_strnatcmp(s_concat, "") != 0) {
+						s_concat = apr_psprintf(r->pool, "%s%s%s", s_concat, claim_delimiter, j_value->value.boolean ? "1" : "0");
+					} else {
+						s_concat = apr_psprintf(r->pool, "%s", j_value->value.boolean ? "1" : "0");
+					}
+
 				} else {
 
 					/* don't know how to handle a non-string array element */
-					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_set_app_headers: unhandled in-array JSON object type [%d] when parsing attributes", elem->type);
+					ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_set_app_headers: unhandled in-array JSON object type [%d] for key \"%s\" when parsing claims", elem->type, s_key);
 				}
 			}
 
