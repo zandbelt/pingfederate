@@ -212,7 +212,7 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 	apr_file_close(fd);
 
 	/* log a succesful cache hit */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_get: cache hit for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expiring in: %" APR_SIZE_T_FMT ")", key, info.len, apr_time_sec(info.expire - apr_time_now()));
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_get: cache hit for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expiring in: %" APR_TIME_T_FMT ")", key, info.len, apr_time_sec(info.expire - apr_time_now()));
 
 	return APR_SUCCESS;
 
@@ -250,7 +250,7 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 
 		/* really only clean once per so much time, check that we haven not recently run */
 		if (apr_time_now() < fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS)) {
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in %" APR_SIZE_T_FMT " secs)", apr_time_sec(fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS) - apr_time_now()));
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in %" APR_TIME_T_FMT " secs)", apr_time_sec(fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS) - apr_time_now()));
 			return APR_SUCCESS;
 		}
 
@@ -373,7 +373,7 @@ apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, 
 	apr_file_close(fd);
 
 	/* log our success */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_set: set entry for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expires in: %" APR_SIZE_T_FMT ")", key, info.len, apr_time_sec(expiry - apr_time_now()));
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_set: set entry for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expires in: %" APR_TIME_T_FMT ")", key, info.len, apr_time_sec(expiry - apr_time_now()));
 
 	return APR_SUCCESS;
 }
