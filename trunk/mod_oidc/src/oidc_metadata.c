@@ -144,7 +144,7 @@ static apr_status_t oidc_metadata_file_read_json(request_rec *r, const char *pat
 
 	/* check that we've got all of it */
 	if (bytes_read != finfo.size) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: apr_file_read_full on (%s) returned less bytes (%" APR_SIZE_T_FMT ") than expected: (%" APR_SIZE_T_FMT ")", path, bytes_read, finfo.size);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: apr_file_read_full on (%s) returned less bytes (%" APR_SIZE_T_FMT ") than expected: (%" APR_OFF_T_FMT ")", path, bytes_read, finfo.size);
 		goto error_close;
 	}
 
