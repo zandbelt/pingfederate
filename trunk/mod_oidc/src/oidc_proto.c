@@ -318,7 +318,7 @@ static apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_provider_t *prov
 	char *signature = apr_pstrdup(r->pool, s);
 
 	/* log our results */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_parse_idtoken: valid id_token for user \"%s\" (expires in %" APR_SIZE_T_FMT " seconds)", username->value.string.p, *expires - apr_time_sec(apr_time_now()));
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_parse_idtoken: valid id_token for user \"%s\" (expires in %" APR_TIME_T_FMT " seconds)", username->value.string.p, *expires - apr_time_sec(apr_time_now()));
 
 	/* since we've made it so far, we may as well say it is a valid id_token */
 	return TRUE;
