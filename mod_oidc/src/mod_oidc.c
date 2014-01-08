@@ -77,8 +77,21 @@
 
 #include "mod_oidc.h"
 
-// TODO: complete documenting oidc_authz.c, oidc_config.c and oidc_util.c
-// TODO: support dynamic client registration
+// TODO: support dynamic client registration; do this in oidc_metadata_list:
+//       1) loop and see if there's a .provider entry but:
+//           a) no .client entry
+//           b) there's a client entry but the client_id/client_secret has expired
+//         then: see if theres a client_registration endpoint in the .provider metadata
+//         if so: call that endpoint and put the metadata in the .client file
+//
+//         if this all succeeded, we'll add the .provider entry to the list, otherwise we'll skip it
+//       2) provide a text input box for an "e-mail style" identifier in the discovery page and return parameters
+//         a) if selected, do a webfinger request to resolve the issuer,
+//         b) if failed, possibly followed by a metadata registry request
+//         c) and once we have the issuer identifier, start at 1)
+//
+//
+// TODO: complete documenting oidc_config.c
 // TODO: improve logging and consistency and completeness in logging
 // TODO: sort out all urlencode/decode stuff (get proper routines from somewhere)
 // TODO: require SSL
@@ -142,8 +155,8 @@ static apr_byte_t oidc_is_discovery_response(request_rec *r, oidc_cfg *cfg) {
 
 	/* see if this is a call to the configured redirect_uri and the OIDC_OP_PARAM_NAME and OIDC_RT_PARAM_NAME parameters are present */
 	return ((oidc_request_matches_url(r, cfg->redirect_uri) == TRUE)
-			&& oidc_request_has_parameter(r, OIDC_OP_PARAM_NAME)
-			&& oidc_request_has_parameter(r, OIDC_RT_PARAM_NAME));
+			&& oidc_request_has_parameter(r, OIDC_DISC_OP_PARAM)
+			&& oidc_request_has_parameter(r, OIDC_DISC_RT_PARAM));
 }
 
 /*
@@ -370,7 +383,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 	if (cfg->discover_url != NULL) {
 
 		/* yes, assemble the paramters for external discovery */
-		char *url = apr_psprintf(r->pool, "%s%s%s=%s", cfg->discover_url, strchr(cfg->discover_url, '?') != NULL ? "&" : "?", OIDC_RT_PARAM_NAME, oidc_escape_string(r, current_url));
+		char *url = apr_psprintf(r->pool, "%s%s%s=%s&%s=%s", cfg->discover_url, strchr(cfg->discover_url, '?') != NULL ? "&" : "?", OIDC_DISC_RT_PARAM, oidc_escape_string(r, current_url), OIDC_DISC_CB_PARAM, oidc_escape_string(r, cfg->redirect_uri));
 
 		/* log what we're about to do */
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: redirecting to external discovery page: %s", url);
@@ -402,7 +415,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 		// TODO: html escape (especially & character)
 
 		/* point back to the redirect_uri, where the selection is handled, with an IDP selection and return_to URL */
-		s = apr_psprintf(r->pool, "%s<p><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></p>\n", s, cfg->redirect_uri, OIDC_OP_PARAM_NAME, oidc_escape_string(r, issuer), OIDC_RT_PARAM_NAME, oidc_escape_string(r, current_url), issuer);
+		s = apr_psprintf(r->pool, "%s<p><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></p>\n", s, cfg->redirect_uri, OIDC_DISC_OP_PARAM, oidc_escape_string(r, issuer), OIDC_DISC_RT_PARAM, oidc_escape_string(r, current_url), issuer);
 	}
 
 	/* footer */
@@ -678,8 +691,8 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 	char *issuer = NULL, *original_url = NULL;
 
 	/* by now we can be sure they exist */
-	oidc_get_request_parameter(r, OIDC_OP_PARAM_NAME, &issuer);
-	oidc_get_request_parameter(r, OIDC_RT_PARAM_NAME, &original_url);
+	oidc_get_request_parameter(r, OIDC_DISC_OP_PARAM, &issuer);
+	oidc_get_request_parameter(r, OIDC_DISC_RT_PARAM, &original_url);
 
 	/* try and get metadata from the metadata directories for the selected OP */
 	oidc_provider_t *provider = NULL;
