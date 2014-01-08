@@ -78,9 +78,11 @@ OIDCCryptoPassphrase <somestring>
 ==========================================================
 
 If you do not want to use the internal discovery page, you can have the user being redirected to
-an external discovery page by setting "OIDCDiscoveryURL". That URL will be accessed with an oidc_return
-parameter that needs to be returned to the "OIDCRedirectURI" (again in the oidc_return parameter)
-together with an "oidc_provider" settings that contains the URL-encoded issuer value of the selected Provider.
+an external discovery page by setting "OIDCDiscoveryURL". That URL will be accessed with 2 parameters,
+"oidc_callback" and "oidc_return" (both URLs). The "oidc_return" parameter needs to be returned to the
+"oidc_callback" URL (again in the oidc_return parameter) together with an "oidc_provider" settings that
+contains the URL-encoded issuer value of the selected Provider. Sample callback:
+${oidc_callback}?oidc_return=${oidc_return}&oidc_provider=${issuer}
 
 
 Another example config for using PingFederate as your OpenID OP and/or OAuth 2.0 Authorization

@@ -71,10 +71,12 @@
 /* key for storing the id_token in the session context */
 #define OIDC_IDTOKEN_SESSION_KEY "id_token"
 
+/* parameter name of the callback URL in the discovery response */
+#define OIDC_DISC_CB_PARAM "oidc_callback"
 /* parameter name of the OP provider selection in the discovery response */
-#define OIDC_OP_PARAM_NAME "oidc_provider"
+#define OIDC_DISC_OP_PARAM "oidc_provider"
 /* parameter name of the original URL in the discovery response */
-#define OIDC_RT_PARAM_NAME "oidc_return"
+#define OIDC_DISC_RT_PARAM "oidc_return"
 
 /* name of the cookie that binds the state in the authorization request/response to the browser */
 #define OIDCStateCookieName  "oidc-state"
@@ -138,7 +140,7 @@ typedef struct oidc_cfg {
 } oidc_cfg;
 
 typedef struct oidc_dir_cfg {
-	char *dir_scope;
+	char *cookie_path;
 	char *cookie;
 	char *authn_header;
 } oidc_dir_cfg;
@@ -185,8 +187,7 @@ const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const 
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
 const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg);
 
-char *oidc_get_endpoint(request_rec *r, apr_uri_t *url, const char *s);
-char *oidc_get_dir_scope(request_rec *r);
+char *oidc_get_cookie_path(request_rec *r);
 
 // oidc_util.c
 int oidc_strnenvcmp(const char *a, const char *b, int len);

@@ -90,10 +90,8 @@
 //         b) if failed, possibly followed by a metadata registry request
 //         c) and once we have the issuer identifier, start at 1)
 //
-//
-// TODO: complete documenting oidc_config.c
-// TODO: improve logging and consistency and completeness in logging
 // TODO: sort out all urlencode/decode stuff (get proper routines from somewhere)
+// TODO: improve error handling/logging consistency and completeness
 // TODO: require SSL
 // TODO: fix the http_call SSL error on Ubuntu?
 
@@ -864,12 +862,12 @@ const command_rec oidc_config_cmds[] = {
 		AP_INIT_FLAG("OIDCOAuthSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.ssl_validate_server), RSRC_CONF, "Require validation of the OAuth 2.0 AS Validation Endpoint SSL server certificate for successful authentication (On or Off)"),
 
 		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, cache_dir), RSRC_CONF, "Directory used for file-based caching."),
-		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains OP metadata files."),
+		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains provider and client metadata files."),
 		AP_INIT_FLAG("OIDCScrubRequestHeaders", oidc_set_flag_slot, (void *) APR_OFFSETOF(oidc_cfg, scrub_request_headers), RSRC_CONF, "Scrub user name and claim headers from the user's request."),
 
-		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, authn_header), ACCESS_CONF|OR_AUTHCFG, "Specify the HTTP header variable to set with the name of the OIDC authenticated user.  By default no headers are added."),
-		AP_INIT_TAKE1("OIDCDirScope", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, dir_scope), ACCESS_CONF|OR_AUTHCFG, "Define the OpenID Connect scope."),
-		AP_INIT_TAKE1("OIDCCookie", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, cookie), ACCESS_CONF|OR_AUTHCFG, "Define the cookie name for HTTP sessions"),
+		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, authn_header), ACCESS_CONF|OR_AUTHCFG, "Specify the HTTP header variable to set with the name of the authenticated user. By default no headers are added."),
+		AP_INIT_TAKE1("OIDCCookiePath", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, cookie_path), ACCESS_CONF|OR_AUTHCFG, "Define the cookie path for the session cookie."),
+		AP_INIT_TAKE1("OIDCCookie", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, cookie), ACCESS_CONF|OR_AUTHCFG, "Define the cookie name for the session cookie."),
 		{ NULL }
 };
 
