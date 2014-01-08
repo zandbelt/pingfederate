@@ -312,12 +312,45 @@ size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream)
 	return (nmemb*size);
 }
 
+/* context structure for encoding parameters */
+typedef struct oidc_http_encode_t {
+	request_rec *r;
+	const char *encoded_params;
+} oidc_http_encode_t;
+
+/*
+ * add a url-form-encoded name/value pair
+ */
+static int oidc_http_add_form_url_encoded_param(void* rec, const char* key, const char* value) {
+	// TODO: handle arrays of strings?
+	oidc_http_encode_t *ctx = (oidc_http_encode_t*)rec;
+	const char *sep = apr_strnatcmp(ctx->encoded_params, "") == 0 ? "" : "&";
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r, "oidc_http_add_post_param: adding parameter: %s=%s to %s (sep=%s)", key, value, ctx->encoded_params, sep);
+	ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s%s%s=%s", ctx->encoded_params, sep, oidc_escape_string(ctx->r, key), oidc_escape_string(ctx->r, value));
+	return 1;
+}
+
+/*
+ * add a JSON name/value pair
+ */
+static int oidc_http_add_json_param(void* rec, const char* key, const char* value) {
+	oidc_http_encode_t *ctx = (oidc_http_encode_t*)rec;
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r, "oidc_http_add_json_param: adding parameter: %s=%s to %s", key, value, ctx->encoded_params);
+	if (value[0] == '[') {
+		// TODO hacky hacky, we need an array so we already encoded it :-)
+		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s\"%s\" : %s,\n", ctx->encoded_params, key, value);
+	} else {
+		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s\"%s\" : \"%s\",\n", ctx->encoded_params, key, value);
+	}
+	return 1;
+}
+
 /*
  * execute a HTTP (GET or POST) request
  *
  * TODO: solve a spurious SSL error against PingFederate 7.1.0-R2, multi-process/threading issue?
  *
- *       oidc_http_call: curl_easy_perform() failed (Unknown SSL protocol error in connection to <authorization-host> )
+ *       oidc_util_http_call: curl_easy_perform() failed (Unknown SSL protocol error in connection to <authorization-host> )
  *
  *       happens on Ubuntu 12.04 and 13.10 but not on Mac OS X macports (although it could still be a timing/server issue)
  *       all environments non-threaded, but pre-fork MPM
@@ -326,19 +359,20 @@ size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream)
  *       ERR: Ubuntu 13.10: Apache 2.4.6,  OpenSSL 1.0.1e, Curl 7.32.0
  *       ERR: Ubuntu 12.04: Apache 2.2.22, OpenSSL 1.0.1,  Curl 7.22.0
  */
-char *oidc_http_call(request_rec *r, const char *url, const char *postfields, const char *basic_auth, const char *bearer_token, int ssl_validate_server) {
+apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, const apr_table_t *params, const char *basic_auth, const char *bearer_token, int ssl_validate_server, const char **response) {
 	char curlError[CURL_ERROR_SIZE];
 	oidc_curl_buffer curlBuffer;
 	CURL *curl;
-	char *rv = NULL;
+	struct curl_slist *h_list = NULL;
+	int nr_of_params = (params != NULL) ? apr_table_elts(params)->nelts : 0;
 
 	/* do some logging about the inputs */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_http_call: entering, url=%s, postfields=%s, basic_auth=%s, bearer_token=%s, ssl_validate_server=%d", url, postfields, basic_auth, bearer_token, ssl_validate_server);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: entering, url=%s, action=%d, #params=%d, basic_auth=%s, bearer_token=%s, ssl_validate_server=%d", url, action, nr_of_params, basic_auth, bearer_token, ssl_validate_server);
 
 	curl = curl_easy_init();
 	if (curl == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_http_call: curl_easy_init() error");
-		return NULL;
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_http_call: curl_easy_init() error");
+		return FALSE;
 	}
 
 	/* some of these are not really required */
@@ -348,6 +382,8 @@ char *oidc_http_call(request_rec *r, const char *url, const char *postfields, co
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curlError);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+
+curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10);
 
 	/* setup the buffer where the response will be written to */
 	curlBuffer.written = 0;
@@ -365,10 +401,7 @@ char *oidc_http_call(request_rec *r, const char *url, const char *postfields, co
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, (ssl_validate_server != FALSE ? 2L : 0L));
 
 	/* identify this HTTP client */
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod-oidc 1.0");
-
-	/* set the target URL */
-	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod-oidc");
 
 	/* see if we need to add token in the Bearer Authorization header */
 	if (bearer_token != NULL) {
@@ -383,29 +416,83 @@ char *oidc_http_call(request_rec *r, const char *url, const char *postfields, co
 		curl_easy_setopt(curl, CURLOPT_USERPWD, basic_auth);
 	}
 
-	/* see if this is a POST or GET request */
-	if (postfields != NULL) {
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postfields);
-		// CURLOPT_POST needed at least to set: Content-Type: application/x-www-form-urlencoded
+	/* the POST contents */
+	oidc_http_encode_t data = { r, "" };
+
+	if (action == OIDC_HTTP_POST_JSON) {
+
+		/* POST JSON data */
+
+		if (nr_of_params > 0) {
+
+			/* add the parameters in JSON formatting */
+			apr_table_do(oidc_http_add_json_param, &data, params, NULL);
+			/* surround it by brackets to make it a valid JSON object */
+			data.encoded_params = apr_psprintf(r->pool, "{\n%s\n}", data.encoded_params);
+
+			/* set the data and log the event */
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: setting JSON parameters: %s", data.encoded_params);
+			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.encoded_params);
+		}
+
+		/* set HTTP method to POST */
 		curl_easy_setopt(curl, CURLOPT_POST, 1);
+
+		/* and overwrite the default url-form-encoded content-type */
+		h_list = curl_slist_append(h_list, "Content-type: application/json; charset=UTF-8");
+
+	} else if (action == OIDC_HTTP_POST_FORM) {
+
+		/* POST url-form-encoded data */
+
+		if (nr_of_params > 0) {
+
+			apr_table_do(oidc_http_add_form_url_encoded_param, &data, params, NULL);
+
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: setting post parameters: %s", data.encoded_params);
+			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.encoded_params);
+		} // else: probably should warn here...
+
+		/* CURLOPT_POST needed at least to set: Content-Type: application/x-www-form-urlencoded */
+		curl_easy_setopt(curl, CURLOPT_POST, 1);
+
+	} else if (nr_of_params > 0) {
+
+		/* HTTP GET with #params > 0 */
+
+		apr_table_do(oidc_http_add_form_url_encoded_param, &data, params, NULL);
+		const char *sep = strchr(url, '?') != NULL ? "&" : "?";
+		url = apr_psprintf(r->pool, "%s%s%s", url, sep, data.encoded_params);
+
+		/* log that the URL has changed now */
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: added query parameters to URL: %s", url);
 	}
 
-	/* do it */
+	/* see if we need to add any custom headers */
+	if (h_list != NULL)
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, h_list);
+
+	/* set the target URL */
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+
+	/* call it and record the result */
+	int rv = TRUE;
 	if (curl_easy_perform(curl) != CURLE_OK) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_http_call: curl_easy_perform() failed (%s)", curlError);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_http_call: curl_easy_perform() failed on: %s (%s)", url, curlError);
+		rv = FALSE;
 		goto out;
 	}
 
-	/* log the response */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_http_call: response=%s", curlBuffer.buf);
-
-	/* set the result */
-	rv = apr_pstrndup(r->pool, curlBuffer.buf, strlen(curlBuffer.buf));
+	/* set and log the response */
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: response=%s", curlBuffer.buf);
+	*response = apr_pstrndup(r->pool, curlBuffer.buf, strlen(curlBuffer.buf));
 
 out:
 
 	/* cleanup and return the result */
+	if (h_list != NULL) curl_slist_free_all(h_list);
 	curl_easy_cleanup(curl);
+
 	return rv;
 }
 
@@ -518,7 +605,7 @@ char *oidc_normalize_header_name(const request_rec *r, const char *str)
 /*
  * see if the currently accessed path matches a path from a defined URL
  */
-apr_byte_t oidc_request_matches_url(request_rec *r, const char *url) {
+apr_byte_t oidc_util_request_matches_url(request_rec *r, const char *url) {
 	apr_uri_t uri;
 	apr_uri_parse(r->pool, url, &uri);
 	apr_byte_t rc = (apr_strnatcmp(r->parsed_uri.path, uri.path) == 0) ? TRUE : FALSE;
@@ -529,7 +616,7 @@ apr_byte_t oidc_request_matches_url(request_rec *r, const char *url) {
 /*
  * see if the currently accessed path has a certain query parameter
  */
-apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param) {
+apr_byte_t oidc_util_request_has_parameter(request_rec *r, const char* param) {
 	if (r->args == NULL) return FALSE;
 	const char *option1 = apr_psprintf(r->pool, "%s=", param);
 	const char *option2 = apr_psprintf(r->pool, "&%s=", param);
@@ -539,7 +626,7 @@ apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param) {
 /*
  * get a query parameter
  */
-apr_byte_t oidc_get_request_parameter(request_rec *r, char *name, char **value) {
+apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name, char **value) {
 	// TODO: we should really check with ? and & and avoid any <bogus>code= stuff to trigger true
 	char *tokenizer_ctx, *p, *args, *rv = NULL;
 	const char *k_param = apr_psprintf(r->pool, "%s=", name);
@@ -583,10 +670,34 @@ static apr_byte_t oidc_util_json_string_print(request_rec *r, apr_json_value_t *
 /*
  * check a JSON object for "error" results and printout
  */
-apr_byte_t oidc_util_check_json_error(request_rec *r, apr_json_value_t *json) {
+static apr_byte_t oidc_util_check_json_error(request_rec *r, apr_json_value_t *json) {
 	if (oidc_util_json_string_print(r, json, "error", "oidc_util_check_json_error") == TRUE) {
 		oidc_util_json_string_print(r, json, "error_description", "oidc_util_check_json_error");
 		return TRUE;
 	}
 	return FALSE;
+}
+
+/*
+ * decode a JSON string, check for "error" results and printout
+ */
+apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r, const char *str, apr_json_value_t **json) {
+
+	/* decode the JSON contents of the buffer */
+	if (apr_json_decode(json, str, strlen(str), r->pool) != APR_SUCCESS) {
+		/* something went wrong */
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_check_json_error: JSON parsing returned an error");
+		return FALSE;
+	}
+
+	if ( (*json == NULL) || ((*json)->type != APR_JSON_OBJECT) ) {
+		/* oops, no JSON */
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_check_json_error: parsed JSON did not contain a JSON object");
+		return FALSE;
+	}
+
+	// see if it is not an error response somehow
+	if (oidc_util_check_json_error(r, *json)) return FALSE;
+
+	return TRUE;
 }

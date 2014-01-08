@@ -115,7 +115,7 @@ static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path,
 
 	/* open the JSON file if it exists */
 	if ((rc = apr_file_open(&fd, path, APR_FOPEN_READ|APR_FOPEN_BUFFERED, APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_read_json: no JSON file found at: \"%s\"", path);
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "oidc_metadata_file_read_json: no JSON file found at: \"%s\"", path);
 		return FALSE;
 	}
 
@@ -183,6 +183,165 @@ error_close:
 }
 
 /*
+ * check to see if dynamically registered JSON client metadata has not expired
+ */
+static apr_byte_t oidc_metadata_client_is_valid(request_rec *r, apr_json_value_t *j_client, const char *issuer) {
+
+	/* the expiry timestamp from the JSON object */
+	apr_json_value_t *expires_at = apr_hash_get(j_client->value.object, "client_secret_expires_at", APR_HASH_KEY_STRING);
+	if ( (expires_at == NULL) || (expires_at->type != APR_JSON_LONG) ) {
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_client_is_valid: client metadata for \"%s\" did not contain a \"client_secret_expires_at\" setting", issuer);
+		/* assume that it never expires */
+		return TRUE;
+	}
+
+	/* see if it is unrestricted */
+	if (expires_at->value.lnumber == 0) {
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_client_is_valid: client metadata for \"%s\" never expires (client_secret_expires_at=0)", issuer);
+		return TRUE;
+	}
+
+	/* check if the value >= now */
+	if (apr_time_sec(apr_time_now()) > expires_at->value.lnumber) {
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "oidc_metadata_client_is_valid: client secret for \"%s\" expired", issuer);
+		return FALSE;
+	}
+
+	ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "oidc_metadata_client_is_valid: client secret for \"%s\" has not expired, return OK", issuer);
+
+	/* all ok, not expired */
+	return TRUE;
+}
+
+/*
+ * write JSON metadata to a file
+ */
+static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path, const char *data) {
+
+	apr_file_t *fd;
+	apr_status_t rc = APR_SUCCESS;
+	apr_size_t bytes_written = 0;
+	char s_err[128];
+
+	/* try to open the metadata file for writing, creating it if it does not exist */
+	if ((rc = apr_file_open(&fd, path, (APR_FOPEN_WRITE|APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_write: file \"%s\" could not be opened (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
+		return FALSE;
+	}
+
+	/* lock the file and move the write pointer to the start of it */
+	apr_file_lock(fd, APR_FLOCK_EXCLUSIVE);
+	apr_off_t begin = 0;
+	apr_file_seek(fd, APR_SET, &begin);
+
+	/* calculate the length of the data, which is a string length */
+	apr_size_t len = strlen(data) + 1;
+
+	/* (blocking) write the number of bytes in the buffer */
+	rc = apr_file_write_full(fd, data, len, &bytes_written);
+
+	/* check for a system error */
+	if (rc != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_write: could not write to: \"%s\" (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
+		return FALSE;
+	}
+
+	/* check that all bytes from the header were written */
+	if (bytes_written !=  len) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_write: could not write enough bytes to: \"%s\", bytes_written (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")", path, bytes_written, len);
+		return FALSE;
+	}
+
+	/* unlock and close the written file */
+	apr_file_unlock(fd);
+	apr_file_close(fd);
+
+	return TRUE;
+}
+
+/*
+ * return both provider and client metadata for the specified issuer
+ *
+ * TODO: should we use a modification timestamp on client metadata to skip
+ *       validation if it has been done recently, or is that overkill?
+ *
+ *       at least it is not overkill for blacklisting providers that registration fails for
+ *       but maybe we should just delete the provider data for those?
+ */
+static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r, oidc_cfg *cfg, const char *issuer, apr_json_value_t **j_provider, apr_json_value_t **j_client) {
+
+	/* get the full file path to the provider and client metadata for this issuer */
+	const char *provider_path = oidc_metadata_provider_file_path(r, issuer);
+	const char *client_path = oidc_metadata_client_file_path(r, issuer);
+
+	/* read the provider metadata in to its variable */
+	if (oidc_metadata_file_read_json(r, provider_path, j_provider) == FALSE)
+		/* errors will already have been reported */
+		return FALSE;
+
+	/* read the client metadata in to the "client" variable */
+	if (oidc_metadata_file_read_json(r, client_path, j_client) == TRUE) {
+
+		/* if we succeeded, we should check its validity */
+		if (oidc_metadata_client_is_valid(r, *j_client, issuer))
+			/* all OK */
+			return TRUE;
+
+		/* this is expired or otherwise invalid client metadata */
+
+		// TODO: decide whether we should delete the client metadata since it is
+		//       just overriden now (which may be useful for client_update's later on)
+	}
+
+	/* at this point we have no valid client metadata, see if there's a registration endpoint for this provider */
+	apr_json_value_t *j_registration_endpoint = apr_hash_get((*j_provider)->value.object, "registration_endpoint", APR_HASH_KEY_STRING);
+	if ( (j_registration_endpoint == NULL) || (j_registration_endpoint->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "oidc_metadata_get_provider_and_client: no (valid) client metadata and provider JSON object did not contain a \"registration_endpoint\" string");
+		return FALSE;
+	}
+
+	apr_table_t *params = apr_table_make(r->pool, 1);
+	apr_table_addn(params, "client_name", cfg->provider.client_name);
+
+	int action = OIDC_HTTP_POST_JSON;
+
+	/* hack away for pre-standard PingFederate client registration... */
+	if (strstr(j_registration_endpoint->value.string.p, "idp/client-registration.openid") != NULL) {
+
+		/* add PF specific client registration parameters */
+		apr_table_addn(params, "operation", "client_register");
+		apr_table_addn(params, "redirect_uris", cfg->redirect_uri);
+		if (cfg->provider.client_contact != NULL) {
+			apr_table_addn(params, "contacts", cfg->provider.client_contact);
+		}
+
+		action = OIDC_HTTP_POST_FORM;
+
+	} else {
+
+		// TODO also hacky, we need arrays for the next two values
+		apr_table_addn(params, "redirect_uris", apr_psprintf(r->pool, "[\"%s\"]", cfg->redirect_uri));
+		if (cfg->provider.client_contact != NULL) {
+			apr_table_addn(params, "contacts", apr_psprintf(r->pool, "[\"%s\"]", cfg->provider.client_contact));
+		}
+	}
+
+	// TODO: now the global setting is used for dynamic client registration...
+	// TODO: shorten the timeout
+	const char *response = NULL;
+	if (oidc_util_http_call(r,j_registration_endpoint->value.string.p, action, params, NULL, NULL, cfg->provider.ssl_validate_server, &response) == FALSE) {
+		/* errors will have been logged by now */
+		return FALSE;
+	}
+
+	/* decode and see if it is not an error response somehow */
+	if (oidc_util_decode_json_and_check_error(r, response, j_client) == FALSE) return FALSE;
+
+	/* if all OK write the client metadata to a file and return that result */
+	return oidc_metadata_file_write(r, client_path, response);
+}
+
+/*
  * get a list of configured OIDC providers based on the entries in the provider metadata directory
  */
 apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **list) {
@@ -210,8 +369,19 @@ apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t 
 		char *ext = strrchr(fi.name, '.');
 		if ( (ext == NULL) || (strcmp(++ext, OIDC_METADATA_SUFFIX_PROVIDER) != 0) ) continue;
 
+		/* get the issuer from the filename */
+		const char *issuer = oidc_metadata_filename_to_issuer(r, fi.name);
+
+		/* pointer to the parsed JSON metadata for the provider */
+		apr_json_value_t *j_provider = NULL;
+		/* pointer to the parsed JSON metadata for the client */
+		apr_json_value_t *j_client = NULL;
+
+		/* get the provider and client metadata, do all checks and registration if possible */
+		if (oidc_metadata_get_provider_and_client(r, cfg, issuer, &j_provider, &j_client) == FALSE) continue;
+
 		/* push the decoded issuer filename in to the array */
-		*(const char**)apr_array_push(*list) = oidc_metadata_filename_to_issuer(r, fi.name);
+		*(const char**)apr_array_push(*list) = issuer;
 	}
 
 	/* we're done, cleanup now */
@@ -228,20 +398,13 @@ apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t 
  */
 apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, oidc_provider_t **result) {
 
-	/* pointer to the parsed JSON metadata from the provider directory */
+	/* pointer to the parsed JSON metadata for the provider */
 	apr_json_value_t *j_provider = NULL;
-	/* pointer to the parsed JSON metadata from the client directory */
+	/* pointer to the parsed JSON metadata for the client */
 	apr_json_value_t *j_client = NULL;
 
-	/* get the full file path to the provider metadata for this issuer */
-	const char *provider_path = oidc_metadata_provider_file_path(r, issuer);
-	/* and read the provider metadata in to the "provider" variable */
-	if (oidc_metadata_file_read_json(r, provider_path, &j_provider) == FALSE) return FALSE;
-
-	/* get the full file path to the client metadata for this issuer */
-	const char *client_path = oidc_metadata_client_file_path(r, issuer);
-	/* and read the client metadata in to the "client" variable */
-	if (oidc_metadata_file_read_json(r, client_path, &j_client) == FALSE) return FALSE;
+	/* get the provider and client metadata */
+	if (oidc_metadata_get_provider_and_client(r, cfg, issuer, &j_provider, &j_client) == FALSE) return FALSE;
 
 	/* allocate space for a parsed-and-merged metadata struct */
 	*result = apr_pcalloc(r->pool, sizeof(oidc_provider_t));
@@ -257,7 +420,7 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, 
 		return FALSE;
 	}
 	if (strcmp(issuer, j_issuer->value.string.p) != 0) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: requested issuer (%s) does not match the \"issuer\" value in the metadata file (%s): %s", issuer, provider_path, j_issuer->value.string.p);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: requested issuer (%s) does not match the \"issuer\" value in the provider metadata file: %s", issuer, j_issuer->value.string.p);
 		return FALSE;
 	}
 
@@ -342,6 +505,11 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, 
 
 	// CLIENT
 
+	// TODO: we already know that the metadata has not expired, shouldn't we have added more checks?
+	//       (although it is nice that the metadata will not be updated anymore:
+	//       errors in dynamic client registration won't be repeated then
+	//       but: when to retry?
+
 	/* find out if we need to perform SSL server certificate validation on the token_endpoint and user_info_endpoint for this provider */
 	int validate = cfg->provider.ssl_validate_server;
 	apr_json_value_t *j_ssl_validate_server = apr_hash_get(j_client->value.object, "ssl_validate_server", APR_HASH_KEY_STRING);
@@ -362,8 +530,6 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, 
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: client JSON object did not contain a \"client_secret\" string");
 		return FALSE;
 	}
-
-	// TODO: something with client_secret_expires_at...
 
 	/* find out what scopes we should be requesting from this provider */
 	// TODO: use the provider "scopes_supported" to mix-and-match with what we've configured for the client
