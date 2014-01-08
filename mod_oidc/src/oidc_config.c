@@ -64,39 +64,57 @@
 
 #include "mod_oidc.h"
 
+/* validate SSL server certificates by default */
 #define OIDC_DEFAULT_SSL_VALIDATE_SERVER 1
+/* default token endpoint authentication method */
 #define OIDC_DEFAULT_ENDPOINT_AUTH "client_secret_basic"
+/* default scope requested from the OP */
 #define OIDC_DEFAULT_SCOPE "openid"
+/* default claim delimiter for multi-valued claims passed in a HTTP header */
 #define OIDC_DEFAULT_CLAIM_DELIMITER ","
+/* default prefix for claim names being passed in HTTP headers */
 #define OIDC_DEFAULT_CLAIM_PREFIX "OIDC_CLAIM_"
-
+/* default name of the session cookie */
 #define OIDC_DEFAULT_COOKIE "mod-oidc"
+/* default for the HTTP header name in which the remote user name is passed */
 #define OIDC_DEFAULT_AUTHN_HEADER NULL
+/* scrub HTTP headers by default unless overriden (and insecure) */
 #define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS 1
-#define OIDC_DEFAULT_DIR_SCOPE NULL
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
+/*
+ * set a boolean value in the server config
+ */
 const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
     return ap_set_flag_slot(cmd, cfg, arg);
 }
 
+/*
+ * set a string value in the server config
+ */
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	//ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, cmd->server, "oidc_set_string_slot: set value: %s", arg);
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
+/*
+ * set a URL value in the server config
+ */
 const char *oidc_set_url_slot(cmd_parms *cmd, void *ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	apr_uri_t url;
 	if (apr_uri_parse(cmd->pool, arg, &url) != APR_SUCCESS) {
-		return apr_psprintf(cmd->pool, "oidc_set_url_slot: URL '%s' could not be parsed!", arg);
+		return apr_psprintf(cmd->pool, "oidc_set_url_slot: configuration value '%s' could not be parsed as a URL!", arg);
 	}
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
+/*
+ * set a directory value in the server config
+ */
 // TODO: it's not really a syntax error... (could be fixed at runtime but then we'd have to restart the server)
 const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
@@ -118,6 +136,9 @@ const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
+/*
+ * set the cookie domain in the server config and check it syntactically
+ */
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	size_t sz, limit;
@@ -136,8 +157,10 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
 	return NULL;
 }
 
+/*
+ * set an authenication method for an endpoint and check it is one that we support
+ */
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
-
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 
 	if ((apr_strnatcmp(arg, "client_secret_post") == 0)
@@ -145,23 +168,14 @@ const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const 
 		(apr_strnatcmp(arg, "client_secret_basic") == 0) ) {
 
 		return ap_set_string_slot(cmd, cfg, arg);
-
 	}
-
 	return "parameter must be 'client_secret_post' or 'client_secret_basic'";
 }
 
-char *oidc_get_endpoint(request_rec *r, apr_uri_t *url, const char *s) {
-	apr_uri_t test;
-	memset(&test, '\0', sizeof(apr_uri_t));
-	if (memcmp(url, &test, sizeof(apr_uri_t)) == 0) {
-		if (s != NULL) ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_endpoint: %s null (not set?)", s);
-		return NULL;
-	}
-	return (apr_uri_unparse(r->pool, url, 0));
-}
-
-char *oidc_get_path(request_rec *r) {
+/*
+ * get the current path from the request in a normalized way
+ */
+static char *oidc_get_path(request_rec *r) {
 	size_t i;
 	char *p;
 	p = r->parsed_uri.path;
@@ -173,15 +187,18 @@ char *oidc_get_path(request_rec *r) {
 	return apr_pstrndup(r->pool, p, i + 1);
 }
 
-char *oidc_get_dir_scope(request_rec *r) {
+/*
+ * get the cookie path setting and check that it matches the request path; cook it up if it is not set
+ */
+char *oidc_get_cookie_path(request_rec *r) {
 	char *rv = NULL, *requestPath = oidc_get_path(r);
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
-	if (d->dir_scope != NULL) {
-		if (strncmp(d->dir_scope, requestPath, strlen(d->dir_scope)) == 0)
-			rv = d->dir_scope;
+	if (d->cookie_path != NULL) {
+		if (strncmp(d->cookie_path, requestPath, strlen(d->cookie_path)) == 0)
+			rv = d->cookie_path;
 		else {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_dir_scope: OIDCDirScope (%s) not a substring of request path, using request path (%s) for cookie", d->dir_scope, requestPath);
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_cookie_path: OIDCCookiePath (%s) not a substring of request path, using request path (%s) for cookie", d->cookie_path, requestPath);
 			rv = requestPath;
 		}
 	} else {
@@ -190,6 +207,9 @@ char *oidc_get_dir_scope(request_rec *r) {
 	return (rv);
 }
 
+/*
+ * create a new server config record with defaults
+ */
 void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
 
@@ -227,6 +247,9 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	return c;
 }
 
+/*
+ * merge a new server config with a base one
+ */
 void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	oidc_cfg *c = apr_pcalloc(pool, sizeof(oidc_cfg));
 	oidc_cfg *base = BASE;
@@ -266,32 +289,38 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	return c;
 }
 
+/*
+ * create a new directory config record with defaults
+ */
 void *oidc_create_dir_config(apr_pool_t *pool, char *path) {
 	oidc_dir_cfg *c = apr_pcalloc(pool, sizeof(oidc_dir_cfg));
 	c->cookie = OIDC_DEFAULT_COOKIE;
-	c->dir_scope = OIDC_DEFAULT_DIR_SCOPE;
+	c->cookie_path = NULL;
 	c->authn_header = OIDC_DEFAULT_AUTHN_HEADER;
 	return(c);
 }
 
+/*
+ * merge a new directory config with a base one
+ */
 void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	oidc_dir_cfg *c = apr_pcalloc(pool, sizeof(oidc_dir_cfg));
 	oidc_dir_cfg *base = BASE;
 	oidc_dir_cfg *add = ADD;
-	c->cookie = (apr_strnatcasecmp(add->cookie, OIDC_DEFAULT_COOKIE) != 0 ?
-		add->cookie : base->cookie);
-	c->dir_scope = (add->dir_scope != OIDC_DEFAULT_DIR_SCOPE ?
-		add->dir_scope : base->dir_scope);
-	if (add->dir_scope != NULL && apr_strnatcasecmp(add->dir_scope, "Off") == 0)
-		c->dir_scope = NULL;
-	c->authn_header = (add->authn_header != OIDC_DEFAULT_AUTHN_HEADER ?
-		add->authn_header : base->authn_header);
-	if (add->authn_header != NULL && apr_strnatcasecmp(add->authn_header, "Off") == 0)
-		c->authn_header = NULL;
-
-	return(c);
+	c->cookie = (
+			apr_strnatcasecmp(add->cookie, OIDC_DEFAULT_COOKIE) != 0 ?
+					add->cookie : base->cookie);
+	c->cookie_path = (
+			add->cookie_path != NULL ? add->cookie_path : base->cookie_path);
+	c->authn_header = (
+			add->authn_header != OIDC_DEFAULT_AUTHN_HEADER ?
+					add->authn_header : base->authn_header);
+	return (c);
 }
 
+/*
+ * SSL initialization magic copied from mod_auth_cas
+ */
 #if defined(OPENSSL_THREADS) && APR_HAS_THREADS
 
 static apr_thread_mutex_t **ssl_locks;
@@ -336,6 +365,9 @@ apr_status_t oidc_cleanup(void *data) {
 	return APR_SUCCESS;
 }
 
+/*
+ * handler that is called (twice) after the configuration phase; check if everything is OK
+ */
 int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_rec *s) {
 	const char *userdata_key = "auth_oidc_init";
 	void *data = NULL;
@@ -407,6 +439,9 @@ static const authz_provider authz_oidc_provider = {
 };
 #endif
 
+/*
+ * register our authentication and authorization functions
+ */
 void oidc_register_hooks(apr_pool_t *pool) {
 	static const char *const authzSucc[] = { "mod_authz_user.c", NULL };
 	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);

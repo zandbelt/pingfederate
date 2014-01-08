@@ -418,11 +418,11 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 	char *headerString, *currentCookies;
 
 	/* construct the cookie value */
-	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName,
-			cookieValue, ";Secure",
-			oidc_url_encode(r, oidc_get_dir_scope(r), " "),
-			(c->cookie_domain != NULL ? ";Domain=" : ""),
-			(c->cookie_domain != NULL ? c->cookie_domain : ""));
+	headerString = apr_psprintf(r->pool, "%s=%s;Secure;Path=%s%s",
+			cookieName,
+			cookieValue,
+			oidc_url_encode(r, oidc_get_cookie_path(r), " "),
+			c->cookie_domain != NULL ? apr_psprintf(r->pool, ";Domain=%s", c->cookie_domain) : "");
 
 	/* see if we need to clear the cookie */
 	if (apr_strnatcmp(cookieValue, "") == 0)
