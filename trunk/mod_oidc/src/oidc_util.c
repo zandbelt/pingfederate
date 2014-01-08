@@ -49,7 +49,6 @@
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
-//#include <stdio.h>
 #include <curl/curl.h>
 
 #include <apr_strings.h>
@@ -64,10 +63,14 @@
 
 #include "mod_oidc.h"
 
+/* hrm, should we get rid of this by adding parameters to the (3) functions? */
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
-// TODO: always padded now, do we need an option to remove the padding?
+/*
+ * base64url encode a string
+ */
 int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_len) {
+	// TODO: always padded now, do we need an option to remove the padding?
 	if ( (src == NULL) || (src_len <= 0) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_base64url_encode: not encoding anything; src=NULL and/or src_len<1");
 		return -1;
@@ -86,8 +89,11 @@ int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_l
 	return enc_len;
 }
 
-// TODO: check base64url decoding/encoding code...
+/*
+ * base64url decode a string
+ */
 int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding) {
+	// TODO: check base64url decoding/encoding code and look for alternatives?
 	if (src == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_base64url_decode: not encoding anything; src=NULL");
 		return -1;
@@ -119,6 +125,9 @@ int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int paddi
 	return apr_base64_decode(*dst, dec);
 }
 
+/*
+ * encrypt and base64url encode a string
+ */
 int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	int crypted_len = strlen(src) + 1;
@@ -130,6 +139,9 @@ int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char 
 	return oidc_base64url_encode(r, dst, (const char *)crypted, crypted_len);
 }
 
+/*
+ * decrypt and base64url dencode a string
+ */
 int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char *src) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	char *decbuf = NULL;
@@ -146,16 +158,21 @@ int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char 
 	return dec_len;
 }
 
+/*
+ * convert a character to an ENVIRONMENT-variable-safe variant
+ */
 int oidc_char_to_env(int c) {
 	return apr_isalnum(c) ? apr_toupper(c) : '_';
 }
 
-/* Compare two strings based on how they would be converted to an
+/*
+ * compare two strings based on how they would be converted to an
  * environment variable, as per oidc_char_to_env. If len is specified
  * as less than zero, then the full strings will be compared. Returns
  * less than, equal to, or greater than zero based on whether the
  * first argument's conversion to an environment variable is less
- * than, equal to, or greater than the second. */
+ * than, equal to, or greater than the second.
+ */
 int oidc_strnenvcmp(const char *a, const char *b, int len) {
 	int d, i = 0;
 	while (1) {
@@ -183,6 +200,10 @@ int oidc_strnenvcmp(const char *a, const char *b, int len) {
 	return 0;
 }
 
+/*
+ * url-encode a string
+ * TODO: see if we can get this from somewhere else though
+ */
 char *oidc_url_encode(const request_rec *r, const char *str,
 								const char *charsToEncode) {
 	char *rv, *p;
@@ -230,11 +251,19 @@ char *oidc_url_encode(const request_rec *r, const char *str,
 	return(rv);
 }
 
+/*
+ * escape a string
+ * TODO: there's probably better stuff out there to do this...
+ */
 char *oidc_escape_string(const request_rec *r, const char *str) {
 	char *rfc1738 = "+ <>\"%{}|\\^~[]`;/?:@=&#";
 	return(oidc_url_encode(r, str, rfc1738));
 }
 
+/*
+ * get the URL that is currently being accessed
+ * TODO: seems hard enough, maybe look for other existing code...?
+ */
 char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c) {
 	const apr_port_t port = r->connection->local_addr->port;
 	char *scheme, *port_str = "", *url;
@@ -259,13 +288,18 @@ char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c) {
 	return url;
 }
 
+/* maximum size of any response returned in HTTP calls */
 #define OIDC_CURL_MAX_RESPONSE_SIZE 65536
 
+/* buffer to hold HTTP call responses */
 typedef struct oidc_curl_buffer {
 	char buf[OIDC_CURL_MAX_RESPONSE_SIZE];
 	size_t written;
 } oidc_curl_buffer;
 
+/*
+ * callback for CURL to write bytes that come back from an HTTP call
+ */
 size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream) {
 	oidc_curl_buffer *curlBuffer = (oidc_curl_buffer *) stream;
 
@@ -278,22 +312,27 @@ size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream)
 	return (nmemb*size);
 }
 
-// TODO: solve a spurious SSL error against PingFederate 7.1.0-R2, multi-process/threading issue?
-//
-//       oidc_http_call: curl_easy_perform() failed (Unknown SSL protocol error in connection to <authorization-host> )
-//
-//       happens on Ubuntu 12.04 and 13.10 but not on Mac OS X macports (although it could still be a timing/server issue)
-//       all environments non-threaded, but pre-fork MPM
-//
-//       OK: Mac OS X 10.9.1, MacPorts 2.2.0, Apache 2.2.25, OpenSSL 1.0.1e, Curl 7.32.0
-//       ERR: Ubuntu 13.10: Apache 2.4.6,  OpenSSL 1.0.1e, Curl 7.32.0
-//       ERR: Ubuntu 12.04: Apache 2.2.22, OpenSSL 1.0.1,  Curl 7.22.0
+/*
+ * execute a HTTP (GET or POST) request
+ *
+ * TODO: solve a spurious SSL error against PingFederate 7.1.0-R2, multi-process/threading issue?
+ *
+ *       oidc_http_call: curl_easy_perform() failed (Unknown SSL protocol error in connection to <authorization-host> )
+ *
+ *       happens on Ubuntu 12.04 and 13.10 but not on Mac OS X macports (although it could still be a timing/server issue)
+ *       all environments non-threaded, but pre-fork MPM
+ *
+ *       OK: Mac OS X 10.9.1, MacPorts 2.2.0, Apache 2.2.25, OpenSSL 1.0.1e, Curl 7.32.0
+ *       ERR: Ubuntu 13.10: Apache 2.4.6,  OpenSSL 1.0.1e, Curl 7.32.0
+ *       ERR: Ubuntu 12.04: Apache 2.2.22, OpenSSL 1.0.1,  Curl 7.22.0
+ */
 char *oidc_http_call(request_rec *r, const char *url, const char *postfields, const char *basic_auth, const char *bearer_token, int ssl_validate_server) {
 	char curlError[CURL_ERROR_SIZE];
 	oidc_curl_buffer curlBuffer;
 	CURL *curl;
 	char *rv = NULL;
 
+	/* do some logging about the inputs */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_http_call: entering, url=%s, postfields=%s, basic_auth=%s, bearer_token=%s, ssl_validate_server=%d", url, postfields, basic_auth, bearer_token, ssl_validate_server);
 
 	curl = curl_easy_init();
@@ -302,6 +341,7 @@ char *oidc_http_call(request_rec *r, const char *url, const char *postfields, co
 		return NULL;
 	}
 
+	/* some of these are not really required */
 	curl_easy_setopt(curl, CURLOPT_HEADER, 0L);
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -309,6 +349,7 @@ char *oidc_http_call(request_rec *r, const char *url, const char *postfields, co
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
 
+	/* setup the buffer where the response will be written to */
 	curlBuffer.written = 0;
 	memset(curlBuffer.buf, '\0', sizeof(curlBuffer.buf));
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &curlBuffer);
@@ -319,95 +360,141 @@ char *oidc_http_call(request_rec *r, const char *url, const char *postfields, co
 	curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP|CURLPROTO_HTTPS);
 #endif
 
+	/* set the options for validating the SSL server certificate that the remote site presents */
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, (ssl_validate_server != FALSE ? 1L : 0L));
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, (ssl_validate_server != FALSE ? 2L : 0L));
 
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod_oidc 1.0");
+	/* identify this HTTP client */
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod-oidc 1.0");
 
+	/* set the target URL */
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 
+	/* see if we need to add token in the Bearer Authorization header */
 	if (bearer_token != NULL) {
 		struct curl_slist *headers = NULL;
 		headers = curl_slist_append(headers, apr_psprintf(r->pool, "Authorization: Bearer %s", bearer_token));
 		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	}
 
+	/* see if we need to perform HTTP basic authentication to the remote site */
 	if (basic_auth != NULL) {
 		curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
 		curl_easy_setopt(curl, CURLOPT_USERPWD, basic_auth);
 	}
 
+	/* see if this is a POST or GET request */
 	if (postfields != NULL) {
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postfields);
 		// CURLOPT_POST needed at least to set: Content-Type: application/x-www-form-urlencoded
 		curl_easy_setopt(curl, CURLOPT_POST, 1);
 	}
 
+	/* do it */
 	if (curl_easy_perform(curl) != CURLE_OK) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_http_call: curl_easy_perform() failed (%s)", curlError);
 		goto out;
 	}
 
+	/* log the response */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_http_call: response=%s", curlBuffer.buf);
 
+	/* set the result */
 	rv = apr_pstrndup(r->pool, curlBuffer.buf, strlen(curlBuffer.buf));
 
 out:
+
+	/* cleanup and return the result */
 	curl_easy_cleanup(curl);
 	return rv;
 }
 
+/*
+ * set a cookie in the HTTP response headers
+ */
 void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 
-	char *headerString, *currentCookies;
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
-	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName, cookieValue, ";Secure", oidc_url_encode(r, oidc_get_dir_scope(r), " "), (c->cookie_domain != NULL ? ";Domain=" : ""), (c->cookie_domain != NULL ? c->cookie_domain : ""));
-	if (apr_strnatcmp(cookieValue, "") == 0) headerString = apr_psprintf(r->pool, "%s;expires=0;Max-Age=0", headerString);
+	char *headerString, *currentCookies;
+
+	/* construct the cookie value */
+	headerString = apr_psprintf(r->pool, "%s=%s%s;Path=%s%s%s", cookieName,
+			cookieValue, ";Secure",
+			oidc_url_encode(r, oidc_get_dir_scope(r), " "),
+			(c->cookie_domain != NULL ? ";Domain=" : ""),
+			(c->cookie_domain != NULL ? c->cookie_domain : ""));
+
+	/* see if we need to clear the cookie */
+	if (apr_strnatcmp(cookieValue, "") == 0)
+		headerString = apr_psprintf(r->pool, "%s;expires=0;Max-Age=0",
+				headerString);
+
 	/* use r->err_headers_out so we always print our headers (even on 302 redirect) - headers_out only prints on 2xx responses */
 	apr_table_add(r->err_headers_out, "Set-Cookie", headerString);
-	if ((currentCookies = (char *) apr_table_get(r->headers_in, "Cookie")) == NULL)
+
+	/* see if we need to add it to existing cookies */
+	if ((currentCookies = (char *) apr_table_get(r->headers_in, "Cookie"))
+			== NULL)
 		apr_table_add(r->headers_in, "Cookie", headerString);
 	else
-		apr_table_set(r->headers_in, "Cookie", (apr_pstrcat(r->pool, headerString, ";", currentCookies, NULL)));
+		apr_table_set(r->headers_in, "Cookie",
+				(apr_pstrcat(r->pool, headerString, ";", currentCookies, NULL)));
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_set_cookie: adding outgoing header: Set-Cookie: %s", headerString);
-
-	return;
+	/* do some logging */
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_set_cookie: adding outgoing header: Set-Cookie: %s",
+			headerString);
 }
 
+/*
+ * get a cookie from the HTTP request
+ */
 char *oidc_get_cookie(request_rec *r, char *cookieName) {
 	char *cookie, *tokenizerCtx, *rv = NULL;
 	apr_byte_t cookieFound = FALSE;
 
+	/* get the Cookie value */
 	char *cookies = apr_pstrdup(r->pool, (char *) apr_table_get(r->headers_in, "Cookie"));
+
 	if (cookies != NULL) {
+
 		/* tokenize on ; to find the cookie we want */
 		cookie = apr_strtok(cookies, ";", &tokenizerCtx);
+
 		do {
+
 			while (cookie != NULL && *cookie == ' ')
 				cookie++;
+
+			/* see if we've found the cookie that we're looking for */
 			if (strncmp(cookie, cookieName, strlen(cookieName)) == 0) {
 				cookieFound = TRUE;
+
 				/* skip to the meat of the parameter (the value after the '=') */
 				cookie += (strlen(cookieName)+1);
 				rv = apr_pstrdup(r->pool, cookie);
+
+				break;
 			}
+
+			/* go to the next cookie */
 			cookie = apr_strtok(NULL, ";", &tokenizerCtx);
-		/* no more parameters */
-		if (cookie == NULL)
-			break;
-		} while (cookieFound == FALSE);
+
+		} while (cookie != NULL);
 	}
 
+	/* log what we've found */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_cookie: returning %s", rv);
 
 	return rv;
 }
 
-/* Normalize a string for use as an HTTP Header Name.  Any invalid
+/*
+ * normalize a string for use as an HTTP Header Name.  Any invalid
  * characters (per http://tools.ietf.org/html/rfc2616#section-4.2 and
  * http://tools.ietf.org/html/rfc2616#section-2.2) are replaced with
- * a dash ('-') character. */
+ * a dash ('-') character.
+ */
 char *oidc_normalize_header_name(const request_rec *r, const char *str)
 {
         /* token = 1*<any CHAR except CTLs or separators>
@@ -428,6 +515,9 @@ char *oidc_normalize_header_name(const request_rec *r, const char *str)
         return ns;
 }
 
+/*
+ * see if the currently accessed path matches a path from a defined URL
+ */
 apr_byte_t oidc_request_matches_url(request_rec *r, const char *url) {
 	apr_uri_t uri;
 	apr_uri_parse(r->pool, url, &uri);
@@ -436,6 +526,9 @@ apr_byte_t oidc_request_matches_url(request_rec *r, const char *url) {
 	return rc;
 }
 
+/*
+ * see if the currently accessed path has a certain query parameter
+ */
 apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param) {
 	if (r->args == NULL) return FALSE;
 	const char *option1 = apr_psprintf(r->pool, "%s=", param);
@@ -443,8 +536,11 @@ apr_byte_t oidc_request_has_parameter(request_rec *r, const char* param) {
 	return ( (strstr(r->args, option1) == r->args) || (strstr(r->args, option2) != NULL) ) ? TRUE : FALSE;
 }
 
-// TODO: we should really check with ? and & and avoid any <bogus>code= stuff to trigger true
+/*
+ * get a query parameter
+ */
 apr_byte_t oidc_get_request_parameter(request_rec *r, char *name, char **value) {
+	// TODO: we should really check with ? and & and avoid any <bogus>code= stuff to trigger true
 	char *tokenizer_ctx, *p, *args, *rv = NULL;
 	const char *k_param = apr_psprintf(r->pool, "%s=", name);
 	const size_t k_param_sz = strlen(k_param);
