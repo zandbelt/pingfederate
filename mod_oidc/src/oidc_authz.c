@@ -57,29 +57,30 @@
 
 #include "mod_oidc.h"
 
-#define OIDC_AUTHZ_CLAIM_MATCH 0
-#define OIDC_AUTHZ_CLAIM_NO_MATCH 1
-
+/* the name of the keyword that follows the Require primitive to indicate claims-based authorization */
 #define OIDC_REQUIRE_NAME "claim"
 
-static int oidc_authz_match_claim(const char *const attr_spec, const apr_json_value_t *const claims, struct request_rec *r) {
+/*
+ * see if a the Require value matches with a set of provided claims
+ */
+static apr_byte_t oidc_authz_match_claim(struct request_rec *r, const char *const attr_spec, const apr_json_value_t *const claims) {
 
 	apr_hash_index_t *hi;
 	const void *key;
 	apr_ssize_t klen;
 	void *hval;
 
-	if (claims == NULL) return OIDC_AUTHZ_CLAIM_NO_MATCH;
+	/* if we don't have any claims, they can never match any Require claim primitive */
+	if (claims == NULL) return FALSE;
 
-	/* Loop over all of the user claims */
+	/* loop over all of the user claims */
 	for (hi = apr_hash_first(r->pool, claims->value.object); hi; hi = apr_hash_next(hi)) {
         apr_hash_this(hi, &key, &klen, &hval);
 
 		const char *attr_c = (const char *)key;
 		const char *spec_c = attr_spec;
 
-		/* Walk both strings until we get to the end of either or we
-		 * find a differing character */
+		/* walk both strings until we get to the end of either or we find a differing character */
 		while ((*attr_c) &&
 		       (*spec_c) &&
 		       (*attr_c) == (*spec_c)) {
@@ -87,50 +88,52 @@ static int oidc_authz_match_claim(const char *const attr_spec, const apr_json_va
 			spec_c++;
 		}
 
-
-		/* The match is a success if we walked the whole claim
-		 * name and the attr_spec is at a colon. */
+		/* The match is a success if we walked the whole claim name and the attr_spec is at a colon. */
 		if (!(*attr_c) && (*spec_c) == ':') {
 			const apr_json_value_t *val;
 
 			val = ((apr_json_value_t *)hval);
 
-			/* Skip the colon */
+			/* skip the colon */
 			spec_c++;
 
+			/* see if it is a string and it (case-insensitively) matches the Require'd value */
 			if (val->type == APR_JSON_STRING) {
 
 				if (apr_strnatcmp(val->value.string.p, spec_c) == 0) {
-					return OIDC_AUTHZ_CLAIM_MATCH;
+					return TRUE;
 				}
 
+			/* see if it is a boolean and it (case-insensitively) matches the Require'd value */
 			} else if (val->type == APR_JSON_BOOLEAN) {
 
 				if (apr_strnatcmp(val->value.boolean ? "true" : "false", spec_c) == 0) {
-					return OIDC_AUTHZ_CLAIM_MATCH;
+					return TRUE;
 				}
 
+			/* if it is an array, we'll walk it */
 			} else if (val->type == APR_JSON_ARRAY) {
 
-				/* Compare the claim values */
+				/* compare the claim values */
 				int i = 0;
 				for (i = 0; i < val->value.array->nelts; i++) {
 
 					apr_json_value_t *elem = APR_ARRAY_IDX(val->value.array, i, apr_json_value_t *);
 
 					if (elem->type == APR_JSON_STRING) {
-
-						/* Approximately compare the claim value (ignoring
+						/*
+						 * approximately compare the claim value (ignoring
 						 * whitespace). At this point, spec_c points to the
-						 * NULL-terminated value pattern. */
+						 * NULL-terminated value pattern.
+						 */
 						if (apr_strnatcmp(elem->value.string.p, spec_c) == 0) {
-							return OIDC_AUTHZ_CLAIM_MATCH;
+							return TRUE;
 						}
 
 					} else if  (elem->type == APR_JSON_BOOLEAN) {
 
 						if (apr_strnatcmp(elem->value.boolean ? "true" : "false", spec_c) == 0) {
-							return OIDC_AUTHZ_CLAIM_MATCH;
+							return TRUE;
 						}
 
 					} else {
@@ -146,57 +149,27 @@ static int oidc_authz_match_claim(const char *const attr_spec, const apr_json_va
 			}
 
 		}
-		/* The match is a success is we walked the whole claim
-		 * name and the attr_spec is a tilde (denotes a PCRE match). */
-//		else if (!(*attr_c) && (*spec_c) == '~') {
-//			const apr_json_value_t *val;
-//			const char *errorptr;
-//			int erroffset;
-//			pcre *preg;
-//
-//			/* Skip the tilde */
-//			spec_c++;
-//
-//			/* Set up the regex */
-//			preg = pcre_compile(spec_c, 0, &errorptr, &erroffset, NULL);
-//			if (NULL == preg) {
-//				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Pattern [%s] is not a valid regular expression", spec_c);
-//				continue;
-//			}
-//
-//			/* Compare the claim values */
-//			val = attr->values;
-//			for ( ; val; val = val->next) {
-//				/* PCRE-compare the claim value. At this point, spec_c
-//				 * points to the NULL-terminated value pattern. */
-//				if (0 == pcre_exec(preg, NULL, val->value, (int)strlen(val->value), 0, 0, NULL, 0)) {
-//					pcre_free(preg);
-//					return PING_OAUTH20_ATTR_MATCH;
-//				}
-//			}
-//
-//			pcre_free(preg);
-//		}
+		/* TODO: a tilde (denotes a PCRE match). */
+		//else if (!(*attr_c) && (*spec_c) == '~') {
 	}
-	return OIDC_AUTHZ_CLAIM_NO_MATCH;
+	return FALSE;
 }
 
-int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const require_line *const reqs, int nelts) {
+/*
+ * Apache <2.4 authorizatio routine: match the claims from the authenticated user against the Require primitive
+ */
+int oidc_authz_worker(request_rec *r, const apr_json_value_t *const claims, const require_line *const reqs, int nelts) {
 	const int m = r->method_number;
 	const char *token;
 	const char *requirement;
 	int i;
 	int have_oauthattr = 0;
-	int count_oauthattr = 0;
+	int count_oauth_claims = 0;
 
-	// Q: why don't we use ap_some_auth_required here?? performance?
-
-	/* Go through applicable Require directives */
+	/* go through applicable Require directives */
 	for (i = 0; i < nelts; ++i) {
-		/* Ignore this Require if it's in a <Limit> section
-		 * that exclude this method
-		 */
 
+		/* ignore this Require if it's in a <Limit> section that exclude this method */
 		if (!(reqs[i].method_mask & (AP_METHOD_BIT << m))) {
 			continue;
 		}
@@ -210,35 +183,33 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 			continue;
 		}
 
-		/* OK, we have a "Require claim" to satisfy */
+		/* ok, we have a "Require claim" to satisfy */
 		have_oauthattr = 1;
 
-		/* If we have an applicable claim, but no
-		 * claims were sent in the request, then we can
-		 * just stop looking here, because it's not
-		 * satisfiable. The code after this loop will give the
-		 * appropriate response. */
-		if (!attrs) {
+		/*
+		 * If we have an applicable claim, but no claims were sent in the request, then we can
+		 * just stop looking here, because it's not satisfiable. The code after this loop will
+		 * give the appropriate response.
+		 */
+		if (!claims) {
 			break;
 		}
 
-		/* Iterate over the claim specification strings in this
-		 * require directive searching for a specification that
-		 * matches one of the claims. */
+		/*
+		 * iterate over the claim specification strings in this require directive searching
+		 * for a specification that matches one of the claims.
+		 */
 		while (*requirement) {
 			token = ap_getword_conf(r->pool, &requirement);
-			count_oauthattr++;
+			count_oauth_claims++;
 
 			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 				     "oidc_authz_worker: evaluating claim specification: %s",
 				     token);
 
-			if (oidc_authz_match_claim(token, attrs, r) ==
-					OIDC_AUTHZ_CLAIM_MATCH) {
+			if (oidc_authz_match_claim(r, token, claims) == TRUE) {
 
-				/* If *any* claim matches, then
-				 * authorization has succeeded and all
-				 * of the others are ignored. */
+				/* if *any* claim matches, then authorization has succeeded and all of the others are ignored */
 				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 					      "oidc_authz_worker: require claim "
 					      "'%s' matched", token);
@@ -247,63 +218,63 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const attrs, const
 		}
 	}
 
-	/* If there weren't any "Require claim" directives,
-	 * we're irrelevant.
-	 */
+	/* if there weren't any "Require claim" directives, we're irrelevant */
 	if (!have_oauthattr) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			      "oidc_authz_worker: no claim statements found, not performing authz.");
 		return DECLINED;
 	}
-	/* If there was a "Require claim", but no actual claims,
-	 * that's cause to warn the admin of an iffy configuration.
-	 */
-	if (count_oauthattr == 0) {
+	/* if there was a "Require claim", but no actual claims, that's cause to warn the admin of an iffy configuration */
+	if (count_oauth_claims == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
 			      "oidc_authz_worker: 'require claim' missing specification(s) in configuration. Declining.");
 		return DECLINED;
 	}
 
-	/* OK, our decision is final and binding */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-		      "oidc_authz_worker: authorization denied for client session");
-
+	/* log the event, also in Apache speak */
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authz_worker: authorization denied for client session");
 	ap_note_auth_failure(r);
 
 	return HTTP_UNAUTHORIZED;
 }
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
-authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const attrs,
-		const char *require_args) {
+/*
+ * Apache >=2.4 authorizatio routine: match the claims from the authenticated user against the Require primitive
+ */
+authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const claims, const char *require_args) {
 
-	int count_oauthattr = 0;
+	int count_oauth_claims = 0;
 	const char *t, *w;
 
+	/* needed for anonymous authentication */
 	if (r->user == NULL) return AUTHZ_DENIED_NO_USER;
 
-	if (!attrs)
-		return AUTHZ_DENIED;
+	/* if no claims, impossible to satisfy */
+	if (!claims) return AUTHZ_DENIED;
 
+	/* loop over the Required specifications */
 	t = require_args;
 	while ((w = ap_getword_conf(r->pool, &t)) && w[0]) {
 
-		count_oauthattr++;
+		count_oauth_claims++;
 
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 				"oidc_authz_worker24: evaluating claim specification: %s",
 				w);
 
-		if (oidc_authz_match_claim(w, attrs, r) == OIDC_AUTHZ_CLAIM_MATCH) {
+		/* see if we can match any of out input claims against this Require'd value */
+		if (oidc_authz_match_claim(w, claims, r) == TRUE) {
 
 			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 					"oidc_authz_worker24: require claim "
-							"'%s' matched", w);
+					"'%s' matched", w);
 			return AUTHZ_GRANTED;
 		}
 	}
 
-	if (count_oauthattr == 0) {
+	/* if there wasn't anything after the Require claims directive... */
+	if (count_oauth_claims == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
 				"oidc_authz_worker24: 'require claim' missing specification(s) in configuration. Denying.");
 	}
