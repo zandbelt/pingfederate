@@ -10,6 +10,15 @@ are passed in HTTP headers, together with those (optionally) obtained from the u
 It allows for authorization rules (based on Requires primitive) that can do matching against the
 set of claims provided in the id_token/userinfo.
 
+It supports multiple OpenID Connect Providers by reading provider metadata files from a
+metadata directory (set by OIDCMetadataDir). The provider metadata files must follow the
+naming convention "<urlencoded-issuer>.provider".
+
+It supports OpenID Connect Dynamic Client Registration by setting OIDCMetadataDir (which needs
+to writable for the Apache process in this case), a provider metadata file exists but for the
+specified issuer, it contains a registration_endpoint setting, but no matching valid client
+metadata (cq."<urlencoded-issuer>.client") file can be found in the metadata directory.
+
 Additionally it can operate as an OAuth 2.0 Resource Server to a PingFederate OAuth 2.0
 Authorization Server, cq. validate Bearer access_tokens against PingFederate.
 In that case it sets the REMOTE_USER variable to the "Username" claim and matches the claims

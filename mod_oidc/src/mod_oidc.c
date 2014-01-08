@@ -77,18 +77,11 @@
 
 #include "mod_oidc.h"
 
-// TODO: support dynamic client registration; do this in oidc_metadata_list:
-//       1) loop and see if there's a .provider entry but:
-//           a) no .client entry
-//           b) there's a client entry but the client_id/client_secret has expired
-//         then: see if theres a client_registration endpoint in the .provider metadata
-//         if so: call that endpoint and put the metadata in the .client file
-//
-//         if this all succeeded, we'll add the .provider entry to the list, otherwise we'll skip it
-//       2) provide a text input box for an "e-mail style" identifier in the discovery page and return parameters
-//         a) if selected, do a webfinger request to resolve the issuer,
-//         b) if failed, possibly followed by a metadata registry request
-//         c) and once we have the issuer identifier, start at 1)
+// TODO: support OpenID Connect Discovery (and rename our internal stuff to WAYF)
+//       provide a text input box for an "e-mail style" identifier in the discovery page and return parameters
+//       a) if selected, do a webfinger request to resolve the issuer,
+//       b) if failed, possibly followed by a metadata registry request
+//       c) and once we have the issuer identifier, start at 1)
 //
 // TODO: sort out all urlencode/decode stuff (get proper routines from somewhere)
 // TODO: improve error handling/logging consistency and completeness
@@ -152,9 +145,9 @@ static void oidc_scrub_request_headers(request_rec *r, const char *claim_prefix,
 static apr_byte_t oidc_is_discovery_response(request_rec *r, oidc_cfg *cfg) {
 
 	/* see if this is a call to the configured redirect_uri and the OIDC_OP_PARAM_NAME and OIDC_RT_PARAM_NAME parameters are present */
-	return ((oidc_request_matches_url(r, cfg->redirect_uri) == TRUE)
-			&& oidc_request_has_parameter(r, OIDC_DISC_OP_PARAM)
-			&& oidc_request_has_parameter(r, OIDC_DISC_RT_PARAM));
+	return ((oidc_util_request_matches_url(r, cfg->redirect_uri) == TRUE)
+			&& oidc_util_request_has_parameter(r, OIDC_DISC_OP_PARAM)
+			&& oidc_util_request_has_parameter(r, OIDC_DISC_RT_PARAM));
 }
 
 /*
@@ -608,8 +601,8 @@ static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c, sessi
 	char *issuer = NULL, *original_url = NULL;
 
 	/* by now we're pretty sure they exist */
-	oidc_get_request_parameter(r, "code", &code);
-	oidc_get_request_parameter(r, "state", &state);
+	oidc_util_get_request_parameter(r, "code", &code);
+	oidc_util_get_request_parameter(r, "state", &state);
 
 	/* check the state parameter against what we stored in a cookie */
 	if (oidc_check_state(r, state, &original_url, &issuer) == FALSE) {
@@ -632,7 +625,8 @@ static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c, sessi
 		}
 	}
 
-	char *id_token = NULL, *access_token = NULL, *response = NULL;
+	char *id_token = NULL, *access_token = NULL;
+	const char*response = NULL;
 	char *remoteUser = NULL;
 	apr_time_t expires;
 	apr_json_value_t *j_idtoken_payload = NULL;
@@ -649,23 +643,14 @@ static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c, sessi
 	oidc_session_set(r, session, OIDC_IDTOKEN_SESSION_KEY, id_token);
 
 	/* optionally resolve additional claims against the userinfo endpoint */
-	if (oidc_proto_resolve_userinfo(r, c, provider, &response, access_token) == TRUE) {
-
-		/* we got back claims from the userinfo endpoint, try and decode them */
-		apr_json_value_t *attrs = NULL;
-		if (apr_json_decode(&attrs, response, strlen(response), r->pool) != APR_SUCCESS) {
-
-			/* something went wrong, but it is not fatal; try and continue without the additional claims */
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_authorization_response: could not decode JSON from UserInfo endpoint response successfully");
-		} else if ( (attrs == NULL) || (attrs->type != APR_JSON_OBJECT) ) {
-
-			/* something went wrong, but it is not fatal; try and continue without the additional claims */
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_authorization_response: UserInfo endpoint response did not contain a JSON object");
-		} else {
-
-			/* succesfully decoded a set claims from the response so we can store them in the session context safely now */
-			oidc_session_set(r, session, OIDC_CLAIMS_SESSION_KEY, response);
-		}
+	apr_json_value_t *claims = NULL;
+	if (oidc_proto_resolve_userinfo(r, c, provider, access_token, &response, &claims) == TRUE) {
+		/*
+		 * succesfully decoded a set claims from the response so we can store them
+		 * (well actually the stringified representation in the response)
+		 * in the session context safely now
+		 */
+		oidc_session_set(r, session, OIDC_CLAIMS_SESSION_KEY, response);
 	}
 
 	/* store the session */
@@ -689,8 +674,8 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 	char *issuer = NULL, *original_url = NULL;
 
 	/* by now we can be sure they exist */
-	oidc_get_request_parameter(r, OIDC_DISC_OP_PARAM, &issuer);
-	oidc_get_request_parameter(r, OIDC_DISC_RT_PARAM, &original_url);
+	oidc_util_get_request_parameter(r, OIDC_DISC_OP_PARAM, &issuer);
+	oidc_util_get_request_parameter(r, OIDC_DISC_RT_PARAM, &original_url);
 
 	/* try and get metadata from the metadata directories for the selected OP */
 	oidc_provider_t *provider = NULL;
@@ -843,6 +828,8 @@ const command_rec oidc_config_cmds[] = {
 		AP_INIT_TAKE1("OIDCProviderUserInfoEndpoint", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.userinfo_endpoint_url), RSRC_CONF, "Define the OpenID OP UserInfo Endpoint URL (e.g.: https://localhost:9031/idp/userinfo.openid)"),
 
 		AP_INIT_FLAG("OIDCSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.ssl_validate_server), RSRC_CONF, "Require validation of the OpenID Connect OP SSL server certificate for successful authentication (On or Off)"),
+		AP_INIT_TAKE1("OIDCClientName", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.client_name), RSRC_CONF, "Define the (client_name) name that the client uses for dynamic registration to the OP."),
+		AP_INIT_TAKE1("OIDCClientContact", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.client_contact), RSRC_CONF, "Define the contact that the client registers in dynamic registration with the OP."),
 		AP_INIT_TAKE1("OIDCScope", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.scope), RSRC_CONF, "Define the OpenID Connect scope that is requested from the OP."),
 
 		AP_INIT_TAKE1("OIDCClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.client_id), RSRC_CONF, "Client identifier used in calls to OpenID Connect OP."),

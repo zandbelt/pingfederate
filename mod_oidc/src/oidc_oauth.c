@@ -65,24 +65,23 @@
  * validates an access token against the validation endpoint of the Authorization server and gets a response back
  */
 static int oidc_oauth_validate_access_token (request_rec *r, oidc_cfg *c, const char *token, const char **response) {
-	char *result = NULL;
-	const char *url = c->oauth.validate_endpoint_url;
-	char *postfields = NULL;
 
+	/* assemble parameters to call the token endpoint for validation */
+	apr_table_t *params = apr_table_make(r->pool, 4);
+	apr_table_addn(params, "grant_type", OIDC_OAUTH_VALIDATION_GRANT_TYPE);
+	apr_table_addn(params, "token", token);
+
+	/* see if we want to do basic auth or post-param-based auth */
+	const char *basic_auth = NULL;
 	if ((apr_strnatcmp(c->oauth.validate_endpoint_auth, "client_secret_post")) == 0) {
-
-		/* assemble post parameters */
-		postfields = apr_psprintf(r->pool, "grant_type=%s&token=%s&client_id=%s&client_secret=%s", oidc_escape_string(r, OIDC_OAUTH_VALIDATION_GRANT_TYPE), oidc_escape_string(r, token), oidc_escape_string(r, c->oauth.client_id), oidc_escape_string(r, c->oauth.client_secret));
+		apr_table_addn(params, "client_id", c->oauth.client_id);
+		apr_table_addn(params, "client_secret", c->oauth.client_secret);
 	} else {
-
-		/* use HTTP basic auth and assemble parameters in the query part of the URL */
-		url = apr_psprintf(r->pool, "%s%sgrant_type=%s&token=%s", url, strchr(c->oauth.validate_endpoint_url, '?') != NULL ? "&" : "?", OIDC_OAUTH_VALIDATION_GRANT_TYPE, token);
+		basic_auth = apr_psprintf(r->pool, "%s:%s", c->oauth.client_id, c->oauth.client_secret);
 	}
 
 	/* call the endpoint with the constructed parameter set and return the resulting response */
-	*response = oidc_http_call(r, url, postfields, (apr_strnatcmp(c->oauth.validate_endpoint_auth, "client_secret_basic") == 0) ? apr_psprintf(r->pool, "%s:%s", c->oauth.client_id, c->oauth.client_secret) : NULL, NULL, c->oauth.ssl_validate_server);
-
-	return (*response != NULL) ? TRUE : FALSE;
+	return oidc_util_http_call(r, c->oauth.validate_endpoint_url, OIDC_HTTP_POST_FORM, params, basic_auth, NULL, c->oauth.ssl_validate_server, response);
 }
 
 /*
@@ -134,17 +133,8 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c, c
 			return FALSE;
 		}
 
-		/* decode the response in to a JSON structure */
-		if (apr_json_decode(&result, json, strlen(json), r->pool) != APR_SUCCESS) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_oauth_resolve_access_token: could not JSON decode response successfully");
-			return FALSE;
-		}
-		if ( (result ==NULL) || (result->type != APR_JSON_OBJECT) ) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_oauth_resolve_access_token: response did not contain a JSON object");
-			return FALSE;
-		}
-
-		if (oidc_util_check_json_error(r, result)) return FALSE;
+		/* decode and see if it is not an error response somehow */
+		if (oidc_util_decode_json_and_check_error(r, json, &result) == FALSE) return FALSE;
 
 		/* get and check the expiry timestamp */
 		apr_json_value_t *expires_in = apr_hash_get(result->value.object, "expires_in", APR_HASH_KEY_STRING);

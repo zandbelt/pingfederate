@@ -80,6 +80,8 @@
 #define OIDC_DEFAULT_AUTHN_HEADER NULL
 /* scrub HTTP headers by default unless overriden (and insecure) */
 #define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS 1
+/* default client_name the client uses for dynamic client registration */
+#define OIDC_DEFAULT_CLIENT_NAME "OpenID Connect Apache Module (mod_oidc)"
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -218,7 +220,6 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->redirect_uri = NULL;
 	c->discover_url = NULL;
 
-	c->provider.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
 	c->provider.issuer = NULL;
 	c->provider.authorization_endpoint_url = NULL;
 	c->provider.token_endpoint_url = NULL;
@@ -226,6 +227,10 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.userinfo_endpoint_url = NULL;
 	c->provider.client_id  = NULL;
 	c->provider.client_secret = NULL;
+
+	c->provider.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
+	c->provider.client_name = OIDC_DEFAULT_CLIENT_NAME;
+	c->provider.client_contact = NULL;
 	c->provider.scope = OIDC_DEFAULT_SCOPE;
 
 	c->oauth.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
@@ -234,6 +239,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->oauth.validate_endpoint_url = NULL;
 	c->oauth.validate_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
 
+	/* by default we'll use the OS specified /tmp dir for cache files */
 	apr_temp_dir_get((const char **)&c->cache_dir, pool);
 	c->metadata_dir = NULL;
 
@@ -260,7 +266,6 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->redirect_uri = add->redirect_uri != NULL ? add->redirect_uri : base->redirect_uri;
 	c->discover_url = add->discover_url != NULL ? add->discover_url : base->discover_url;
 
-	c->provider.ssl_validate_server = add->provider.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->provider.ssl_validate_server : base->provider.ssl_validate_server;
 	c->provider.issuer = add->provider.issuer != NULL ? add->provider.issuer : base->provider.issuer;
 	c->provider.authorization_endpoint_url = add->provider.authorization_endpoint_url != NULL ? add->provider.authorization_endpoint_url : base->provider.authorization_endpoint_url;
 	c->provider.token_endpoint_url = add->provider.token_endpoint_url != NULL ? add->provider.token_endpoint_url : base->provider.token_endpoint_url;
@@ -268,6 +273,10 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->provider.userinfo_endpoint_url = add->provider.userinfo_endpoint_url != NULL ? add->provider.userinfo_endpoint_url : base->provider.userinfo_endpoint_url;
 	c->provider.client_id = add->provider.client_id != NULL ? add->provider.client_id : base->provider.client_id;
 	c->provider.client_secret = add->provider.client_secret != NULL ? add->provider.client_secret : base->provider.client_secret;
+
+	c->provider.ssl_validate_server = add->provider.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->provider.ssl_validate_server : base->provider.ssl_validate_server;
+	c->provider.client_name = add->provider.client_name != OIDC_DEFAULT_CLIENT_NAME ? add->provider.client_name : base->provider.client_name;
+	c->provider.client_contact = add->provider.client_contact != NULL ? add->provider.client_contact : base->provider.client_contact;
 	c->provider.scope = add->provider.scope != OIDC_DEFAULT_SCOPE ? add->provider.scope : base->provider.scope;
 
 	c->oauth.ssl_validate_server = add->oauth.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->oauth.ssl_validate_server : base->oauth.ssl_validate_server;
