@@ -259,6 +259,26 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path, con
 	return TRUE;
 }
 
+static apr_byte_t oidc_metadata_http_get_and_store(request_rec *r, oidc_cfg *cfg, int action, const char *url, apr_table_t *params, const char *path, apr_json_value_t **j_response) {
+
+	const char *response = NULL;
+
+	/* execute the call to retrieve the metadata */
+	if (oidc_util_http_call(r, url, action, params, NULL, NULL, cfg->provider.ssl_validate_server, &response, cfg->http_timeout_short) == FALSE) return FALSE;
+
+	/* decode and see if it is not an error response somehow */
+	if (oidc_util_decode_json_and_check_error(r, response, j_response) == FALSE) return FALSE;
+
+	/* write the obtained provider metadata file */
+	if (oidc_metadata_file_write(r, path, response) == FALSE) return FALSE;
+
+	return TRUE;
+}
+
+apr_byte_t oidc_metadata_provider_get_and_store(request_rec *r, oidc_cfg *cfg, const char *url, const char *issuer, apr_json_value_t **j_response) {
+	return oidc_metadata_http_get_and_store(r, cfg, OIDC_HTTP_GET, url, NULL, oidc_metadata_provider_file_path(r, issuer), j_response);
+}
+
 /*
  * return both provider and client metadata for the specified issuer
  *
@@ -300,7 +320,7 @@ static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r, oidc_cfg
 		return FALSE;
 	}
 
-	apr_table_t *params = apr_table_make(r->pool, 1);
+	apr_table_t *params = apr_table_make(r->pool, 3);
 	apr_table_addn(params, "client_name", cfg->provider.client_name);
 
 	int action = OIDC_HTTP_POST_JSON;
@@ -326,19 +346,8 @@ static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r, oidc_cfg
 		}
 	}
 
-	// TODO: now the global setting is used for dynamic client registration...
-	// TODO: shorten the timeout
-	const char *response = NULL;
-	if (oidc_util_http_call(r,j_registration_endpoint->value.string.p, action, params, NULL, NULL, cfg->provider.ssl_validate_server, &response) == FALSE) {
-		/* errors will have been logged by now */
-		return FALSE;
-	}
-
-	/* decode and see if it is not an error response somehow */
-	if (oidc_util_decode_json_and_check_error(r, response, j_client) == FALSE) return FALSE;
-
-	/* if all OK write the client metadata to a file and return that result */
-	return oidc_metadata_file_write(r, client_path, response);
+	/* register the client and get back the metadata, store it and return the result */
+	return oidc_metadata_http_get_and_store(r, cfg, action, j_registration_endpoint->value.string.p, params, client_path, j_client);
 }
 
 /*

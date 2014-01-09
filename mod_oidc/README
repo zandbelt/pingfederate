@@ -15,9 +15,14 @@ metadata directory (set by OIDCMetadataDir). The provider metadata files must fo
 naming convention "<urlencoded-issuer>.provider".
 
 It supports OpenID Connect Dynamic Client Registration by setting OIDCMetadataDir (which needs
-to writable for the Apache process in this case), a provider metadata file exists but for the
+to be writeable for the Apache process in this case), a provider metadata file exists but for the
 specified issuer, it contains a registration_endpoint setting, but no matching valid client
 metadata (cq."<urlencoded-issuer>.client") file can be found in the metadata directory.
+
+It supports OpenID Provider Discovery through account names (cq. <name>@<domain>) by setting
+OIDCMetadataDir (which needs to be writeable for the Apache process in this case), and
+calling (HTTP GET) the Redirect URI with an oidc_acct parameter that contains the user account
+name (see sample config for multiple OPs and an external Discovery page below).
 
 Additionally it can operate as an OAuth 2.0 Resource Server to a PingFederate OAuth 2.0
 Authorization Server, cq. validate Bearer access_tokens against PingFederate.
@@ -89,10 +94,13 @@ OIDCCryptoPassphrase <somestring>
 If you do not want to use the internal discovery page, you can have the user being redirected to
 an external discovery page by setting "OIDCDiscoveryURL". That URL will be accessed with 2 parameters,
 "oidc_callback" and "oidc_return" (both URLs). The "oidc_return" parameter needs to be returned to the
-"oidc_callback" URL (again in the oidc_return parameter) together with an "oidc_provider" settings that
-contains the URL-encoded issuer value of the selected Provider. Sample callback:
-${oidc_callback}?oidc_return=${oidc_return}&oidc_provider=${issuer}
-
+"oidc_callback" URL (again in the oidc_return parameter) together with an "oidc_provider" parameter that
+contains the URL-encoded issuer value of the selected Provider, or an oidc_acct" parameter that contains
+a URL-encoded account name for OpenID Connect Discovery purposes (aka. e-mail style identifier).
+Sample callback after handpicking an OP:
+  ${oidc_callback}?oidc_return=${oidc_return}&oidc_provider=${issuer}
+Sample callback for having mod_oidc do OP discovery and dynamic client registration:
+  ${oidc_callback}?oidc_return=${oidc_return}&oidc_acct=${e-mail-style-user-identifier}
 
 Another example config for using PingFederate as your OpenID OP and/or OAuth 2.0 Authorization
 server, based on the OAuth 2.0 PlayGround 3.x default configuration and doing claims-based authorization.

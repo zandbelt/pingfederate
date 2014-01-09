@@ -348,7 +348,7 @@ apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_provider_
 	}
 
 	/* resolve the code against the token endpoint */
-	if (oidc_util_http_call(r, provider->token_endpoint_url, OIDC_HTTP_POST_FORM, params, basic_auth, NULL, provider->ssl_validate_server, &response) == FALSE) {
+	if (oidc_util_http_call(r, provider->token_endpoint_url, OIDC_HTTP_POST_FORM, params, basic_auth, NULL, provider->ssl_validate_server, &response, cfg->http_timeout_long) == FALSE) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_resolve_code: could not succesfully resolve the \"code\" (%s) against the tokent endpont (%s)", code, provider->token_endpoint_url);
 		return FALSE;
 	}
@@ -408,7 +408,7 @@ apr_byte_t oidc_proto_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_provi
 	if (provider->userinfo_endpoint_url == NULL) return FALSE;
 
 	/* get the JSON response */
-	if (oidc_util_http_call(r,  provider->userinfo_endpoint_url, OIDC_HTTP_GET, NULL, NULL, access_token, provider->ssl_validate_server, response) == FALSE) return FALSE;
+	if (oidc_util_http_call(r,  provider->userinfo_endpoint_url, OIDC_HTTP_GET, NULL, NULL, access_token, provider->ssl_validate_server, response, cfg->http_timeout_long) == FALSE) return FALSE;
 
 	/* decode and check for an "error" response */
 	return oidc_util_decode_json_and_check_error(r, *response, claims);

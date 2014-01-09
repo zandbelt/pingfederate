@@ -359,7 +359,7 @@ static int oidc_http_add_json_param(void* rec, const char* key, const char* valu
  *       ERR: Ubuntu 13.10: Apache 2.4.6,  OpenSSL 1.0.1e, Curl 7.32.0
  *       ERR: Ubuntu 12.04: Apache 2.2.22, OpenSSL 1.0.1,  Curl 7.22.0
  */
-apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, const apr_table_t *params, const char *basic_auth, const char *bearer_token, int ssl_validate_server, const char **response) {
+apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, const apr_table_t *params, const char *basic_auth, const char *bearer_token, int ssl_validate_server, const char **response, int timeout) {
 	char curlError[CURL_ERROR_SIZE];
 	oidc_curl_buffer curlBuffer;
 	CURL *curl;
@@ -383,7 +383,8 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
 
-curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10);
+	/* set the timeout */
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
 
 	/* setup the buffer where the response will be written to */
 	curlBuffer.written = 0;

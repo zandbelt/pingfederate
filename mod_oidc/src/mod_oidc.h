@@ -77,6 +77,8 @@
 #define OIDC_DISC_OP_PARAM "oidc_provider"
 /* parameter name of the original URL in the discovery response */
 #define OIDC_DISC_RT_PARAM "oidc_return"
+/* parameter name of an account name in the discovery response */
+#define OIDC_DISC_ACCT_PARAM "oidc_acct"
 
 /* name of the cookie that binds the state in the authorization request/response to the browser */
 #define OIDCStateCookieName  "oidc-state"
@@ -140,6 +142,9 @@ typedef struct oidc_cfg {
 	/* tell the module to strip any mod_oidc related headers that already have been set by the user-agent, normally required for secure operation */
 	int scrub_request_headers;
 
+	int http_timeout_long;
+	int http_timeout_short;
+
 	char *cookie_domain;
 	char *claim_delimiter;
 	char *claim_prefix;
@@ -192,6 +197,7 @@ void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD);
 void oidc_register_hooks(apr_pool_t *pool);
 
 const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg);
+const char *oidc_set_int_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_url_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
@@ -212,7 +218,7 @@ char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c);
 char *oidc_url_encode(const request_rec *r, const char *str, const char *charsToEncode);
 char *oidc_normalize_header_name(const request_rec *r, const char *str);
 
-apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, const apr_table_t *params, const char *basic_auth, const char *bearer_token, int ssl_validate_server, const char **response);
+apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, const apr_table_t *params, const char *basic_auth, const char *bearer_token, int ssl_validate_server, const char **response, int timeout);
 apr_byte_t oidc_util_request_matches_url(request_rec *r, const char *url);
 apr_byte_t oidc_util_request_has_parameter(request_rec *r, const char* param);
 apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name, char **value);
@@ -225,6 +231,7 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg, unsigned c
 // oidc_metadata.c
 apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **arr);
 apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *selected, oidc_provider_t **provider);
+apr_byte_t oidc_metadata_provider_get_and_store(request_rec *r, oidc_cfg *cfg, const char *url, const char *issuer, apr_json_value_t **j_response);
 
 // oidc_session.c
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20081201

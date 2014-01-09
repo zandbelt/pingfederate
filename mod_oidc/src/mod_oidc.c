@@ -77,12 +77,6 @@
 
 #include "mod_oidc.h"
 
-// TODO: support OpenID Connect Discovery (and rename our internal stuff to WAYF)
-//       provide a text input box for an "e-mail style" identifier in the discovery page and return parameters
-//       a) if selected, do a webfinger request to resolve the issuer,
-//       b) if failed, possibly followed by a metadata registry request
-//       c) and once we have the issuer identifier, start at 1)
-//
 // TODO: sort out all urlencode/decode stuff (get proper routines from somewhere)
 // TODO: improve error handling/logging consistency and completeness
 // TODO: require SSL
@@ -137,17 +131,6 @@ static void oidc_scrub_request_headers(request_rec *r, const char *claim_prefix,
 
 	/* overwrite the incoming headrs with the clean result */
 	r->headers_in = clean_headers;
-}
-
-/*
- * find out whether the request is a response from the IDP discovery page
- */
-static apr_byte_t oidc_is_discovery_response(request_rec *r, oidc_cfg *cfg) {
-
-	/* see if this is a call to the configured redirect_uri and the OIDC_OP_PARAM_NAME and OIDC_RT_PARAM_NAME parameters are present */
-	return ((oidc_util_request_matches_url(r, cfg->redirect_uri) == TRUE)
-			&& oidc_util_request_has_parameter(r, OIDC_DISC_OP_PARAM)
-			&& oidc_util_request_has_parameter(r, OIDC_DISC_RT_PARAM));
 }
 
 /*
@@ -335,109 +318,6 @@ const char*oidc_request_state_get(request_rec *r, const char *key) {
 
 	/* return the value from the table */
 	return apr_table_get(state, key);
-}
-
-/*
- * sends HTML content to the user agent
- */
-static int oidc_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
-
-	conn_rec *c = r->connection;
-	apr_bucket *b;
-
-	/* set the context type header to HTML */
-	ap_set_content_type(r, "text/html");
-
-	/* do some magic copied from somewhere */
-	apr_bucket_brigade *bb = apr_brigade_create(r->pool, c->bucket_alloc);
-	b = apr_bucket_transient_create(html, strlen(html), c->bucket_alloc);
-	APR_BRIGADE_INSERT_TAIL(bb, b);
-	b = apr_bucket_eos_create(c->bucket_alloc);
-	APR_BRIGADE_INSERT_TAIL(bb, b);
-	if (ap_pass_brigade(r->output_filters, bb) != APR_SUCCESS)
-		return HTTP_INTERNAL_SERVER_ERROR;
-
-	return success_rvalue;
-}
-
-/*
- * present the user with an OP selection screen
- */
-static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: entering");
-
-	/* obtain the URL we're currently accessing, to be stored in the state/session */
-	char *current_url = oidc_get_current_url(r, cfg);
-
-	/* see if there's an external discovery page configured */
-	if (cfg->discover_url != NULL) {
-
-		/* yes, assemble the paramters for external discovery */
-		char *url = apr_psprintf(r->pool, "%s%s%s=%s&%s=%s", cfg->discover_url, strchr(cfg->discover_url, '?') != NULL ? "&" : "?", OIDC_DISC_RT_PARAM, oidc_escape_string(r, current_url), OIDC_DISC_CB_PARAM, oidc_escape_string(r, cfg->redirect_uri));
-
-		/* log what we're about to do */
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: redirecting to external discovery page: %s", url);
-
-		/* do the actual redirect to an external discovery page */
-		apr_table_add(r->headers_out, "Location", url);
-		return HTTP_MOVED_TEMPORARILY;
-	}
-
-	/* get a list of all providers configured in the metadata directory */
-	apr_array_header_t *arr = NULL;
-	if (oidc_metadata_list(r, cfg, &arr) == FALSE) HTTP_UNAUTHORIZED;
-
-	/* assemble a where-are-you-from IDP discovery HTML page */
-	const char *s = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
-			"<html>\n"
-			"	<head>\n"
-			"		<meta http-equiv=\"Content-Type\" content=\"text/html;charset=UTF-8\"/>\n"
-			"		<title>OpenID Connect Provider Discovery</title>\n"
-			"	</head>\n"
-			"	<body>\n"
-			"		<center>\n"
-			"			<h3>Select your OpenID Connect Identity Provider</h3>\n";
-
-	/* list all configured providers in there */
-	int i;
-	for (i = 0; i < arr->nelts; i++) {
-		const char *issuer = ((const char**)arr->elts)[i];
-		// TODO: html escape (especially & character)
-
-		/* point back to the redirect_uri, where the selection is handled, with an IDP selection and return_to URL */
-		s = apr_psprintf(r->pool, "%s<p><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></p>\n", s, cfg->redirect_uri, OIDC_DISC_OP_PARAM, oidc_escape_string(r, issuer), OIDC_DISC_RT_PARAM, oidc_escape_string(r, current_url), issuer);
-	}
-
-	/* footer */
-	s = apr_psprintf(r->pool, "%s"
-			"		</center>\n"
-			"	</body>\n"
-			"</html>\n", s);
-
-	/* now send the HTML contents to the user agent */
-	return oidc_http_sendstring(r, s, HTTP_UNAUTHORIZED);
-}
-
-/*
- * authenticate the user to the selected OP, if the OP is not selected yet, do discovery first
- */
-static int oidc_authenticate_user(request_rec *r, oidc_cfg *c, oidc_provider_t *provider, const char *original_url) {
-
-	if (provider == NULL) {
-
-		// TODO: shouldn't we use an explicit redirect to the discovery endpoint (maybe a "discovery" param to the redirect_uri)?
-		if (c->metadata_dir != NULL) return oidc_discovery(r, c);
-
-		/* we're not using multiple OP's configured in a metadata directory, pick the statically configured OP */
-		provider = &c->provider;
-	}
-
-	/* create state that restores the context when the authorization response comes in; cryptographically bind it to the browser */
-	const char *state = oidc_create_state_and_set_cookie(r, original_url, provider->issuer);
-
-	/* send off to the OpenID Connect Provider */
-	return oidc_proto_authorization_request(r, provider, c->redirect_uri, state, original_url);
 }
 
 /*
@@ -666,27 +546,217 @@ static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c, sessi
 }
 
 /*
+ * sends HTML content to the user agent
+ */
+static int oidc_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
+
+	conn_rec *c = r->connection;
+	apr_bucket *b;
+
+	/* set the context type header to HTML */
+	ap_set_content_type(r, "text/html");
+
+	/* do some magic copied from somewhere */
+	apr_bucket_brigade *bb = apr_brigade_create(r->pool, c->bucket_alloc);
+	b = apr_bucket_transient_create(html, strlen(html), c->bucket_alloc);
+	APR_BRIGADE_INSERT_TAIL(bb, b);
+	b = apr_bucket_eos_create(c->bucket_alloc);
+	APR_BRIGADE_INSERT_TAIL(bb, b);
+	if (ap_pass_brigade(r->output_filters, bb) != APR_SUCCESS)
+		return HTTP_INTERNAL_SERVER_ERROR;
+
+	return success_rvalue;
+}
+
+/*
+ * present the user with an OP selection screen
+ */
+static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: entering");
+
+	/* obtain the URL we're currently accessing, to be stored in the state/session */
+	char *current_url = oidc_get_current_url(r, cfg);
+
+	/* see if there's an external discovery page configured */
+	if (cfg->discover_url != NULL) {
+
+		/* yes, assemble the paramters for external discovery */
+		char *url = apr_psprintf(r->pool, "%s%s%s=%s&%s=%s", cfg->discover_url, strchr(cfg->discover_url, '?') != NULL ? "&" : "?", OIDC_DISC_RT_PARAM, oidc_escape_string(r, current_url), OIDC_DISC_CB_PARAM, oidc_escape_string(r, cfg->redirect_uri));
+
+		/* log what we're about to do */
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: redirecting to external discovery page: %s", url);
+
+		/* do the actual redirect to an external discovery page */
+		apr_table_add(r->headers_out, "Location", url);
+		return HTTP_MOVED_TEMPORARILY;
+	}
+
+	/* get a list of all providers configured in the metadata directory */
+	apr_array_header_t *arr = NULL;
+	if (oidc_metadata_list(r, cfg, &arr) == FALSE) HTTP_UNAUTHORIZED;
+
+	/* assemble a where-are-you-from IDP discovery HTML page */
+	const char *s = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
+			"<html>\n"
+			"	<head>\n"
+			"		<meta http-equiv=\"Content-Type\" content=\"text/html;charset=UTF-8\"/>\n"
+			"		<title>OpenID Connect Provider Discovery</title>\n"
+			"	</head>\n"
+			"	<body>\n"
+			"		<center>\n"
+			"			<h3>Select your OpenID Connect Identity Provider</h3>\n";
+
+	/* list all configured providers in there */
+	int i;
+	for (i = 0; i < arr->nelts; i++) {
+		const char *issuer = ((const char**)arr->elts)[i];
+		// TODO: html escape (especially & character)
+
+		/* point back to the redirect_uri, where the selection is handled, with an IDP selection and return_to URL */
+		s = apr_psprintf(r->pool, "%s<p><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></p>\n", s, cfg->redirect_uri, OIDC_DISC_OP_PARAM, oidc_escape_string(r, issuer), OIDC_DISC_RT_PARAM, oidc_escape_string(r, current_url), issuer);
+	}
+
+	s = apr_psprintf(r->pool, "%s<form method=\"get\" action=\"%s\">\n", s, cfg->redirect_uri);
+	s = apr_psprintf(r->pool, "%s<input type=\"hidden\" name=\"%s\" value=\"%s\"><br>\n", s, OIDC_DISC_RT_PARAM, current_url);
+	s = apr_psprintf(r->pool, "%sOr enter your account name (e.g.: \"mike@seed.gluu.org\" or \"diana@xenosmilus2.umdc.umu.se\"):<br>\n", s);
+	s = apr_psprintf(r->pool, "%s<p><input type=\"text\" name=\"%s\" value=\"%s\"></p>\n", s, OIDC_DISC_ACCT_PARAM, "");
+	s = apr_psprintf(r->pool, "%s<input type=\"submit\" value=\"Submit\">\n", s);
+	s = apr_psprintf(r->pool, "%s</form>\n", s);
+
+	/* footer */
+	s = apr_psprintf(r->pool, "%s"
+			"		</center>\n"
+			"	</body>\n"
+			"</html>\n", s);
+
+	/* now send the HTML contents to the user agent */
+	return oidc_http_sendstring(r, s, HTTP_UNAUTHORIZED);
+}
+
+/*
+ * authenticate the user to the selected OP, if the OP is not selected yet, do discovery first
+ */
+static int oidc_authenticate_user(request_rec *r, oidc_cfg *c, oidc_provider_t *provider, const char *original_url) {
+
+	if (provider == NULL) {
+
+		// TODO: shouldn't we use an explicit redirect to the discovery endpoint (maybe a "discovery" param to the redirect_uri)?
+		if (c->metadata_dir != NULL) return oidc_discovery(r, c);
+
+		/* we're not using multiple OP's configured in a metadata directory, pick the statically configured OP */
+		provider = &c->provider;
+	}
+
+	/* create state that restores the context when the authorization response comes in; cryptographically bind it to the browser */
+	const char *state = oidc_create_state_and_set_cookie(r, original_url, provider->issuer);
+
+	// TODO: maybe show intermediate/progress screen "redirecting to"
+
+	/* send off to the OpenID Connect Provider */
+	return oidc_proto_authorization_request(r, provider, c->redirect_uri, state, original_url);
+}
+
+/*
+ * find out whether the request is a response from the IDP discovery page
+ */
+static apr_byte_t oidc_is_discovery_response(request_rec *r, oidc_cfg *cfg) {
+	/*
+	 * see if this is a call to the configured redirect_uri and
+	 * the OIDC_RT_PARAM_NAME parameter is present and
+	 * the OIDC_DISC_ACCT_PARAM or OIDC_DISC_OP_PARAM is present
+	 */
+	return ((oidc_util_request_matches_url(r, cfg->redirect_uri) == TRUE)
+			&& oidc_util_request_has_parameter(r, OIDC_DISC_RT_PARAM)
+			&& (oidc_util_request_has_parameter(r, OIDC_DISC_OP_PARAM)
+					|| oidc_util_request_has_parameter(r, OIDC_DISC_ACCT_PARAM)));
+}
+
+/*
  * handle a response from the OP discovery page
  */
 static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
 	/* variables to hold the issuer identifier and the original URL returned in the response */
-	char *issuer = NULL, *original_url = NULL;
+	char *issuer = NULL, *original_url = NULL, *acct = NULL;
 
-	/* by now we can be sure they exist */
 	oidc_util_get_request_parameter(r, OIDC_DISC_OP_PARAM, &issuer);
+	oidc_util_get_request_parameter(r, OIDC_DISC_ACCT_PARAM, &acct);
 	oidc_util_get_request_parameter(r, OIDC_DISC_RT_PARAM, &original_url);
 
-	/* try and get metadata from the metadata directories for the selected OP */
-	oidc_provider_t *provider = NULL;
-	if ( (oidc_metadata_get(r, c, issuer, &provider) == TRUE) && (provider != NULL) ) {
+	if (acct != NULL) {
 
-		/* now we've got a selected OP, send the user there to authenticate */
-		return oidc_authenticate_user(r, c, provider, original_url);
+		// TODO: maybe show intermediate/progress screen "discovering..."
+		// TODO: move this (or more) to oidc_proto.c
+
+		const char *resource = apr_psprintf(r->pool, "acct:%s", acct);
+		const char *domain = strrchr(acct, '@');
+		if (domain == NULL) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: invalid account name");
+			return HTTP_NOT_ACCEPTABLE;
+		}
+		domain++;
+		const char *url = apr_psprintf(r->pool, "https://%s/.well-known/webfinger", domain);
+
+		apr_table_t *params = apr_table_make(r->pool, 1);
+		apr_table_addn(params, "resource", resource);
+		apr_table_addn(params, "rel", "http://openid.net/specs/connect/1.0/issuer");
+
+		const char *response = NULL;
+		if (oidc_util_http_call(r, url, OIDC_HTTP_GET, params, NULL, NULL, c->provider.ssl_validate_server, &response, c->http_timeout_short) == FALSE) {
+			/* errors will have been logged by now */
+			return HTTP_NOT_FOUND;
+		}
+
+		/* decode and see if it is not an error response somehow */
+		apr_json_value_t *j_response = NULL;
+		if (oidc_util_decode_json_and_check_error(r, response, &j_response) == FALSE) return HTTP_NOT_FOUND;
+
+		apr_json_value_t *j_links = apr_hash_get(j_response->value.object, "links", APR_HASH_KEY_STRING);
+		if ( (j_links == NULL) || (j_links->type != APR_JSON_ARRAY) ) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: response JSON object did not contain a \"links\" array");
+			return HTTP_NOT_FOUND;
+		}
+
+		apr_json_value_t *j_object = ((apr_json_value_t**)j_links->value.array->elts)[0];
+		if ( (j_object == NULL) || (j_object->type != APR_JSON_OBJECT) ) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: response JSON object did not contain a JSON object as the first element in the \"links\" array");
+			return HTTP_NOT_FOUND;
+		}
+
+		apr_json_value_t *j_href = apr_hash_get(j_object->value.object, "href", APR_HASH_KEY_STRING);
+		if ( (j_href == NULL) || (j_href->type != APR_JSON_STRING) ) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: response JSON object did not contain a \"href\" element in the first \"links\" array object");
+			return HTTP_NOT_FOUND;
+		}
+
+		issuer = (char *)j_href->value.string.p;
+
+		// TODO: if we have provider metadata (how to do validity/expiry checks?) don't go here:
+
+		url = apr_psprintf(r->pool, "%s", ( (strstr(issuer, "http://") == issuer) || (strstr(issuer, "https://") == issuer) ) ? issuer : apr_psprintf(r->pool, "https://%s", issuer));
+		url = apr_psprintf(r->pool, "%s%s.well-known/openid-configuration", url, url[strlen(url) -1] != '/' ? "/" : "");
+
+		if (oidc_metadata_provider_get_and_store(r, c, url, issuer, &j_response) == FALSE) return HTTP_NOT_FOUND;
+
+		// TODO: if failed try metadata service based discovery
+
+		/* issuer is set, so let's continue as planned */
 	}
 
-	/* something went wrong, log that */
-	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: no valid provider metadata found for selected OP: returning HTTP 500");
+	if (issuer != NULL) {
+
+		/* try and get metadata from the metadata directories for the selected OP */
+		oidc_provider_t *provider = NULL;
+		if ( (oidc_metadata_get(r, c, issuer, &provider) == TRUE) && (provider != NULL) ) {
+
+			/* now we've got a selected OP, send the user there to authenticate */
+			return oidc_authenticate_user(r, c, provider, original_url);
+		}
+
+		/* something went wrong, log that */
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: no valid provider metadata found for selected OP: returning HTTP 500");
+	}
 
 	return HTTP_INTERNAL_SERVER_ERROR;
 }
@@ -847,6 +917,9 @@ const command_rec oidc_config_cmds[] = {
 		AP_INIT_TAKE1("OIDCOAuthEndpoint", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, oauth.validate_endpoint_url), RSRC_CONF, "Define the OAuth AS Validation Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
 		AP_INIT_TAKE1("OIDCOAuthEndpointAuth", oidc_set_endpoint_auth_slot, (void *)APR_OFFSETOF(oidc_cfg, oauth.validate_endpoint_auth), RSRC_CONF, "Specify an authentication method for the OAuth AS Validation Endpoint (e.g.: client_auth_basic)"),
 		AP_INIT_FLAG("OIDCOAuthSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.ssl_validate_server), RSRC_CONF, "Require validation of the OAuth 2.0 AS Validation Endpoint SSL server certificate for successful authentication (On or Off)"),
+
+		AP_INIT_TAKE1("OIDCHTTPTimeoutLong", oidc_set_int_slot,  (void*)APR_OFFSETOF(oidc_cfg, http_timeout_long), RSRC_CONF, "Timeout for long duration HTTP calls (default)."),
+		AP_INIT_TAKE1("OIDCHTTPTimeoutShort", oidc_set_int_slot,  (void*)APR_OFFSETOF(oidc_cfg, http_timeout_short), RSRC_CONF, "Timeout for short duration HTTP calls (registry/discovery)."),
 
 		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, cache_dir), RSRC_CONF, "Directory used for file-based caching."),
 		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot,  (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains provider and client metadata files."),

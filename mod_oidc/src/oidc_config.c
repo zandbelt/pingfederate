@@ -82,6 +82,10 @@
 #define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS 1
 /* default client_name the client uses for dynamic client registration */
 #define OIDC_DEFAULT_CLIENT_NAME "OpenID Connect Apache Module (mod_oidc)"
+/* timeouts for HTTP calls that may take a long time */
+#define OIDC_DEFAULT_HTTP_TIMEOUT_LONG  60
+/* timeouts for HTTP calls that should take a short time (registry/discovery related) */
+#define OIDC_DEFAULT_HTTP_TIMEOUT_SHORT  5
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -98,8 +102,15 @@ const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg) {
  */
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-	//ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, cmd->server, "oidc_set_string_slot: set value: %s", arg);
 	return ap_set_string_slot(cmd, cfg, arg);
+}
+
+/*
+ * set an integer value in the server config
+ */
+const char *oidc_set_int_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	return ap_set_int_slot(cmd, cfg, arg);
 }
 
 /*
@@ -243,6 +254,9 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	apr_temp_dir_get((const char **)&c->cache_dir, pool);
 	c->metadata_dir = NULL;
 
+	c->http_timeout_long = OIDC_DEFAULT_HTTP_TIMEOUT_LONG;
+	c->http_timeout_short = OIDC_DEFAULT_HTTP_TIMEOUT_SHORT;
+
 	c->cookie_domain = NULL;
 	c->claim_delimiter = OIDC_DEFAULT_CLAIM_DELIMITER;
 	c->claim_prefix = OIDC_DEFAULT_CLAIM_PREFIX;
@@ -284,6 +298,9 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->oauth.client_secret = add->oauth.client_secret != NULL ? add->oauth.client_secret : base->oauth.client_secret;
 	c->oauth.validate_endpoint_url = add->oauth.validate_endpoint_url != NULL ? add->oauth.validate_endpoint_url : base->oauth.validate_endpoint_url;
 	c->oauth.validate_endpoint_auth = add->oauth.validate_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ? add->oauth.validate_endpoint_auth : base->oauth.validate_endpoint_auth;
+
+	c->http_timeout_long = add->http_timeout_long != OIDC_DEFAULT_HTTP_TIMEOUT_LONG ? add->http_timeout_long : base->http_timeout_long;
+	c->http_timeout_short = add->http_timeout_short != OIDC_DEFAULT_HTTP_TIMEOUT_SHORT ? add->http_timeout_short : base->http_timeout_short;
 
 	c->cache_dir = add->cache_dir != NULL ? add->cache_dir : base->cache_dir;
 	c->metadata_dir = add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
