@@ -201,63 +201,44 @@ int oidc_strnenvcmp(const char *a, const char *b, int len) {
 }
 
 /*
- * url-encode a string
- * TODO: see if we can get this from somewhere else though
+ * escape a string
  */
-char *oidc_url_encode(const request_rec *r, const char *str,
-								const char *charsToEncode) {
-	char *rv, *p;
-	const char *q;
-	size_t i, j, size, limit, newsz;
-	char escaped = FALSE;
-
-	if (str == NULL)
-		return "";
-
-	size = newsz = strlen(str);
-	limit = strlen(charsToEncode);
-
-	for(i = 0; i < size; i++) {
-		for(j = 0; j < limit; j++) {
-			if (str[i] == charsToEncode[j]) {
-				/* allocate 2 extra bytes for the escape sequence (' ' -> '%20') */
-				newsz += 2;
-				break;
-			}
-		}
+char *oidc_util_escape_string(const request_rec *r, const char *str) {
+	CURL *curl = curl_easy_init();
+	if (curl == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_escape_string: curl_easy_init() error");
+		return NULL;
 	}
-	/* allocate new memory to return the encoded URL */
-	p = rv = apr_pcalloc(r->pool, newsz + 1); /* +1 for terminating NULL */
-	q = str;
-
-	do {
-		escaped = FALSE;
-		for(i = 0; i < limit; i++) {
-			if (*q == charsToEncode[i]) {
-				sprintf(p, "%%%x", charsToEncode[i]);
-				p+= 3;
-				escaped = TRUE;
-				break;
-			}
-		}
-		if (escaped == FALSE) {
-			*p++ = *q;
-		}
-
-		q++;
-	} while (*q != '\0');
-	*p = '\0';
-
-	return(rv);
+	char *result = curl_easy_escape(curl, str, 0);
+	if (result == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_escape_string: curl_easy_escape() error");
+		return NULL;
+	}
+	char *rv = apr_pstrdup(r->pool, result);
+	curl_free(result);
+	curl_easy_cleanup(curl);
+	return rv;
 }
 
 /*
  * escape a string
- * TODO: there's probably better stuff out there to do this...
  */
-char *oidc_escape_string(const request_rec *r, const char *str) {
-	char *rfc1738 = "+ <>\"%{}|\\^~[]`;/?:@=&#";
-	return(oidc_url_encode(r, str, rfc1738));
+char *oidc_util_unescape_string(const request_rec *r, const char *str) {
+	CURL *curl = curl_easy_init();
+	if (curl == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_unescape_string: curl_easy_init() error");
+		return NULL;
+	}
+	char *result = curl_easy_unescape(curl, str, 0, 0);
+	if (result == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_unescape_string: curl_easy_unescape() error");
+		return NULL;
+	}
+	char *rv = apr_pstrdup(r->pool, result);
+	curl_free(result);
+	curl_easy_cleanup(curl);
+	//ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_unescape_string: input=\"%s\", output=\"%s\"", str, rv);
+	return rv;
 }
 
 /*
@@ -326,7 +307,7 @@ static int oidc_http_add_form_url_encoded_param(void* rec, const char* key, cons
 	oidc_http_encode_t *ctx = (oidc_http_encode_t*)rec;
 	const char *sep = apr_strnatcmp(ctx->encoded_params, "") == 0 ? "" : "&";
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r, "oidc_http_add_post_param: adding parameter: %s=%s to %s (sep=%s)", key, value, ctx->encoded_params, sep);
-	ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s%s%s=%s", ctx->encoded_params, sep, oidc_escape_string(ctx->r, key), oidc_escape_string(ctx->r, value));
+	ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s%s%s=%s", ctx->encoded_params, sep, oidc_util_escape_string(ctx->r, key), oidc_util_escape_string(ctx->r, value));
 	return 1;
 }
 
@@ -509,7 +490,7 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 	headerString = apr_psprintf(r->pool, "%s=%s;Secure;Path=%s%s",
 			cookieName,
 			cookieValue,
-			oidc_url_encode(r, oidc_get_cookie_path(r), " "),
+			oidc_get_cookie_path(r),
 			c->cookie_domain != NULL ? apr_psprintf(r->pool, ";Domain=%s", c->cookie_domain) : "");
 
 	/* see if we need to clear the cookie */
@@ -644,7 +625,7 @@ apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name, char **va
 	do {
 		if (p && strncmp(p, k_param, k_param_sz) == 0) {
 			*value = apr_pstrdup(r->pool, p + k_param_sz);
-			ap_unescape_url(*value);
+			*value = oidc_util_unescape_string(r, *value);
 		}
 		p = apr_strtok(NULL, "&", &tokenizer_ctx);
 	} while (p);
@@ -702,3 +683,27 @@ apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r, const char *str
 
 	return TRUE;
 }
+
+/*
+ * sends HTML content to the user agent
+ */
+int oidc_util_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
+
+	conn_rec *c = r->connection;
+	apr_bucket *b;
+
+	/* set the context type header to HTML */
+	ap_set_content_type(r, "text/html");
+
+	/* do some magic copied from somewhere */
+	apr_bucket_brigade *bb = apr_brigade_create(r->pool, c->bucket_alloc);
+	b = apr_bucket_transient_create(html, strlen(html), c->bucket_alloc);
+	APR_BRIGADE_INSERT_TAIL(bb, b);
+	b = apr_bucket_eos_create(c->bucket_alloc);
+	APR_BRIGADE_INSERT_TAIL(bb, b);
+	if (ap_pass_brigade(r->output_filters, bb) != APR_SUCCESS)
+		return HTTP_INTERNAL_SERVER_ERROR;
+
+	return success_rvalue;
+}
+

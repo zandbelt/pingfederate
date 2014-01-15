@@ -178,6 +178,7 @@ int oidc_proto_authorization_request(request_rec *r, struct oidc_provider_t *pro
 apr_byte_t oidc_proto_is_authorization_response(request_rec *r, oidc_cfg *cfg);
 apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char *code, char **user, apr_json_value_t **j_idtoken_payload, char **s_id_token, char **s_access_token, apr_time_t *expires);
 apr_byte_t oidc_proto_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, const char *access_token, const char **response, apr_json_value_t **claims);
+apr_byte_t oidc_proto_account_based_discovery(request_rec *r, oidc_cfg *cfg, const char *acct, char **issuer);
 
 // oidc_cache.c
 apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value);
@@ -206,10 +207,12 @@ const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg);
 
 char *oidc_get_cookie_path(request_rec *r);
 
+int oidc_check_config_oidc(request_rec *r, oidc_cfg *c);
+int oidc_check_config_oauth(request_rec *r, oidc_cfg *c);
+
 // oidc_util.c
 int oidc_strnenvcmp(const char *a, const char *b, int len);
 int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding);
-char *oidc_escape_string(const request_rec *r, const char *str);
 void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue);
 char *oidc_get_cookie(request_rec *r, char *cookieName);
 int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src);
@@ -223,6 +226,9 @@ apr_byte_t oidc_util_request_matches_url(request_rec *r, const char *url);
 apr_byte_t oidc_util_request_has_parameter(request_rec *r, const char* param);
 apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name, char **value);
 apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r, const char *str, apr_json_value_t **json);
+int oidc_util_http_sendstring(request_rec *r, const char *html, int success_rvalue);
+char *oidc_util_escape_string(const request_rec *r, const char *str);
+char *oidc_util_unescape_string(const request_rec *r, const char *str);
 
 // oidc_crypto.c
 unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg, unsigned char *plaintext, int *len);
@@ -231,7 +237,6 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg, unsigned c
 // oidc_metadata.c
 apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **arr);
 apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *selected, oidc_provider_t **provider);
-apr_byte_t oidc_metadata_provider_get_and_store(request_rec *r, oidc_cfg *cfg, const char *url, const char *issuer, apr_json_value_t **j_response);
 
 // oidc_session.c
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20081201

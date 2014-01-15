@@ -70,18 +70,17 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
  * get the metadata filename for a specified issuer (cq. urlencode it)
  */
 static const char *oidc_metadata_issuer_to_filename(request_rec *r, const char *issuer) {
-	return oidc_escape_string(r, issuer);
+	return oidc_util_escape_string(r, issuer);
 }
 
 /*
- * get the issuer from a metadata filename (cq. urldeccode it)
+ * get the issuer from a metadata filename (cq. urldecode it)
  */
 static const char *oidc_metadata_filename_to_issuer(request_rec *r, const char *filename) {
 	char *result = apr_pstrdup(r->pool, filename);
 	char *p = strrchr(result, '.');
 	*p = '\0';
-	ap_unescape_url(result);
-	return result;
+	return oidc_util_unescape_string(r, result);
 }
 
 /*
@@ -107,6 +106,9 @@ static const char *oidc_metadata_client_file_path(request_rec *r, const char *is
 	return oidc_metadata_file_path(r, cfg, issuer, OIDC_METADATA_SUFFIX_CLIENT);
 }
 
+/*
+ * read a JSON metadata file from disk
+ */
 static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path, apr_json_value_t **result) {
 	apr_file_t *fd;
 	apr_status_t rc;
@@ -183,9 +185,110 @@ error_close:
 }
 
 /*
+ * check to see if JSON provider metadata is valid
+ */
+static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r, apr_json_value_t *j_provider, const char *issuer) {
+
+	/* get the "issuer" from the provider metadata and double-check that it matches what we looked for */
+	apr_json_value_t *j_issuer = apr_hash_get(j_provider->value.object, "issuer", APR_HASH_KEY_STRING);
+	if ( (j_issuer == NULL) || (j_issuer->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_provider_is_valid: provider JSON object did not contain an \"issuer\" string");
+		return FALSE;
+	}
+	if (strcmp(issuer, j_issuer->value.string.p) != 0) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_provider_is_valid: requested issuer (%s) does not match the \"issuer\" value in the provider metadata file: %s", issuer, j_issuer->value.string.p);
+		return FALSE;
+	}
+
+	/* verify that the provider supports the "code" flow, cq. the only one that we support for now */
+	apr_json_value_t *j_response_types_supported = apr_hash_get(j_provider->value.object, "response_types_supported", APR_HASH_KEY_STRING);
+	if ( (j_response_types_supported == NULL) || (j_response_types_supported->type != APR_JSON_ARRAY) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "oidc_metadata_provider_is_valid: provider JSON object did not contain a \"response_types_supported\" array; assuming that \"code\" flow is supported...");
+		// TODO: hey, this is required-by-spec stuff right?
+	} else {
+		int i;
+		for (i = 0; i < j_response_types_supported->value.array->nelts; i++) {
+			apr_json_value_t *elem = APR_ARRAY_IDX(j_response_types_supported->value.array, i, apr_json_value_t *);
+			if (elem->type != APR_JSON_STRING) {
+				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_provider_is_valid: unhandled in-array JSON object type [%d] in provider metadata for entry \"response_types_supported\"", elem->type);
+				continue;
+			}
+			if (strcmp(elem->value.string.p, "code") == 0) {
+				break;
+			}
+		}
+		if (i == j_response_types_supported->value.array->nelts) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_provider_is_valid: could not find a supported value [\"code\"] in provider metadata for entry \"response_types_supported\"");
+			return FALSE;
+		}
+	}
+
+	/* get a handle to the authorization endpoint */
+	apr_json_value_t *j_authorization_endpoint = apr_hash_get(j_provider->value.object, "authorization_endpoint", APR_HASH_KEY_STRING);
+	if ( (j_authorization_endpoint == NULL) || (j_authorization_endpoint->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_provider_is_valid: provider JSON object did not contain an \"authorization_endpoint\" string");
+		return FALSE;
+	}
+
+	/* get a handle to the token endpoint */
+	apr_json_value_t *j_token_endpoint = apr_hash_get(j_provider->value.object, "token_endpoint", APR_HASH_KEY_STRING);
+	if ( (j_token_endpoint == NULL) || (j_token_endpoint->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_provider_is_valid: provider JSON object did not contain a \"token_endpoint\" string");
+		return FALSE;
+	}
+
+	/* get a handle to the user_info endpoint */
+	apr_json_value_t *j_userinfo_endpoint = apr_hash_get(j_provider->value.object, "userinfo_endpoint", APR_HASH_KEY_STRING);
+	if ( (j_userinfo_endpoint == NULL) || (j_userinfo_endpoint->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "oidc_metadata_provider_is_valid: provider JSON object did not contain a \"userinfo_endpoint\" string");
+	}
+
+	/* find out what type of authentication the token endpoint supports (we only support post or basic) */
+	apr_json_value_t *j_token_endpoint_auth_methods_supported = apr_hash_get(j_provider->value.object, "token_endpoint_auth_methods_supported", APR_HASH_KEY_STRING);
+	if ( (j_token_endpoint_auth_methods_supported == NULL) || (j_token_endpoint_auth_methods_supported->type != APR_JSON_ARRAY) ) {
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"token_endpoint_auth_methods_supported\" array, assuming \"client_secret_basic\" is supported");
+	} else {
+		int i;
+		for (i = 0; i < j_token_endpoint_auth_methods_supported->value.array->nelts; i++) {
+			apr_json_value_t *elem = APR_ARRAY_IDX(j_token_endpoint_auth_methods_supported->value.array, i, apr_json_value_t *);
+			if (elem->type != APR_JSON_STRING) {
+				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"", elem->type);
+				continue;
+			}
+			if (strcmp(elem->value.string.p, "client_secret_post") == 0) {
+				break;
+			}
+			if (strcmp(elem->value.string.p, "client_secret_basic") == 0) {
+				break;
+			}
+		}
+		if (i == j_token_endpoint_auth_methods_supported->value.array->nelts) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: could not find a supported value [client_secret_post|client_secret_basic] in provider metadata for entry \"token_endpoint_auth_methods_supported\"");
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
+/*
  * check to see if dynamically registered JSON client metadata has not expired
  */
 static apr_byte_t oidc_metadata_client_is_valid(request_rec *r, apr_json_value_t *j_client, const char *issuer) {
+
+	/* get a handle to the client_id we need to use for this provider */
+	apr_json_value_t *j_client_id = apr_hash_get(j_client->value.object, "client_id", APR_HASH_KEY_STRING);
+	if ( (j_client_id == NULL) || (j_client_id->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_client_is_valid: client JSON object did not contain a \"client_id\" string");
+		return FALSE;
+	}
+
+	/* get a handle to the client_secret we need to use for this provider */
+	apr_json_value_t *j_client_secret = apr_hash_get(j_client->value.object, "client_secret", APR_HASH_KEY_STRING);
+	if ( (j_client_secret == NULL) || (j_client_secret->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_client_is_valid: client JSON object did not contain a \"client_secret\" string");
+		return FALSE;
+	}
 
 	/* the expiry timestamp from the JSON object */
 	apr_json_value_t *expires_at = apr_hash_get(j_client->value.object, "client_secret_expires_at", APR_HASH_KEY_STRING);
@@ -217,6 +320,8 @@ static apr_byte_t oidc_metadata_client_is_valid(request_rec *r, apr_json_value_t
  * write JSON metadata to a file
  */
 static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path, const char *data) {
+
+	// TODO: completely erase the contents of the file if it already exists....
 
 	apr_file_t *fd;
 	apr_status_t rc = APR_SUCCESS;
@@ -256,77 +361,114 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path, con
 	apr_file_unlock(fd);
 	apr_file_close(fd);
 
-	return TRUE;
-}
-
-static apr_byte_t oidc_metadata_http_get_and_store(request_rec *r, oidc_cfg *cfg, int action, const char *url, apr_table_t *params, const char *path, apr_json_value_t **j_response) {
-
-	const char *response = NULL;
-
-	/* execute the call to retrieve the metadata */
-	if (oidc_util_http_call(r, url, action, params, NULL, NULL, cfg->provider.ssl_validate_server, &response, cfg->http_timeout_short) == FALSE) return FALSE;
-
-	/* decode and see if it is not an error response somehow */
-	if (oidc_util_decode_json_and_check_error(r, response, j_response) == FALSE) return FALSE;
-
-	/* write the obtained provider metadata file */
-	if (oidc_metadata_file_write(r, path, response) == FALSE) return FALSE;
+	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_file_write: file \"%s\" written", path);
 
 	return TRUE;
 }
 
-apr_byte_t oidc_metadata_provider_get_and_store(request_rec *r, oidc_cfg *cfg, const char *url, const char *issuer, apr_json_value_t **j_response) {
-	return oidc_metadata_http_get_and_store(r, cfg, OIDC_HTTP_GET, url, NULL, oidc_metadata_provider_file_path(r, issuer), j_response);
+/* callback function type for checking metdata validity (provider or client) */
+typedef apr_byte_t (*oidc_is_valid_function_t)(request_rec *, apr_json_value_t *, const char *);
+
+/*
+ * helper function to get the JSON (client or provider) metadata from the specified file path and check its validity
+ */
+static apr_byte_t oidc_metadata_get_and_check(request_rec *r, const char *path, const char *issuer, oidc_is_valid_function_t metadata_is_valid, apr_json_value_t **j_metadata) {
+
+	/* read the metadata from a file in to a variable */
+	if (oidc_metadata_file_read_json(r, path, j_metadata) == FALSE) return FALSE;
+
+	/* we've got metadata that is JSON and no error-JSON, but now we check provider/client validity */
+	if (metadata_is_valid(r, *j_metadata, issuer) == FALSE) {
+		/*
+		 * this is expired or otherwise invalid metadata, we're probably going to get
+		 * new metadata, so delete the file first
+		 */
+		apr_status_t rc = APR_SUCCESS;
+		char s_err[128];
+		if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get_and_check: could not delete invalid metadata file %s (%s)", path,  apr_strerror(rc, s_err, sizeof(s_err)));
+		} else {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get_and_check: removed invalid metadata file %s", path);
+		}
+
+		/* return an error status */
+		return FALSE;
+	}
+
+	/* all OK if we got here */
+	return TRUE;
 }
 
 /*
- * return both provider and client metadata for the specified issuer
- *
- * TODO: should we use a modification timestamp on client metadata to skip
- *       validation if it has been done recently, or is that overkill?
- *
- *       at least it is not overkill for blacklisting providers that registration fails for
- *       but maybe we should just delete the provider data for those?
+ * helper function to retrieve (client or provider) metadata from a URL, check it and store it
  */
-static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r, oidc_cfg *cfg, const char *issuer, apr_json_value_t **j_provider, apr_json_value_t **j_client) {
+static apr_byte_t oidc_metadata_retrieve_and_store(request_rec *r, oidc_cfg *cfg, const char *url, int action, apr_table_t *params, const char *issuer, oidc_is_valid_function_t f_is_valid, const char *path, apr_json_value_t **j_metadata) {
+	const char *response = NULL;
 
-	/* get the full file path to the provider and client metadata for this issuer */
+	/* no valid provider metadata, get it at the specified URL with the specified parameters */
+	if (oidc_util_http_call(r, url, action, params, NULL, NULL, cfg->provider.ssl_validate_server, &response, cfg->http_timeout_short) == FALSE) return FALSE;
+
+	/* decode and see if it is not an error response somehow */
+	if (oidc_util_decode_json_and_check_error(r, response, j_metadata) == FALSE) return FALSE;
+
+	/* check to see if it is valid metadata */
+	if (f_is_valid(r, *j_metadata, issuer) == FALSE) return FALSE;
+
+	/* since it is valid, write the obtained provider metadata file */
+	if (oidc_metadata_file_write(r, path, response) == FALSE) return FALSE;
+
+	/* all OK */
+	return TRUE;
+}
+
+/*
+ * see if we have provider metadata and check its validity
+ * if not, use OpenID Connect Provider Issuer Discovery to get it, check it and store it
+ */
+static apr_byte_t oidc_metadata_provider_get(request_rec *r, oidc_cfg *cfg, const char *issuer, apr_json_value_t **j_provider) {
+
+	/* get the full file path to the provider metadata for this issuer */
 	const char *provider_path = oidc_metadata_provider_file_path(r, issuer);
+
+	/* see if we have valid metadata already, if so, return it */
+	if (oidc_metadata_get_and_check(r, provider_path, issuer, oidc_metadata_provider_is_valid, j_provider) == TRUE) return TRUE;
+
+	// TODO: if we have provider metadata (how to do validity/expiry checks?) don't go here:
+
+	/* assemble the URL to the .well-known OpenID metadata */
+	const char *url = apr_psprintf(r->pool, "%s", ( (strstr(issuer, "http://") == issuer) || (strstr(issuer, "https://") == issuer) ) ? issuer : apr_psprintf(r->pool, "https://%s", issuer));
+	url = apr_psprintf(r->pool, "%s%s.well-known/openid-configuration", url, url[strlen(url) -1] != '/' ? "/" : "");
+
+	/* try and get it from there, checking it and storing it if succesful */
+	return oidc_metadata_retrieve_and_store(r, cfg, url, OIDC_HTTP_GET, NULL, issuer, oidc_metadata_provider_is_valid, provider_path, j_provider);
+}
+
+/*
+ * see if we have client metadata and check its validity
+ * if not, use OpenID Connect Client Registration to get it, check it and store it
+ */
+static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg, const char *issuer, const char *registration_url, apr_json_value_t **j_client) {
+
+	/* get the full file path to the provider metadata for this issuer */
 	const char *client_path = oidc_metadata_client_file_path(r, issuer);
 
-	/* read the provider metadata in to its variable */
-	if (oidc_metadata_file_read_json(r, provider_path, j_provider) == FALSE)
-		/* errors will already have been reported */
-		return FALSE;
-
-	/* read the client metadata in to the "client" variable */
-	if (oidc_metadata_file_read_json(r, client_path, j_client) == TRUE) {
-
-		/* if we succeeded, we should check its validity */
-		if (oidc_metadata_client_is_valid(r, *j_client, issuer))
-			/* all OK */
-			return TRUE;
-
-		/* this is expired or otherwise invalid client metadata */
-
-		// TODO: decide whether we should delete the client metadata since it is
-		//       just overriden now (which may be useful for client_update's later on)
-	}
+	/* see if we already have valid client metadata, if so, return TRUE */
+	if (oidc_metadata_get_and_check(r, client_path, issuer, oidc_metadata_client_is_valid, j_client) == TRUE) return TRUE;
 
 	/* at this point we have no valid client metadata, see if there's a registration endpoint for this provider */
-	apr_json_value_t *j_registration_endpoint = apr_hash_get((*j_provider)->value.object, "registration_endpoint", APR_HASH_KEY_STRING);
-	if ( (j_registration_endpoint == NULL) || (j_registration_endpoint->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "oidc_metadata_get_provider_and_client: no (valid) client metadata and provider JSON object did not contain a \"registration_endpoint\" string");
+	if (registration_url == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_client_get: no (valid) client metadata exists and provider JSON object did not contain a (valid) \"registration_endpoint\" string");
 		return FALSE;
 	}
 
+	/* go and use Dynamic Client registration to fetch ourselves new client metadata */
 	apr_table_t *params = apr_table_make(r->pool, 3);
 	apr_table_addn(params, "client_name", cfg->provider.client_name);
 
 	int action = OIDC_HTTP_POST_JSON;
 
 	/* hack away for pre-standard PingFederate client registration... */
-	if (strstr(j_registration_endpoint->value.string.p, "idp/client-registration.openid") != NULL) {
+	if (strstr(registration_url, "idp/client-registration.openid") != NULL) {
 
 		/* add PF specific client registration parameters */
 		apr_table_addn(params, "operation", "client_register");
@@ -346,8 +488,37 @@ static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r, oidc_cfg
 		}
 	}
 
-	/* register the client and get back the metadata, store it and return the result */
-	return oidc_metadata_http_get_and_store(r, cfg, action, j_registration_endpoint->value.string.p, params, client_path, j_client);
+	/* try and get it from there, checking it and storing it if succesful */
+	return oidc_metadata_retrieve_and_store(r, cfg, registration_url, action, params, issuer, oidc_metadata_client_is_valid, client_path, j_client);
+}
+
+/*
+ * return both provider and client metadata for the specified issuer
+ *
+ * TODO: should we use a modification timestamp on client metadata to skip
+ *       validation if it has been done recently, or is that overkill?
+ *
+ *       at least it is not overkill for blacklisting providers that registration fails for
+ *       but maybe we should just delete the provider data for those?
+ */
+static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r, oidc_cfg *cfg, const char *issuer, apr_json_value_t **j_provider, apr_json_value_t **j_client) {
+
+	const char *registration_url = NULL;
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_get_provider_and_client: entering; issuer=\"%s\"", issuer);
+
+	/* see if we can get valid provider metadata (possibly bootstrapping with Discovery), if not, return FALSE */
+	if (oidc_metadata_provider_get(r, cfg, issuer, j_provider) == FALSE) return FALSE;
+
+	/* get a reference to the registration endpoint, if it exists */
+	apr_json_value_t *j_registration_endpoint = apr_hash_get((*j_provider)->value.object, "registration_endpoint", APR_HASH_KEY_STRING);
+	if ( (j_registration_endpoint != NULL) || (j_registration_endpoint->type == APR_JSON_STRING) ) {
+		registration_url = j_registration_endpoint->value.string.p;
+	}
+
+	if (oidc_metadata_client_get(r, cfg, issuer, registration_url, j_client) == FALSE) return FALSE;
+
+	/* all OK */
+	return TRUE;
 }
 
 /*
@@ -358,6 +529,8 @@ apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t 
 	apr_dir_t *dir;
 	apr_finfo_t fi;
 	char s_err[128];
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_list: entering");
 
 	/* open the metadata directory */
 	if ((rc = apr_dir_open(&dir, cfg->metadata_dir, r->pool)) != APR_SUCCESS) {
@@ -424,65 +597,20 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, 
 
 	/* get the "issuer" from the provider metadata and double-check that it matches what we looked for */
 	apr_json_value_t *j_issuer = apr_hash_get(j_provider->value.object, "issuer", APR_HASH_KEY_STRING);
-	if ( (j_issuer == NULL) || (j_issuer->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain an \"issuer\" string");
-		return FALSE;
-	}
-	if (strcmp(issuer, j_issuer->value.string.p) != 0) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: requested issuer (%s) does not match the \"issuer\" value in the provider metadata file: %s", issuer, j_issuer->value.string.p);
-		return FALSE;
-	}
-
-	/* verify that the provider supports the "code" flow, cq. the only one that we support for now */
-	apr_json_value_t *j_response_types_supported = apr_hash_get(j_provider->value.object, "response_types_supported", APR_HASH_KEY_STRING);
-	if ( (j_response_types_supported == NULL) || (j_response_types_supported->type != APR_JSON_ARRAY) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"response_types_supported\" array; assuming that \"code\" flow is supported...");
-		// TODO: hey, this is required-by-spec stuff right?
-	} else {
-		int i;
-		for (i = 0; i < j_response_types_supported->value.array->nelts; i++) {
-			apr_json_value_t *elem = APR_ARRAY_IDX(j_response_types_supported->value.array, i, apr_json_value_t *);
-			if (elem->type != APR_JSON_STRING) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: unhandled in-array JSON object type [%d] in provider metadata for entry \"response_types_supported\"", elem->type);
-				continue;
-			}
-			if (strcmp(elem->value.string.p, "code") == 0) {
-				break;
-			}
-		}
-		if (i == j_response_types_supported->value.array->nelts) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: could not find a supported value [\"code\"] in provider metadata for entry \"response_types_supported\"");
-			return FALSE;
-		}
-	}
 
 	/* get a handle to the authorization endpoint */
 	apr_json_value_t *j_authorization_endpoint = apr_hash_get(j_provider->value.object, "authorization_endpoint", APR_HASH_KEY_STRING);
-	if ( (j_authorization_endpoint == NULL) || (j_authorization_endpoint->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain an \"authorization_endpoint\" string");
-		return FALSE;
-	}
 
 	/* get a handle to the token endpoint */
 	apr_json_value_t *j_token_endpoint = apr_hash_get(j_provider->value.object, "token_endpoint", APR_HASH_KEY_STRING);
-	if ( (j_token_endpoint == NULL) || (j_token_endpoint->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"token_endpoint\" string");
-		return FALSE;
-	}
 
 	/* get a handle to the user_info endpoint */
 	apr_json_value_t *j_userinfo_endpoint = apr_hash_get(j_provider->value.object, "userinfo_endpoint", APR_HASH_KEY_STRING);
-	if ( (j_userinfo_endpoint == NULL) || (j_userinfo_endpoint->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"userinfo_endpoint\" string");
-		return FALSE;
-	}
 
 	/* find out what type of authentication we must provide to the token endpoint (we only support post or basic) */
 	const char *auth = "client_secret_basic";
 	apr_json_value_t *j_token_endpoint_auth_methods_supported = apr_hash_get(j_provider->value.object, "token_endpoint_auth_methods_supported", APR_HASH_KEY_STRING);
-	if ( (j_token_endpoint_auth_methods_supported == NULL) || (j_token_endpoint_auth_methods_supported->type != APR_JSON_ARRAY) ) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_get: provider JSON object did not contain a \"token_endpoint_auth_methods_supported\" array");
-	} else {
+	if ( (j_token_endpoint_auth_methods_supported != NULL) && (j_token_endpoint_auth_methods_supported->type == APR_JSON_ARRAY) ) {
 		int i;
 		for (i = 0; i < j_token_endpoint_auth_methods_supported->value.array->nelts; i++) {
 			apr_json_value_t *elem = APR_ARRAY_IDX(j_token_endpoint_auth_methods_supported->value.array, i, apr_json_value_t *);
@@ -499,10 +627,6 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, 
 				break;
 			}
 		}
-		if (i == j_token_endpoint_auth_methods_supported->value.array->nelts) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: could not find a supported value [client_secret_post|client_secret_basic] in provider metadata for entry \"token_endpoint_auth_methods_supported\"");
-			return FALSE;
-		}
 	}
 
 	/* put whatever we've found out about the provider in (the provider part of) the metadata struct */
@@ -510,34 +634,22 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer, 
 	provider->authorization_endpoint_url = apr_pstrdup(r->pool, j_authorization_endpoint->value.string.p);
 	provider->token_endpoint_url = apr_pstrdup(r->pool, j_token_endpoint->value.string.p);
 	provider->token_endpoint_auth = apr_pstrdup(r->pool, auth);
-	provider->userinfo_endpoint_url = apr_pstrdup(r->pool, j_userinfo_endpoint->value.string.p);;
+	if (j_userinfo_endpoint != NULL)
+		provider->userinfo_endpoint_url = apr_pstrdup(r->pool, j_userinfo_endpoint->value.string.p);;
 
 	// CLIENT
 
-	// TODO: we already know that the metadata has not expired, shouldn't we have added more checks?
-	//       (although it is nice that the metadata will not be updated anymore:
-	//       errors in dynamic client registration won't be repeated then
-	//       but: when to retry?
+	/* get a handle to the client_id we need to use for this provider */
+	apr_json_value_t *j_client_id = apr_hash_get(j_client->value.object, "client_id", APR_HASH_KEY_STRING);
+
+	/* get a handle to the client_secret we need to use for this provider */
+	apr_json_value_t *j_client_secret = apr_hash_get(j_client->value.object, "client_secret", APR_HASH_KEY_STRING);
 
 	/* find out if we need to perform SSL server certificate validation on the token_endpoint and user_info_endpoint for this provider */
 	int validate = cfg->provider.ssl_validate_server;
 	apr_json_value_t *j_ssl_validate_server = apr_hash_get(j_client->value.object, "ssl_validate_server", APR_HASH_KEY_STRING);
 	if ( (j_ssl_validate_server != NULL) && (j_ssl_validate_server->type == APR_JSON_STRING) && (strcmp(j_ssl_validate_server->value.string.p, "Off") == 0)) {
 		validate = 0;
-	}
-
-	/* get a handle to the client_id we need to use for this provider */
-	apr_json_value_t *j_client_id = apr_hash_get(j_client->value.object, "client_id", APR_HASH_KEY_STRING);
-	if ( (j_client_id == NULL) || (j_client_id->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: client JSON object did not contain a \"client_id\" string");
-		return FALSE;
-	}
-
-	/* get a handle to the client_secret we need to use for this provider */
-	apr_json_value_t *j_client_secret = apr_hash_get(j_client->value.object, "client_secret", APR_HASH_KEY_STRING);
-	if ( (j_client_secret == NULL) || (j_client_secret->type != APR_JSON_STRING) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_metadata_get: client JSON object did not contain a \"client_secret\" string");
-		return FALSE;
 	}
 
 	/* find out what scopes we should be requesting from this provider */

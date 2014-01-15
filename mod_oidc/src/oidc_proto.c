@@ -73,10 +73,10 @@ int oidc_proto_authorization_request(request_rec *r, struct oidc_provider_t *pro
 					provider->authorization_endpoint_url,
 					(strchr(provider->authorization_endpoint_url, '?') != NULL ?
 							"&" : "?"), "code",
-					oidc_escape_string(r, provider->scope),
-					oidc_escape_string(r, provider->client_id),
-					oidc_escape_string(r, state),
-					oidc_escape_string(r, redirect_uri));
+					oidc_util_escape_string(r, provider->scope),
+					oidc_util_escape_string(r, provider->client_id),
+					oidc_util_escape_string(r, state),
+					oidc_util_escape_string(r, redirect_uri));
 
 	/* add the redirect location header */
 	apr_table_add(r->headers_out, "Location", destination);
@@ -414,4 +414,62 @@ apr_byte_t oidc_proto_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_provi
 	return oidc_util_decode_json_and_check_error(r, *response, claims);
 }
 
+/*
+ * based on an account name, perform OpenID Connect Provider Issuer Discovery to find out the issuer and obtain and store its metadata
+ */
+apr_byte_t oidc_proto_account_based_discovery(request_rec *r, oidc_cfg *cfg, const char *acct, char **issuer) {
 
+	// TODO: maybe show intermediate/progress screen "discovering..."
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_account_based_discovery: entering, acct=%s", acct);
+
+	const char *resource = apr_psprintf(r->pool, "acct:%s", acct);
+	const char *domain = strrchr(acct, '@');
+	if (domain == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_account_based_discovery: invalid account name");
+		return FALSE;
+	}
+	domain++;
+	const char *url = apr_psprintf(r->pool, "https://%s/.well-known/webfinger", domain);
+
+	apr_table_t *params = apr_table_make(r->pool, 1);
+	apr_table_addn(params, "resource", resource);
+	apr_table_addn(params, "rel", "http://openid.net/specs/connect/1.0/issuer");
+
+	const char *response = NULL;
+	if (oidc_util_http_call(r, url, OIDC_HTTP_GET, params, NULL, NULL, cfg->provider.ssl_validate_server, &response, cfg->http_timeout_short) == FALSE) {
+		/* errors will have been logged by now */
+		return FALSE;
+	}
+
+	/* decode and see if it is not an error response somehow */
+	apr_json_value_t *j_response = NULL;
+	if (oidc_util_decode_json_and_check_error(r, response, &j_response) == FALSE) return FALSE;
+
+	/* get the links parameter */
+	apr_json_value_t *j_links = apr_hash_get(j_response->value.object, "links", APR_HASH_KEY_STRING);
+	if ( (j_links == NULL) || (j_links->type != APR_JSON_ARRAY) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_account_based_discovery: response JSON object did not contain a \"links\" array");
+		return FALSE;
+	}
+
+	/* get the one-and-only object in the "links" array */
+	apr_json_value_t *j_object = ((apr_json_value_t**)j_links->value.array->elts)[0];
+	if ( (j_object == NULL) || (j_object->type != APR_JSON_OBJECT) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_account_based_discovery: response JSON object did not contain a JSON object as the first element in the \"links\" array");
+		return FALSE;
+	}
+
+	/* get the href from that object, which is the issuer value */
+	apr_json_value_t *j_href = apr_hash_get(j_object->value.object, "href", APR_HASH_KEY_STRING);
+	if ( (j_href == NULL) || (j_href->type != APR_JSON_STRING) ) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_proto_account_based_discovery: response JSON object did not contain a \"href\" element in the first \"links\" array object");
+		return FALSE;
+	}
+
+	*issuer = (char *)j_href->value.string.p;
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_account_based_discovery: returning issuer \"%s\" for account \"%s\" after doing succesful webfinger-based discovery", *issuer, acct);
+
+	return TRUE;
+}

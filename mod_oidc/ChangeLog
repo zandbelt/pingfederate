@@ -1,0 +1,8 @@
+15/1/2014
+- check for mandatory settings in the configuration
+- present user facing text in discovery errors
+- use proper (curl) url-encode/url-decode routines
+- re-organize metadata handling (incl. validation)
+- move stuff around to oidc_util.c, oidc_proto.c and some renaming
+9/1/2014
+- version 1.0

@@ -122,6 +122,12 @@ const char *oidc_set_url_slot(cmd_parms *cmd, void *ptr, const char *arg) {
 	if (apr_uri_parse(cmd->pool, arg, &url) != APR_SUCCESS) {
 		return apr_psprintf(cmd->pool, "oidc_set_url_slot: configuration value '%s' could not be parsed as a URL!", arg);
 	}
+	if ( (url.scheme == NULL) || ( (strcmp(url.scheme, "http") != 0) && (strcmp(url.scheme, "https") != 0) ) ) {
+		return apr_psprintf(cmd->pool, "oidc_set_url_slot: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (scheme != http/https)!", arg);
+	}
+	if (url.hostname == NULL) {
+		return apr_psprintf(cmd->pool, "oidc_set_url_slot: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (no hostname set, check your slashes)!", arg);
+	}
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
@@ -138,7 +144,7 @@ const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
 
 	/* ensure the directory exists */
 	if ((rc = apr_dir_open(&dir, arg, cmd->pool)) != APR_SUCCESS) {
-		return apr_psprintf(cmd->pool, "could not access directory '%s' (%s)", arg,  apr_strerror(rc, s_err, sizeof(s_err)));
+		return apr_psprintf(cmd->pool, "oidc_set_dir_slot: could not access directory '%s' (%s)", arg,  apr_strerror(rc, s_err, sizeof(s_err)));
 	}
 
 	/* and cleanup... */
@@ -153,17 +159,18 @@ const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
  * set the cookie domain in the server config and check it syntactically
  */
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	size_t sz, limit;
 	char d;
 	limit = strlen(value);
-	for(sz = 0; sz < limit; sz++) {
+	for (sz = 0; sz < limit; sz++) {
 		d = value[sz];
-		if ( (d < '0' || d > '9') &&
-				(d < 'a' || d > 'z') &&
-				(d < 'A' || d > 'Z') &&
-				d != '.' && d != '-') {
-			return(apr_psprintf(cmd->pool, "oidc_set_cookie_domain: invalid character (%c) in OIDCCookieDomain", d));
+		if ((d < '0' || d > '9') && (d < 'a' || d > 'z') && (d < 'A' || d > 'Z')
+				&& d != '.' && d != '-') {
+			return (apr_psprintf(cmd->pool,
+					"oidc_set_cookie_domain: invalid character (%c) in OIDCCookieDomain",
+					d));
 		}
 	}
 	cfg->cookie_domain = apr_pstrdup(cmd->pool, value);
@@ -342,6 +349,66 @@ void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->authn_header != OIDC_DEFAULT_AUTHN_HEADER ?
 					add->authn_header : base->authn_header);
 	return (c);
+}
+
+/*
+ * report a config error
+ */
+static int oidc_check_config_error(request_rec *r, const char *config_str) {
+	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_config_error: mandatory parameter \"%s\" is not set", config_str);
+	return oidc_util_http_sendstring(r, "mod_oidc configuration error: contact the administrator.", HTTP_INTERNAL_SERVER_ERROR);
+}
+
+/*
+ * check the config required for the OpenID Connect RP role
+ */
+int oidc_check_config_oidc(request_rec *r, oidc_cfg *c) {
+
+	if ((c->metadata_dir == NULL) && (c->provider.issuer == NULL)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_check_config_oidc: one of \"OIDCProviderIssuer\" or \"OIDCMetadataDir\" must be set");
+		return oidc_util_http_sendstring(r,
+				"mod_oidc configuration error: contact the administrator.",
+				HTTP_INTERNAL_SERVER_ERROR);
+	}
+
+	if (c->redirect_uri == NULL)
+		return oidc_check_config_error(r, "OIDCRedirectURI");
+	if (c->crypto_passphrase == NULL)
+		return oidc_check_config_error(r, "OIDCCryptoPassphrase");
+
+	if (c->metadata_dir == NULL) {
+		if (c->provider.issuer == NULL)
+			return oidc_check_config_error(r, "OIDCProviderIssuer");
+		if (c->provider.authorization_endpoint_url == NULL)
+			return oidc_check_config_error(r,
+					"OIDCProviderAuthorizationEndpoint");
+		if (c->provider.token_endpoint_url == NULL)
+			return oidc_check_config_error(r, "OIDCProviderTokenEndpoint");
+		if (c->provider.client_id == NULL)
+			return oidc_check_config_error(r, "OIDCClientID");
+		if (c->provider.client_secret == NULL)
+			return oidc_check_config_error(r, "OIDCClientSecret");
+	}
+
+	return OK;
+}
+
+/*
+ * check the config required for the OAuth 2.0 RS role
+ */
+int oidc_check_config_oauth(request_rec *r, oidc_cfg *c) {
+
+	if (c->provider.client_id == NULL)
+		return oidc_check_config_error(r, "OIDCOAuthClientID");
+
+	if (c->provider.client_secret == NULL)
+		return oidc_check_config_error(r, "OIDCOAuthClientSecret");
+
+	if (c->provider.token_endpoint_url == NULL)
+		return oidc_check_config_error(r, "OIDCOAuthEndpoint");
+
+	return OK;
 }
 
 /*

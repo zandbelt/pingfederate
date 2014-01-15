@@ -77,9 +77,9 @@
 
 #include "mod_oidc.h"
 
-// TODO: sort out all urlencode/decode stuff (get proper routines from somewhere)
-// TODO: improve error handling/logging consistency and completeness
+// TODO: improve error handling/logging consistency and completeness (make #define shortcuts)
 // TODO: require SSL
+// TODO: user documentation (at least of configuration primitives)
 // TODO: fix the http_call SSL error on Ubuntu?
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
@@ -546,29 +546,6 @@ static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c, sessi
 }
 
 /*
- * sends HTML content to the user agent
- */
-static int oidc_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
-
-	conn_rec *c = r->connection;
-	apr_bucket *b;
-
-	/* set the context type header to HTML */
-	ap_set_content_type(r, "text/html");
-
-	/* do some magic copied from somewhere */
-	apr_bucket_brigade *bb = apr_brigade_create(r->pool, c->bucket_alloc);
-	b = apr_bucket_transient_create(html, strlen(html), c->bucket_alloc);
-	APR_BRIGADE_INSERT_TAIL(bb, b);
-	b = apr_bucket_eos_create(c->bucket_alloc);
-	APR_BRIGADE_INSERT_TAIL(bb, b);
-	if (ap_pass_brigade(r->output_filters, bb) != APR_SUCCESS)
-		return HTTP_INTERNAL_SERVER_ERROR;
-
-	return success_rvalue;
-}
-
-/*
  * present the user with an OP selection screen
  */
 static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
@@ -582,7 +559,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 	if (cfg->discover_url != NULL) {
 
 		/* yes, assemble the paramters for external discovery */
-		char *url = apr_psprintf(r->pool, "%s%s%s=%s&%s=%s", cfg->discover_url, strchr(cfg->discover_url, '?') != NULL ? "&" : "?", OIDC_DISC_RT_PARAM, oidc_escape_string(r, current_url), OIDC_DISC_CB_PARAM, oidc_escape_string(r, cfg->redirect_uri));
+		char *url = apr_psprintf(r->pool, "%s%s%s=%s&%s=%s", cfg->discover_url, strchr(cfg->discover_url, '?') != NULL ? "&" : "?", OIDC_DISC_RT_PARAM, oidc_util_escape_string(r, current_url), OIDC_DISC_CB_PARAM, oidc_util_escape_string(r, cfg->redirect_uri));
 
 		/* log what we're about to do */
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: redirecting to external discovery page: %s", url);
@@ -594,7 +571,8 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 
 	/* get a list of all providers configured in the metadata directory */
 	apr_array_header_t *arr = NULL;
-	if (oidc_metadata_list(r, cfg, &arr) == FALSE) HTTP_UNAUTHORIZED;
+	if (oidc_metadata_list(r, cfg, &arr) == FALSE)
+		return oidc_util_http_sendstring(r, "mod_oidc: no configured providers found, contact your adminstrator", HTTP_UNAUTHORIZED);
 
 	/* assemble a where-are-you-from IDP discovery HTML page */
 	const char *s = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
@@ -614,7 +592,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 		// TODO: html escape (especially & character)
 
 		/* point back to the redirect_uri, where the selection is handled, with an IDP selection and return_to URL */
-		s = apr_psprintf(r->pool, "%s<p><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></p>\n", s, cfg->redirect_uri, OIDC_DISC_OP_PARAM, oidc_escape_string(r, issuer), OIDC_DISC_RT_PARAM, oidc_escape_string(r, current_url), issuer);
+		s = apr_psprintf(r->pool, "%s<p><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></p>\n", s, cfg->redirect_uri, OIDC_DISC_OP_PARAM, oidc_util_escape_string(r, issuer), OIDC_DISC_RT_PARAM, oidc_util_escape_string(r, current_url), issuer);
 	}
 
 	s = apr_psprintf(r->pool, "%s<form method=\"get\" action=\"%s\">\n", s, cfg->redirect_uri);
@@ -631,7 +609,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 			"</html>\n", s);
 
 	/* now send the HTML contents to the user agent */
-	return oidc_http_sendstring(r, s, HTTP_UNAUTHORIZED);
+	return oidc_util_http_sendstring(r, s, HTTP_UNAUTHORIZED);
 }
 
 /*
@@ -677,85 +655,38 @@ static apr_byte_t oidc_is_discovery_response(request_rec *r, oidc_cfg *cfg) {
  */
 static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
-	/* variables to hold the issuer identifier and the original URL returned in the response */
+	/* variables to hold the values (original_url+issuer or original_url+acct) returned in the response */
 	char *issuer = NULL, *original_url = NULL, *acct = NULL;
+	oidc_provider_t *provider = NULL;
 
 	oidc_util_get_request_parameter(r, OIDC_DISC_OP_PARAM, &issuer);
 	oidc_util_get_request_parameter(r, OIDC_DISC_ACCT_PARAM, &acct);
 	oidc_util_get_request_parameter(r, OIDC_DISC_RT_PARAM, &original_url);
 
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_handle_discovery_response: issuer=\"%s\", acct=\"%s\", original_url=\"%s\"", issuer, acct, original_url);
+
 	if (acct != NULL) {
 
-		// TODO: maybe show intermediate/progress screen "discovering..."
-		// TODO: move this (or more) to oidc_proto.c
+		if (oidc_proto_account_based_discovery(r, c, acct, &issuer) == FALSE) {
 
-		const char *resource = apr_psprintf(r->pool, "acct:%s", acct);
-		const char *domain = strrchr(acct, '@');
-		if (domain == NULL) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: invalid account name");
-			return HTTP_NOT_ACCEPTABLE;
-		}
-		domain++;
-		const char *url = apr_psprintf(r->pool, "https://%s/.well-known/webfinger", domain);
-
-		apr_table_t *params = apr_table_make(r->pool, 1);
-		apr_table_addn(params, "resource", resource);
-		apr_table_addn(params, "rel", "http://openid.net/specs/connect/1.0/issuer");
-
-		const char *response = NULL;
-		if (oidc_util_http_call(r, url, OIDC_HTTP_GET, params, NULL, NULL, c->provider.ssl_validate_server, &response, c->http_timeout_short) == FALSE) {
-			/* errors will have been logged by now */
-			return HTTP_NOT_FOUND;
+			/* something did not work out, show a user facing error */
+			return oidc_util_http_sendstring(r, "mod_oidc: could not resolve the provided account name to an OpenID Connect provider; check your syntax", HTTP_NOT_FOUND);
 		}
 
-		/* decode and see if it is not an error response somehow */
-		apr_json_value_t *j_response = NULL;
-		if (oidc_util_decode_json_and_check_error(r, response, &j_response) == FALSE) return HTTP_NOT_FOUND;
-
-		apr_json_value_t *j_links = apr_hash_get(j_response->value.object, "links", APR_HASH_KEY_STRING);
-		if ( (j_links == NULL) || (j_links->type != APR_JSON_ARRAY) ) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: response JSON object did not contain a \"links\" array");
-			return HTTP_NOT_FOUND;
-		}
-
-		apr_json_value_t *j_object = ((apr_json_value_t**)j_links->value.array->elts)[0];
-		if ( (j_object == NULL) || (j_object->type != APR_JSON_OBJECT) ) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: response JSON object did not contain a JSON object as the first element in the \"links\" array");
-			return HTTP_NOT_FOUND;
-		}
-
-		apr_json_value_t *j_href = apr_hash_get(j_object->value.object, "href", APR_HASH_KEY_STRING);
-		if ( (j_href == NULL) || (j_href->type != APR_JSON_STRING) ) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: response JSON object did not contain a \"href\" element in the first \"links\" array object");
-			return HTTP_NOT_FOUND;
-		}
-
-		issuer = (char *)j_href->value.string.p;
-
-		// TODO: if we have provider metadata (how to do validity/expiry checks?) don't go here:
-
-		url = apr_psprintf(r->pool, "%s", ( (strstr(issuer, "http://") == issuer) || (strstr(issuer, "https://") == issuer) ) ? issuer : apr_psprintf(r->pool, "https://%s", issuer));
-		url = apr_psprintf(r->pool, "%s%s.well-known/openid-configuration", url, url[strlen(url) -1] != '/' ? "/" : "");
-
-		if (oidc_metadata_provider_get_and_store(r, c, url, issuer, &j_response) == FALSE) return HTTP_NOT_FOUND;
-
-		// TODO: if failed try metadata service based discovery
-
-		/* issuer is set, so let's continue as planned */
+		/* issuer is set now, so let's continue as planned */
 	}
 
 	if (issuer != NULL) {
 
 		/* try and get metadata from the metadata directories for the selected OP */
-		oidc_provider_t *provider = NULL;
 		if ( (oidc_metadata_get(r, c, issuer, &provider) == TRUE) && (provider != NULL) ) {
 
 			/* now we've got a selected OP, send the user there to authenticate */
 			return oidc_authenticate_user(r, c, provider, original_url);
 		}
 
-		/* something went wrong, log that */
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_handle_discovery_response: no valid provider metadata found for selected OP: returning HTTP 500");
+		/* something went wrong */
+		return oidc_util_http_sendstring(r, "mod_oidc: could not find valid provider metadata for the specified OpenID Connect provider; contact the administrator", HTTP_NOT_FOUND);
 	}
 
 	return HTTP_INTERNAL_SERVER_ERROR;
@@ -765,6 +696,9 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
  * main routine: handle OpenID Connect authentication
  */
 int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
+
+	/* first check the config required for the OpenID Connect RP role */
+	if (oidc_check_config_oidc(r, c) != OK) return HTTP_INTERNAL_SERVER_ERROR;
 
 	/* check if this is a sub-request or an initial request */
 	if (ap_is_initial_req(r)) {
