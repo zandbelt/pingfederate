@@ -63,7 +63,7 @@
 /*
  * see if a the Require value matches with a set of provided claims
  */
-static apr_byte_t oidc_authz_match_claim(struct request_rec *r, const char *const attr_spec, const apr_json_value_t *const claims) {
+static apr_byte_t oidc_authz_match_claim(request_rec *r, const char *const attr_spec, const apr_json_value_t *const claims) {
 
 	apr_hash_index_t *hi;
 	const void *key;
@@ -264,7 +264,7 @@ authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const 
 				w);
 
 		/* see if we can match any of out input claims against this Require'd value */
-		if (oidc_authz_match_claim(w, claims, r) == TRUE) {
+		if (oidc_authz_match_claim(r, w, claims) == TRUE) {
 
 			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 					"oidc_authz_worker24: require claim "
