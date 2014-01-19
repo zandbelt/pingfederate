@@ -69,20 +69,25 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
 /*
  * base64url encode a string
  */
-int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_len) {
+int oidc_base64url_encode(request_rec *r, char **dst, const char *src,
+		int src_len) {
 	// TODO: always padded now, do we need an option to remove the padding?
-	if ( (src == NULL) || (src_len <= 0) ) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_base64url_encode: not encoding anything; src=NULL and/or src_len<1");
+	if ((src == NULL) || (src_len <= 0)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_base64url_encode: not encoding anything; src=NULL and/or src_len<1");
 		return -1;
 	}
 	int enc_len = apr_base64_encode_len(src_len);
 	char *enc = apr_palloc(r->pool, enc_len);
-	apr_base64_encode(enc, (const char *)src, src_len);
+	apr_base64_encode(enc, (const char *) src, src_len);
 	int i = 0;
 	while (enc[i] != '\0') {
-		if (enc[i] == '+') enc[i] = '-';
-		if (enc[i] == '/') enc[i] = '_';
-		if (enc[i] == '=') enc[i] = ',';
+		if (enc[i] == '+')
+			enc[i] = '-';
+		if (enc[i] == '/')
+			enc[i] = '_';
+		if (enc[i] == '=')
+			enc[i] = ',';
 		i++;
 	}
 	*dst = enc;
@@ -92,32 +97,37 @@ int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_l
 /*
  * base64url decode a string
  */
-int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding) {
+int oidc_base64url_decode(request_rec *r, char **dst, const char *src,
+		int padding) {
 	// TODO: check base64url decoding/encoding code and look for alternatives?
 	if (src == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_base64url_decode: not encoding anything; src=NULL");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_base64url_decode: not encoding anything; src=NULL");
 		return -1;
 	}
 	char *dec = apr_pstrdup(r->pool, src);
 	int i = 0;
 	while (dec[i] != '\0') {
-		if (dec[i] == '-') dec[i] = '+';
-		if (dec[i] == '_') dec[i] = '/';
-		if (dec[i] == ',') dec[i] = '=';
+		if (dec[i] == '-')
+			dec[i] = '+';
+		if (dec[i] == '_')
+			dec[i] = '/';
+		if (dec[i] == ',')
+			dec[i] = '=';
 		i++;
 	}
 	if (padding == 1) {
 		switch (strlen(dec) % 4) {
-			case 0:
-				break;
-			case 2:
-				dec = apr_pstrcat(r->pool, dec, "==", NULL);
-				break;
-			case 3:
-				dec = apr_pstrcat(r->pool, dec, "=", NULL);
-				break;
-			default:
-				return 0;
+		case 0:
+			break;
+		case 2:
+			dec = apr_pstrcat(r->pool, dec, "==", NULL);
+			break;
+		case 3:
+			dec = apr_pstrcat(r->pool, dec, "=", NULL);
+			break;
+		default:
+			return 0;
 		}
 	}
 	int dlen = apr_base64_decode_len(dec);
@@ -128,31 +138,38 @@ int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int paddi
 /*
  * encrypt and base64url encode a string
  */
-int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src) {
+int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst,
+		const char *src) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	int crypted_len = strlen(src) + 1;
-	unsigned char *crypted = oidc_crypto_aes_encrypt(r, c, (unsigned char *)src, &crypted_len);
+	unsigned char *crypted = oidc_crypto_aes_encrypt(r, c,
+			(unsigned char *) src, &crypted_len);
 	if (crypted == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_encrypt_base64url_encode_string: oidc_crypto_aes_encrypt failed");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_encrypt_base64url_encode_string: oidc_crypto_aes_encrypt failed");
 		return -1;
 	}
-	return oidc_base64url_encode(r, dst, (const char *)crypted, crypted_len);
+	return oidc_base64url_encode(r, dst, (const char *) crypted, crypted_len);
 }
 
 /*
  * decrypt and base64url dencode a string
  */
-int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char *src) {
+int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst,
+		const char *src) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	char *decbuf = NULL;
 	int dec_len = oidc_base64url_decode(r, &decbuf, src, 0);
 	if (dec_len <= 0) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_base64url_decode_decrypt_string: oidc_base64url_decode failed");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_base64url_decode_decrypt_string: oidc_base64url_decode failed");
 		return -1;
 	}
-	*dst = (char *)oidc_crypto_aes_decrypt(r, c, (unsigned char *)decbuf, &dec_len);
+	*dst = (char *) oidc_crypto_aes_decrypt(r, c, (unsigned char *) decbuf,
+			&dec_len);
 	if (*dst == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_base64url_decode_decrypt_string: oidc_crypto_aes_decrypt failed");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_base64url_decode_decrypt_string: oidc_crypto_aes_decrypt failed");
 		return -1;
 	}
 	return dec_len;
@@ -177,21 +194,26 @@ int oidc_strnenvcmp(const char *a, const char *b, int len) {
 	int d, i = 0;
 	while (1) {
 		/* If len < 0 then we don't stop based on length */
-		if (len >= 0 && i >= len) return 0;
+		if (len >= 0 && i >= len)
+			return 0;
 
 		/* If we're at the end of both strings, they're equal */
-		if (!*a && !*b) return 0;
+		if (!*a && !*b)
+			return 0;
 
 		/* If the second string is shorter, pick it: */
-		if (*a && !*b) return 1;
+		if (*a && !*b)
+			return 1;
 
 		/* If the first string is shorter, pick it: */
-		if (!*a && *b) return -1;
+		if (!*a && *b)
+			return -1;
 
 		/* Normalize the characters as for conversion to an
 		 * environment variable. */
 		d = oidc_char_to_env(*a) - oidc_char_to_env(*b);
-		if (d) return d;
+		if (d)
+			return d;
 
 		a++;
 		b++;
@@ -206,12 +228,14 @@ int oidc_strnenvcmp(const char *a, const char *b, int len) {
 char *oidc_util_escape_string(const request_rec *r, const char *str) {
 	CURL *curl = curl_easy_init();
 	if (curl == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_escape_string: curl_easy_init() error");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_escape_string: curl_easy_init() error");
 		return NULL;
 	}
 	char *result = curl_easy_escape(curl, str, 0);
 	if (result == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_escape_string: curl_easy_escape() error");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_escape_string: curl_easy_escape() error");
 		return NULL;
 	}
 	char *rv = apr_pstrdup(r->pool, result);
@@ -226,12 +250,14 @@ char *oidc_util_escape_string(const request_rec *r, const char *str) {
 char *oidc_util_unescape_string(const request_rec *r, const char *str) {
 	CURL *curl = curl_easy_init();
 	if (curl == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_unescape_string: curl_easy_init() error");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_util_unescape_string: curl_easy_init() error");
 		return NULL;
 	}
 	char *result = curl_easy_unescape(curl, str, 0, 0);
 	if (result == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_unescape_string: curl_easy_unescape() error");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_util_unescape_string: curl_easy_unescape() error");
 		return NULL;
 	}
 	char *rv = apr_pstrdup(r->pool, result);
@@ -261,11 +287,10 @@ char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c) {
 	if (print_port)
 		port_str = apr_psprintf(r->pool, ":%u", port);
 	url = apr_pstrcat(r->pool, scheme, "://",
-		apr_table_get(r->headers_in, "Host"),
-		port_str, r->uri,
-		(r->args != NULL && *r->args != '\0' ? "?" : ""),
-		r->args, NULL);
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_current_url: current URL '%s'", url);
+			apr_table_get(r->headers_in, "Host"), port_str, r->uri,
+			(r->args != NULL && *r->args != '\0' ? "?" : ""), r->args, NULL);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_get_current_url: current URL '%s'", url);
 	return url;
 }
 
@@ -284,13 +309,13 @@ typedef struct oidc_curl_buffer {
 size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream) {
 	oidc_curl_buffer *curlBuffer = (oidc_curl_buffer *) stream;
 
-	if ((nmemb*size) + curlBuffer->written >= OIDC_CURL_MAX_RESPONSE_SIZE)
+	if ((nmemb * size) + curlBuffer->written >= OIDC_CURL_MAX_RESPONSE_SIZE)
 		return 0;
 
 	memcpy((curlBuffer->buf + curlBuffer->written), ptr, (nmemb*size));
-	curlBuffer->written += (nmemb*size);
+	curlBuffer->written += (nmemb * size);
 
-	return (nmemb*size);
+	return (nmemb * size);
 }
 
 /* context structure for encoding parameters */
@@ -302,26 +327,36 @@ typedef struct oidc_http_encode_t {
 /*
  * add a url-form-encoded name/value pair
  */
-static int oidc_http_add_form_url_encoded_param(void* rec, const char* key, const char* value) {
+static int oidc_http_add_form_url_encoded_param(void* rec, const char* key,
+		const char* value) {
 	// TODO: handle arrays of strings?
-	oidc_http_encode_t *ctx = (oidc_http_encode_t*)rec;
+	oidc_http_encode_t *ctx = (oidc_http_encode_t*) rec;
 	const char *sep = apr_strnatcmp(ctx->encoded_params, "") == 0 ? "" : "&";
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r, "oidc_http_add_post_param: adding parameter: %s=%s to %s (sep=%s)", key, value, ctx->encoded_params, sep);
-	ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s%s%s=%s", ctx->encoded_params, sep, oidc_util_escape_string(ctx->r, key), oidc_util_escape_string(ctx->r, value));
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r,
+			"oidc_http_add_post_param: adding parameter: %s=%s to %s (sep=%s)",
+			key, value, ctx->encoded_params, sep);
+	ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s%s%s=%s",
+			ctx->encoded_params, sep, oidc_util_escape_string(ctx->r, key),
+			oidc_util_escape_string(ctx->r, value));
 	return 1;
 }
 
 /*
  * add a JSON name/value pair
  */
-static int oidc_http_add_json_param(void* rec, const char* key, const char* value) {
-	oidc_http_encode_t *ctx = (oidc_http_encode_t*)rec;
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r, "oidc_http_add_json_param: adding parameter: %s=%s to %s", key, value, ctx->encoded_params);
+static int oidc_http_add_json_param(void* rec, const char* key,
+		const char* value) {
+	oidc_http_encode_t *ctx = (oidc_http_encode_t*) rec;
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r,
+			"oidc_http_add_json_param: adding parameter: %s=%s to %s", key,
+			value, ctx->encoded_params);
 	if (value[0] == '[') {
 		// TODO hacky hacky, we need an array so we already encoded it :-)
-		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s\"%s\" : %s,\n", ctx->encoded_params, key, value);
+		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s\"%s\" : %s,\n",
+				ctx->encoded_params, key, value);
 	} else {
-		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s\"%s\" : \"%s\",\n", ctx->encoded_params, key, value);
+		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s\"%s\" : \"%s\",\n",
+				ctx->encoded_params, key, value);
 	}
 	return 1;
 }
@@ -340,7 +375,10 @@ static int oidc_http_add_json_param(void* rec, const char* key, const char* valu
  *       ERR: Ubuntu 13.10: Apache 2.4.6,  OpenSSL 1.0.1e, Curl 7.32.0
  *       ERR: Ubuntu 12.04: Apache 2.2.22, OpenSSL 1.0.1,  Curl 7.22.0
  */
-apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, const apr_table_t *params, const char *basic_auth, const char *bearer_token, int ssl_validate_server, const char **response, int timeout) {
+apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
+		const apr_table_t *params, const char *basic_auth,
+		const char *bearer_token, int ssl_validate_server,
+		const char **response, int timeout) {
 	char curlError[CURL_ERROR_SIZE];
 	oidc_curl_buffer curlBuffer;
 	CURL *curl;
@@ -348,11 +386,15 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 	int nr_of_params = (params != NULL) ? apr_table_elts(params)->nelts : 0;
 
 	/* do some logging about the inputs */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: entering, url=%s, action=%d, #params=%d, basic_auth=%s, bearer_token=%s, ssl_validate_server=%d", url, action, nr_of_params, basic_auth, bearer_token, ssl_validate_server);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_util_http_call: entering, url=%s, action=%d, #params=%d, basic_auth=%s, bearer_token=%s, ssl_validate_server=%d",
+			url, action, nr_of_params, basic_auth, bearer_token,
+			ssl_validate_server);
 
 	curl = curl_easy_init();
 	if (curl == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_http_call: curl_easy_init() error");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_util_http_call: curl_easy_init() error");
 		return FALSE;
 	}
 
@@ -374,13 +416,16 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, oidc_curl_write);
 
 #ifndef LIBCURL_NO_CURLPROTO
-	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP|CURLPROTO_HTTPS);
+	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS,
+			CURLPROTO_HTTP|CURLPROTO_HTTPS);
 	curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP|CURLPROTO_HTTPS);
 #endif
 
 	/* set the options for validating the SSL server certificate that the remote site presents */
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, (ssl_validate_server != FALSE ? 1L : 0L));
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, (ssl_validate_server != FALSE ? 2L : 0L));
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER,
+			(ssl_validate_server != FALSE ? 1L : 0L));
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST,
+			(ssl_validate_server != FALSE ? 2L : 0L));
 
 	/* identify this HTTP client */
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod-oidc");
@@ -388,7 +433,9 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 	/* see if we need to add token in the Bearer Authorization header */
 	if (bearer_token != NULL) {
 		struct curl_slist *headers = NULL;
-		headers = curl_slist_append(headers, apr_psprintf(r->pool, "Authorization: Bearer %s", bearer_token));
+		headers = curl_slist_append(headers,
+				apr_psprintf(r->pool, "Authorization: Bearer %s",
+						bearer_token));
 		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	}
 
@@ -410,10 +457,13 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 			/* add the parameters in JSON formatting */
 			apr_table_do(oidc_http_add_json_param, &data, params, NULL);
 			/* surround it by brackets to make it a valid JSON object */
-			data.encoded_params = apr_psprintf(r->pool, "{\n%s\n}", data.encoded_params);
+			data.encoded_params = apr_psprintf(r->pool, "{\n%s\n}",
+					data.encoded_params);
 
 			/* set the data and log the event */
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: setting JSON parameters: %s", data.encoded_params);
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+					"oidc_util_http_call: setting JSON parameters: %s",
+					data.encoded_params);
 			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.encoded_params);
 		}
 
@@ -421,7 +471,8 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 		curl_easy_setopt(curl, CURLOPT_POST, 1);
 
 		/* and overwrite the default url-form-encoded content-type */
-		h_list = curl_slist_append(h_list, "Content-type: application/json; charset=UTF-8");
+		h_list = curl_slist_append(h_list,
+				"Content-type: application/json; charset=UTF-8");
 
 	} else if (action == OIDC_HTTP_POST_FORM) {
 
@@ -429,9 +480,12 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 
 		if (nr_of_params > 0) {
 
-			apr_table_do(oidc_http_add_form_url_encoded_param, &data, params, NULL);
+			apr_table_do(oidc_http_add_form_url_encoded_param, &data, params,
+					NULL);
 
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: setting post parameters: %s", data.encoded_params);
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+					"oidc_util_http_call: setting post parameters: %s",
+					data.encoded_params);
 			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.encoded_params);
 		} // else: probably should warn here...
 
@@ -447,7 +501,8 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 		url = apr_psprintf(r->pool, "%s%s%s", url, sep, data.encoded_params);
 
 		/* log that the URL has changed now */
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: added query parameters to URL: %s", url);
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+				"oidc_util_http_call: added query parameters to URL: %s", url);
 	}
 
 	/* see if we need to add any custom headers */
@@ -460,19 +515,23 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action, cons
 	/* call it and record the result */
 	int rv = TRUE;
 	if (curl_easy_perform(curl) != CURLE_OK) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_http_call: curl_easy_perform() failed on: %s (%s)", url, curlError);
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_util_http_call: curl_easy_perform() failed on: %s (%s)",
+				url, curlError);
 		rv = FALSE;
 		goto out;
 	}
 
 	/* set and log the response */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_http_call: response=%s", curlBuffer.buf);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_util_http_call: response=%s", curlBuffer.buf);
 	*response = apr_pstrndup(r->pool, curlBuffer.buf, strlen(curlBuffer.buf));
 
-out:
+	out:
 
 	/* cleanup and return the result */
-	if (h_list != NULL) curl_slist_free_all(h_list);
+	if (h_list != NULL)
+		curl_slist_free_all(h_list);
 	curl_easy_cleanup(curl);
 
 	return rv;
@@ -487,11 +546,10 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
 	char *headerString, *currentCookies;
 
 	/* construct the cookie value */
-	headerString = apr_psprintf(r->pool, "%s=%s;Secure;Path=%s%s",
-			cookieName,
-			cookieValue,
-			oidc_get_cookie_path(r),
-			c->cookie_domain != NULL ? apr_psprintf(r->pool, ";Domain=%s", c->cookie_domain) : "");
+	headerString = apr_psprintf(r->pool, "%s=%s;Secure;Path=%s%s", cookieName,
+			cookieValue, oidc_get_cookie_path(r),
+			c->cookie_domain != NULL ?
+					apr_psprintf(r->pool, ";Domain=%s", c->cookie_domain) : "");
 
 	/* see if we need to clear the cookie */
 	if (apr_strnatcmp(cookieValue, "") == 0)
@@ -523,7 +581,8 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
 	apr_byte_t cookieFound = FALSE;
 
 	/* get the Cookie value */
-	char *cookies = apr_pstrdup(r->pool, (char *) apr_table_get(r->headers_in, "Cookie"));
+	char *cookies = apr_pstrdup(r->pool,
+			(char *) apr_table_get(r->headers_in, "Cookie"));
 
 	if (cookies != NULL) {
 
@@ -540,7 +599,7 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
 				cookieFound = TRUE;
 
 				/* skip to the meat of the parameter (the value after the '=') */
-				cookie += (strlen(cookieName)+1);
+				cookie += (strlen(cookieName) + 1);
 				rv = apr_pstrdup(r->pool, cookie);
 
 				break;
@@ -553,7 +612,8 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
 	}
 
 	/* log what we've found */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_cookie: returning %s", rv);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_cookie: returning %s",
+			rv);
 
 	return rv;
 }
@@ -564,24 +624,25 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
  * http://tools.ietf.org/html/rfc2616#section-2.2) are replaced with
  * a dash ('-') character.
  */
-char *oidc_normalize_header_name(const request_rec *r, const char *str)
-{
-        /* token = 1*<any CHAR except CTLs or separators>
-         * CTL = <any US-ASCII control character
-         *          (octets 0 - 31) and DEL (127)>
-         * separators = "(" | ")" | "<" | ">" | "@"
-         *              | "," | ";" | ":" | "\" | <">
-         *              | "/" | "[" | "]" | "?" | "="
-         *              | "{" | "}" | SP | HT */
-        const char *separators = "()<>@,;:\\\"/[]?={} \t";
+char *oidc_normalize_header_name(const request_rec *r, const char *str) {
+	/* token = 1*<any CHAR except CTLs or separators>
+	 * CTL = <any US-ASCII control character
+	 *          (octets 0 - 31) and DEL (127)>
+	 * separators = "(" | ")" | "<" | ">" | "@"
+	 *              | "," | ";" | ":" | "\" | <">
+	 *              | "/" | "[" | "]" | "?" | "="
+	 *              | "{" | "}" | SP | HT */
+	const char *separators = "()<>@,;:\\\"/[]?={} \t";
 
-        char *ns = apr_pstrdup(r->pool, str);
-        size_t i;
-        for (i = 0; i < strlen(ns); i++) {
-                if (ns[i] < 32 || ns[i] == 127) ns[i] = '-';
-                else if (strchr(separators, ns[i]) != NULL) ns[i] = '-';
-        }
-        return ns;
+	char *ns = apr_pstrdup(r->pool, str);
+	size_t i;
+	for (i = 0; i < strlen(ns); i++) {
+		if (ns[i] < 32 || ns[i] == 127)
+			ns[i] = '-';
+		else if (strchr(separators, ns[i]) != NULL)
+			ns[i] = '-';
+	}
+	return ns;
 }
 
 /*
@@ -590,8 +651,11 @@ char *oidc_normalize_header_name(const request_rec *r, const char *str)
 apr_byte_t oidc_util_request_matches_url(request_rec *r, const char *url) {
 	apr_uri_t uri;
 	apr_uri_parse(r->pool, url, &uri);
-	apr_byte_t rc = (apr_strnatcmp(r->parsed_uri.path, uri.path) == 0) ? TRUE : FALSE;
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_request_matches_url: comparing \"%s\"==\"%s\" (%d)", r->parsed_uri.path, uri.path, rc);
+	apr_byte_t rc =
+			(apr_strnatcmp(r->parsed_uri.path, uri.path) == 0) ? TRUE : FALSE;
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_request_matches_url: comparing \"%s\"==\"%s\" (%d)",
+			r->parsed_uri.path, uri.path, rc);
 	return rc;
 }
 
@@ -599,16 +663,19 @@ apr_byte_t oidc_util_request_matches_url(request_rec *r, const char *url) {
  * see if the currently accessed path has a certain query parameter
  */
 apr_byte_t oidc_util_request_has_parameter(request_rec *r, const char* param) {
-	if (r->args == NULL) return FALSE;
+	if (r->args == NULL)
+		return FALSE;
 	const char *option1 = apr_psprintf(r->pool, "%s=", param);
 	const char *option2 = apr_psprintf(r->pool, "&%s=", param);
-	return ( (strstr(r->args, option1) == r->args) || (strstr(r->args, option2) != NULL) ) ? TRUE : FALSE;
+	return ((strstr(r->args, option1) == r->args)
+			|| (strstr(r->args, option2) != NULL)) ? TRUE : FALSE;
 }
 
 /*
  * get a query parameter
  */
-apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name, char **value) {
+apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name,
+		char **value) {
 	// TODO: we should really check with ? and & and avoid any <bogus>code= stuff to trigger true
 	char *tokenizer_ctx, *p, *args, *rv = NULL;
 	const char *k_param = apr_psprintf(r->pool, "%s=", name);
@@ -616,7 +683,8 @@ apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name, char **va
 
 	*value = NULL;
 
-	if (r->args == NULL || strlen(r->args) == 0) return FALSE;
+	if (r->args == NULL || strlen(r->args) == 0)
+		return FALSE;
 
 	/* not sure why we do this, but better be safe than sorry */
 	args = apr_pstrndup(r->pool, r->args, strlen(r->args));
@@ -636,13 +704,19 @@ apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name, char **va
 /*
  * printout a JSON string value
  */
-static apr_byte_t oidc_util_json_string_print(request_rec *r, apr_json_value_t *result, const char *key, const char *log) {
-	apr_json_value_t *value = apr_hash_get(result->value.object, key, APR_HASH_KEY_STRING);
+static apr_byte_t oidc_util_json_string_print(request_rec *r,
+		apr_json_value_t *result, const char *key, const char *log) {
+	apr_json_value_t *value = apr_hash_get(result->value.object, key,
+			APR_HASH_KEY_STRING);
 	if (value != NULL) {
 		if (value->type == APR_JSON_STRING) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "%s: response contained a \"%s\" key with string value: \"%s\"", log, key, value->value.string.p);
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+					"%s: response contained a \"%s\" key with string value: \"%s\"",
+					log, key, value->value.string.p);
 		} else {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "%s: response contained an \"%s\" key but no string value", log, key);
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+					"%s: response contained an \"%s\" key but no string value",
+					log, key);
 		}
 		return TRUE;
 	}
@@ -652,9 +726,12 @@ static apr_byte_t oidc_util_json_string_print(request_rec *r, apr_json_value_t *
 /*
  * check a JSON object for "error" results and printout
  */
-static apr_byte_t oidc_util_check_json_error(request_rec *r, apr_json_value_t *json) {
-	if (oidc_util_json_string_print(r, json, "error", "oidc_util_check_json_error") == TRUE) {
-		oidc_util_json_string_print(r, json, "error_description", "oidc_util_check_json_error");
+static apr_byte_t oidc_util_check_json_error(request_rec *r,
+		apr_json_value_t *json) {
+	if (oidc_util_json_string_print(r, json, "error",
+			"oidc_util_check_json_error") == TRUE) {
+		oidc_util_json_string_print(r, json, "error_description",
+				"oidc_util_check_json_error");
 		return TRUE;
 	}
 	return FALSE;
@@ -663,23 +740,27 @@ static apr_byte_t oidc_util_check_json_error(request_rec *r, apr_json_value_t *j
 /*
  * decode a JSON string, check for "error" results and printout
  */
-apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r, const char *str, apr_json_value_t **json) {
+apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r,
+		const char *str, apr_json_value_t **json) {
 
 	/* decode the JSON contents of the buffer */
 	if (apr_json_decode(json, str, strlen(str), r->pool) != APR_SUCCESS) {
 		/* something went wrong */
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_check_json_error: JSON parsing returned an error");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_util_check_json_error: JSON parsing returned an error");
 		return FALSE;
 	}
 
-	if ( (*json == NULL) || ((*json)->type != APR_JSON_OBJECT) ) {
+	if ((*json == NULL) || ((*json)->type != APR_JSON_OBJECT)) {
 		/* oops, no JSON */
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_util_check_json_error: parsed JSON did not contain a JSON object");
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_util_check_json_error: parsed JSON did not contain a JSON object");
 		return FALSE;
 	}
 
 	// see if it is not an error response somehow
-	if (oidc_util_check_json_error(r, *json)) return FALSE;
+	if (oidc_util_check_json_error(r, *json))
+		return FALSE;
 
 	return TRUE;
 }
@@ -687,7 +768,8 @@ apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r, const char *str
 /*
  * sends HTML content to the user agent
  */
-int oidc_util_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
+int oidc_util_http_sendstring(request_rec *r, const char *html,
+		int success_rvalue) {
 
 	conn_rec *c = r->connection;
 	apr_bucket *b;

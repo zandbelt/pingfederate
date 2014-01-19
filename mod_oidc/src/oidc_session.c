@@ -72,48 +72,47 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
 // http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
 #define T_ESCAPE_URLENCODED    (64)
 
-static const unsigned char test_c_table[256] = {
-	32,126,126,126,126,126,126,126,126,126,127,126,126,126,126,126,126,126,126,126,
-	126,126,126,126,126,126,126,126,126,126,126,126,14,64,95,70,65,102,65,65,
-	73,73,1,64,72,0,0,74,0,0,0,0,0,0,0,0,0,0,104,79,
-	79,72,79,79,72,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-	0,0,0,0,0,0,0,0,0,0,0,79,95,79,71,0,71,0,0,0,
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-	0,0,0,79,103,79,65,126,118,118,118,118,118,118,118,118,118,118,118,118,
-	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
-	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
-	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
-	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
-	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,
-	118,118,118,118,118,118,118,118,118,118,118,118,118,118,118,118
-};
+static const unsigned char test_c_table[256] = { 32, 126, 126, 126, 126, 126,
+		126, 126, 126, 126, 127, 126, 126, 126, 126, 126, 126, 126, 126, 126,
+		126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 126, 14, 64, 95,
+		70, 65, 102, 65, 65, 73, 73, 1, 64, 72, 0, 0, 74, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 104, 79, 79, 72, 79, 79, 72, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 79, 95, 79, 71, 0, 71, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		0, 79, 103, 79, 65, 126, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118, 118,
+		118, 118, 118, 118, 118, 118, 118 };
 
 #define TEST_CHAR(c, f)        (test_c_table[(unsigned)(c)] & (f))
 
 static const char c2x_table[] = "0123456789abcdef";
 
 static APR_INLINE unsigned char *c2x(unsigned what, unsigned char prefix,
-                                     unsigned char *where)
-{
+		unsigned char *where) {
 #if APR_CHARSET_EBCDIC
-    what = apr_xlate_conv_byte(ap_hdrs_to_ascii, (unsigned char)what);
+	what = apr_xlate_conv_byte(ap_hdrs_to_ascii, (unsigned char)what);
 #endif /*APR_CHARSET_EBCDIC*/
-    *where++ = prefix;
-    *where++ = c2x_table[what >> 4];
-    *where++ = c2x_table[what & 0xf];
-    return where;
+	*where++ = prefix;
+	*where++ = c2x_table[what >> 4];
+	*where++ = c2x_table[what & 0xf];
+	return where;
 }
 
-static char x2c(const char *what)
-{
+static char x2c(const char *what) {
 	register char digit;
 
 #if !APR_CHARSET_EBCDIC
-	digit = ((what[0] >= 'A') ? ((what[0] & 0xdf) - 'A') + 10
-			: (what[0] - '0'));
+	digit =
+			((what[0] >= 'A') ? ((what[0] & 0xdf) - 'A') + 10 : (what[0] - '0'));
 	digit *= 16;
-	digit += (what[1] >= 'A' ? ((what[1] & 0xdf) - 'A') + 10
-			: (what[1] - '0'));
+	digit += (what[1] >= 'A' ? ((what[1] & 0xdf) - 'A') + 10 : (what[1] - '0'));
 #else /*APR_CHARSET_EBCDIC*/
 	char xstr[5];
 	xstr[0]='0';
@@ -128,28 +127,26 @@ static char x2c(const char *what)
 }
 
 AP_DECLARE(char *) ap_escape_urlencoded_buffer(char *copy, const char *buffer) {
-    const unsigned char *s = (const unsigned char *)buffer;
-    unsigned char *d = (unsigned char *)copy;
-    unsigned c;
+	const unsigned char *s = (const unsigned char *) buffer;
+	unsigned char *d = (unsigned char *) copy;
+	unsigned c;
 
-    while ((c = *s)) {
-        if (TEST_CHAR(c, T_ESCAPE_URLENCODED)) {
-            d = c2x(c, '%', d);
-        }
-        else if (c == ' ') {
-            *d++ = '+';
-        }
-        else {
-            *d++ = c;
-        }
-        ++s;
-    }
-    *d = '\0';
-    return copy;
+	while ((c = *s)) {
+		if (TEST_CHAR(c, T_ESCAPE_URLENCODED)) {
+			d = c2x(c, '%', d);
+		} else if (c == ' ') {
+			*d++ = '+';
+		} else {
+			*d++ = c;
+		}
+		++s;
+	}
+	*d = '\0';
+	return copy;
 }
 
-static int oidc_session_unescape_url(char *url, const char *forbid, const char *reserved)
-{
+static int oidc_session_unescape_url(char *url, const char *forbid,
+		const char *reserved) {
 	register int badesc, badpath;
 	char *x, *y;
 
@@ -164,13 +161,11 @@ static int oidc_session_unescape_url(char *url, const char *forbid, const char *
 	for (x = y; *y; ++x, ++y) {
 		if (*y != '%') {
 			*x = *y;
-		}
-		else {
+		} else {
 			if (!apr_isxdigit(*(y + 1)) || !apr_isxdigit(*(y + 2))) {
 				badesc = 1;
 				*x = '%';
-			}
-			else {
+			} else {
 				char decoded;
 				decoded = x2c(y + 1);
 				if ((decoded == '\0')
@@ -178,13 +173,11 @@ static int oidc_session_unescape_url(char *url, const char *forbid, const char *
 					badpath = 1;
 					*x = decoded;
 					y += 2;
-				}
-				else if (reserved && ap_strchr_c(reserved, decoded)) {
+				} else if (reserved && ap_strchr_c(reserved, decoded)) {
 					*x++ = *y++;
 					*x++ = *y++;
 					*x = *y;
-				}
-				else {
+				} else {
 					*x = decoded;
 					y += 2;
 				}
@@ -194,110 +187,113 @@ static int oidc_session_unescape_url(char *url, const char *forbid, const char *
 	*x = '\0';
 	if (badesc) {
 		return HTTP_BAD_REQUEST;
-	}
-	else if (badpath) {
+	} else if (badpath) {
 		return HTTP_NOT_FOUND;
-	}
-	else {
+	} else {
 		return OK;
 	}
 }
 
 AP_DECLARE(int) ap_unescape_urlencoded(char *query) {
-    char *slider;
-    /* replace plus with a space */
-    if (query) {
-        for (slider = query; *slider; slider++) {
-            if (*slider == '+') {
-                *slider = ' ';
-            }
-        }
-    }
-    /* unescape everything else */
-    return oidc_session_unescape_url(query, NULL, NULL);
+	char *slider;
+	/* replace plus with a space */
+	if (query) {
+		for (slider = query; *slider; slider++) {
+			if (*slider == '+') {
+				*slider = ' ';
+			}
+		}
+	}
+	/* unescape everything else */
+	return oidc_session_unescape_url(query, NULL, NULL);
 }
 
 // copied from mod_session.c
-static apr_status_t oidc_session_identity_decode(request_rec * r, session_rec * z) {
-	   char *last = NULL;
-	    char *encoded, *pair;
-	    const char *sep = "&";
+static apr_status_t oidc_session_identity_decode(request_rec * r,
+		session_rec * z) {
+	char *last = NULL;
+	char *encoded, *pair;
+	const char *sep = "&";
 
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_session_identity_decode: decoding %s", z->encoded);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_session_identity_decode: decoding %s", z->encoded);
 
-	    /* sanity check - anything to decode? */
-	    if (!z->encoded) {
-	        return APR_SUCCESS;
-	    }
+	/* sanity check - anything to decode? */
+	if (!z->encoded) {
+		return APR_SUCCESS;
+	}
 
-	    /* decode what we have */
-	    encoded = apr_pstrdup(r->pool, z->encoded);
-	    pair = apr_strtok(encoded, sep, &last);
-	    while (pair && pair[0]) {
-	        char *plast = NULL;
-	        const char *psep = "=";
-	        char *key = apr_strtok(pair, psep, &plast);
-	        char *val = apr_strtok(NULL, psep, &plast);
+	/* decode what we have */
+	encoded = apr_pstrdup(r->pool, z->encoded);
+	pair = apr_strtok(encoded, sep, &last);
+	while (pair && pair[0]) {
+		char *plast = NULL;
+		const char *psep = "=";
+		char *key = apr_strtok(pair, psep, &plast);
+		char *val = apr_strtok(NULL, psep, &plast);
 
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_session_identity_decode: decoding %s=%s", key, val);
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+				"oidc_session_identity_decode: decoding %s=%s", key, val);
 
-	        if (key && *key) {
-	            if (!val || !*val) {
-	                apr_table_unset(z->entries, key);
-	            }
-	            else if (!ap_unescape_urlencoded(key) && !ap_unescape_urlencoded(val)) {
-	                if (!strcmp(OIDC_SESSION_EXPIRY_KEY, key)) {
-	                    z->expiry = (apr_time_t) apr_atoi64(val);
-	                }
-	                else {
-	                    apr_table_set(z->entries, key, val);
-	                }
-	            }
-	        }
-	        pair = apr_strtok(NULL, sep, &last);
-	    }
-	    z->encoded = NULL;
-	    return APR_SUCCESS;
+		if (key && *key) {
+			if (!val || !*val) {
+				apr_table_unset(z->entries, key);
+			} else if (!ap_unescape_urlencoded(key)
+					&& !ap_unescape_urlencoded(val)) {
+				if (!strcmp(OIDC_SESSION_EXPIRY_KEY, key)) {
+					z->expiry = (apr_time_t) apr_atoi64(val);
+				} else {
+					apr_table_set(z->entries, key, val);
+				}
+			}
+		}
+		pair = apr_strtok(NULL, sep, &last);
+	}
+	z->encoded = NULL;
+	return APR_SUCCESS;
 }
 
 // copied from mod_session.c
 static int oidc_identity_count(int *count, const char *key, const char *val) {
-    *count += strlen(key) * 3 + strlen(val) * 3 + 1;
-    return 1;
+	*count += strlen(key) * 3 + strlen(val) * 3 + 1;
+	return 1;
 }
 
 // copied from mod_session.c
 static int oidc_identity_concat(char *buffer, const char *key, const char *val) {
-    char *slider = buffer;
-    int length = strlen(slider);
-    slider += length;
-    if (length) {
-        *slider = '&';
-        slider++;
-    }
-    ap_escape_urlencoded_buffer(slider, key);
-    slider += strlen(slider);
-    *slider = '=';
-    slider++;
-    ap_escape_urlencoded_buffer(slider, val);
-    return 1;
+	char *slider = buffer;
+	int length = strlen(slider);
+	slider += length;
+	if (length) {
+		*slider = '&';
+		slider++;
+	}
+	ap_escape_urlencoded_buffer(slider, key);
+	slider += strlen(slider);
+	*slider = '=';
+	slider++;
+	ap_escape_urlencoded_buffer(slider, val);
+	return 1;
 }
 
 // copied from mod_session.c
-static apr_status_t oidc_session_identity_encode(request_rec * r, session_rec * z) {
-    char *buffer = NULL;
-    int length = 0;
-    if (z->expiry) {
-        char *expiry = apr_psprintf(z->pool, "%" APR_INT64_T_FMT, z->expiry);
-        apr_table_setn(z->entries, OIDC_SESSION_EXPIRY_KEY, expiry);
-    }
-    apr_table_do((int (*) (void *, const char *, const char *))
-    		oidc_identity_count, &length, z->entries, NULL);
-    buffer = apr_pcalloc(r->pool, length + 1);
-    apr_table_do((int (*) (void *, const char *, const char *))
-    		oidc_identity_concat, buffer, z->entries, NULL);
-    z->encoded = buffer;
-    return APR_SUCCESS;
+static apr_status_t oidc_session_identity_encode(request_rec * r,
+		session_rec * z) {
+	char *buffer = NULL;
+	int length = 0;
+	if (z->expiry) {
+		char *expiry = apr_psprintf(z->pool, "%" APR_INT64_T_FMT, z->expiry);
+		apr_table_setn(z->entries, OIDC_SESSION_EXPIRY_KEY, expiry);
+	}
+	apr_table_do(
+			(int (*)(void *, const char *, const char *)) oidc_identity_count,
+			&length, z->entries, NULL);
+	buffer = apr_pcalloc(r->pool, length + 1);
+	apr_table_do(
+			(int (*)(void *, const char *, const char *)) oidc_identity_concat,
+			buffer, z->entries, NULL);
+	z->encoded = buffer;
+	return APR_SUCCESS;
 
 }
 
@@ -309,7 +305,8 @@ static apr_status_t oidc_session_load_cache(request_rec *r, session_rec *z) {
 	char *uuid = oidc_get_cookie(r, d->cookie);
 
 	/* get the string-encoded session from the cache based on the key */
-	if (uuid != NULL) return oidc_cache_get(r, uuid, &z->encoded);
+	if (uuid != NULL)
+		return oidc_cache_get(r, uuid, &z->encoded);
 
 	return APR_EGENERAL;
 }
@@ -322,7 +319,7 @@ static apr_status_t oidc_session_save_cache(request_rec *r, session_rec *z) {
 
 	/* convert the uuid to a string */
 	char key[APR_UUID_FORMATTED_LENGTH + 1];
-	apr_uuid_format((char *)&key, z->uuid);
+	apr_uuid_format((char *) &key, z->uuid);
 
 	/* set the uuid in the cookie */
 	oidc_set_cookie(r, d->cookie, key);
@@ -346,8 +343,9 @@ apr_status_t oidc_session_init() {
 apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 
 	/* first see if this is a sub-request and it was set already in the main request */
-	if (((*zz) = (session_rec *)oidc_request_state_get(r, "session")) != NULL) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_session_load: loading session from request state");
+	if (((*zz) = (session_rec *) oidc_request_state_get(r, "session")) != NULL) {
+		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+				"oidc_session_load: loading session from request state");
 		return APR_SUCCESS;
 	}
 
@@ -372,12 +370,13 @@ apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 		/* yup, now decode the info */
 		if ((rc = oidc_session_identity_decode(r, z)) == APR_SUCCESS)
 
-				/* and set the remote_user explicitly */
-				z->remote_user = apr_table_get(z->entries, OIDC_SESSION_REMOTE_USER_KEY);
+			/* and set the remote_user explicitly */
+			z->remote_user = apr_table_get(z->entries,
+					OIDC_SESSION_REMOTE_USER_KEY);
 	}
 
 	/* store this session in the request context, so it is available to sub-requests */
-	oidc_request_state_set(r, "session", (const char *)z);
+	oidc_request_state_set(r, "session", (const char *) z);
 
 	return rc;
 }
@@ -394,7 +393,7 @@ apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
 	oidc_session_identity_encode(r, z);
 
 	/* store this session in the request context, so it is available to sub-requests as a quicker-than-file-backend cache */
-	oidc_request_state_set(r, "session", (const char *)z);
+	oidc_request_state_set(r, "session", (const char *) z);
 
 	/* store the session in the cache */
 	return oidc_session_save_cache(r, z);
@@ -403,7 +402,8 @@ apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
 /*
  * get a value from the session based on the name from a name/value pair
  */
-apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value) {
+apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key,
+		const char **value) {
 
 	/* just return the value for the key */
 	*value = apr_table_get(z->entries, key);
@@ -414,7 +414,8 @@ apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, c
 /*
  * set a name/value key pair in the session
  */
-apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value) {
+apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key,
+		const char *value) {
 
 	/* only set it if non-NULL, otherwise delete the entry */
 	if (value) {
@@ -440,10 +441,10 @@ static apr_status_t (*ap_session_save_fn)(request_rec *r, session_rec *z) = NULL
 
 apr_status_t oidc_session_init() {
 	if (!ap_session_load_fn || !ap_session_get_fn || !ap_session_set_fn || !ap_session_save_fn) {
-	    ap_session_load_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_load);
-	    ap_session_get_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_get);
-	    ap_session_set_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_set);
-	    ap_session_save_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_save);
+		ap_session_load_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_load);
+		ap_session_get_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_get);
+		ap_session_set_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_set);
+		ap_session_save_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_save);
 	}
 	return OK;
 }

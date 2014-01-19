@@ -63,7 +63,8 @@
 /*
  * see if a the Require value matches with a set of provided claims
  */
-static apr_byte_t oidc_authz_match_claim(request_rec *r, const char *const attr_spec, const apr_json_value_t *const claims) {
+static apr_byte_t oidc_authz_match_claim(request_rec *r,
+		const char * const attr_spec, const apr_json_value_t * const claims) {
 
 	apr_hash_index_t *hi;
 	const void *key;
@@ -71,19 +72,19 @@ static apr_byte_t oidc_authz_match_claim(request_rec *r, const char *const attr_
 	void *hval;
 
 	/* if we don't have any claims, they can never match any Require claim primitive */
-	if (claims == NULL) return FALSE;
+	if (claims == NULL)
+		return FALSE;
 
 	/* loop over all of the user claims */
-	for (hi = apr_hash_first(r->pool, claims->value.object); hi; hi = apr_hash_next(hi)) {
-        apr_hash_this(hi, &key, &klen, &hval);
+	for (hi = apr_hash_first(r->pool, claims->value.object); hi; hi =
+			apr_hash_next(hi)) {
+		apr_hash_this(hi, &key, &klen, &hval);
 
-		const char *attr_c = (const char *)key;
+		const char *attr_c = (const char *) key;
 		const char *spec_c = attr_spec;
 
 		/* walk both strings until we get to the end of either or we find a differing character */
-		while ((*attr_c) &&
-		       (*spec_c) &&
-		       (*attr_c) == (*spec_c)) {
+		while ((*attr_c) && (*spec_c) && (*attr_c) == (*spec_c)) {
 			attr_c++;
 			spec_c++;
 		}
@@ -92,7 +93,7 @@ static apr_byte_t oidc_authz_match_claim(request_rec *r, const char *const attr_
 		if (!(*attr_c) && (*spec_c) == ':') {
 			const apr_json_value_t *val;
 
-			val = ((apr_json_value_t *)hval);
+			val = ((apr_json_value_t *) hval);
 
 			/* skip the colon */
 			spec_c++;
@@ -104,21 +105,23 @@ static apr_byte_t oidc_authz_match_claim(request_rec *r, const char *const attr_
 					return TRUE;
 				}
 
-			/* see if it is a boolean and it (case-insensitively) matches the Require'd value */
+				/* see if it is a boolean and it (case-insensitively) matches the Require'd value */
 			} else if (val->type == APR_JSON_BOOLEAN) {
 
-				if (apr_strnatcmp(val->value.boolean ? "true" : "false", spec_c) == 0) {
+				if (apr_strnatcmp(val->value.boolean ? "true" : "false", spec_c)
+						== 0) {
 					return TRUE;
 				}
 
-			/* if it is an array, we'll walk it */
+				/* if it is an array, we'll walk it */
 			} else if (val->type == APR_JSON_ARRAY) {
 
 				/* compare the claim values */
 				int i = 0;
 				for (i = 0; i < val->value.array->nelts; i++) {
 
-					apr_json_value_t *elem = APR_ARRAY_IDX(val->value.array, i, apr_json_value_t *);
+					apr_json_value_t *elem =
+							APR_ARRAY_IDX(val->value.array, i, apr_json_value_t *);
 
 					if (elem->type == APR_JSON_STRING) {
 						/*
@@ -130,21 +133,27 @@ static apr_byte_t oidc_authz_match_claim(request_rec *r, const char *const attr_
 							return TRUE;
 						}
 
-					} else if  (elem->type == APR_JSON_BOOLEAN) {
+					} else if (elem->type == APR_JSON_BOOLEAN) {
 
-						if (apr_strnatcmp(elem->value.boolean ? "true" : "false", spec_c) == 0) {
+						if (apr_strnatcmp(
+								elem->value.boolean ? "true" : "false", spec_c)
+								== 0) {
 							return TRUE;
 						}
 
 					} else {
 
-						ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_claim: unhandled in-array JSON object type [%d] for key \"%s\"", elem->type, (const char *)key);
+						ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+								"oidc_authz_match_claim: unhandled in-array JSON object type [%d] for key \"%s\"",
+								elem->type, (const char *) key);
 						continue;
 					}
 				}
 
 			} else {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_authz_match_claim: unhandled JSON object type [%d] for key \"%s\"", val->type, (const char *)key);
+				ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+						"oidc_authz_match_claim: unhandled JSON object type [%d] for key \"%s\"",
+						val->type, (const char *) key);
 				continue;
 			}
 
@@ -158,7 +167,8 @@ static apr_byte_t oidc_authz_match_claim(request_rec *r, const char *const attr_
 /*
  * Apache <2.4 authorizatio routine: match the claims from the authenticated user against the Require primitive
  */
-int oidc_authz_worker(request_rec *r, const apr_json_value_t *const claims, const require_line *const reqs, int nelts) {
+int oidc_authz_worker(request_rec *r, const apr_json_value_t * const claims,
+		const require_line * const reqs, int nelts) {
 	const int m = r->method_number;
 	const char *token;
 	const char *requirement;
@@ -204,15 +214,15 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const claims, cons
 			count_oauth_claims++;
 
 			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				     "oidc_authz_worker: evaluating claim specification: %s",
-				     token);
+					"oidc_authz_worker: evaluating claim specification: %s",
+					token);
 
 			if (oidc_authz_match_claim(r, token, claims) == TRUE) {
 
 				/* if *any* claim matches, then authorization has succeeded and all of the others are ignored */
 				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					      "oidc_authz_worker: require claim "
-					      "'%s' matched", token);
+						"oidc_authz_worker: require claim "
+						"'%s' matched", token);
 				return OK;
 			}
 		}
@@ -221,18 +231,19 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const claims, cons
 	/* if there weren't any "Require claim" directives, we're irrelevant */
 	if (!have_oauthattr) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			      "oidc_authz_worker: no claim statements found, not performing authz.");
+				"oidc_authz_worker: no claim statements found, not performing authz");
 		return DECLINED;
 	}
 	/* if there was a "Require claim", but no actual claims, that's cause to warn the admin of an iffy configuration */
 	if (count_oauth_claims == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-			      "oidc_authz_worker: 'require claim' missing specification(s) in configuration. Declining.");
+				"oidc_authz_worker: 'require claim' missing specification(s) in configuration, eclining");
 		return DECLINED;
 	}
 
 	/* log the event, also in Apache speak */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_authz_worker: authorization denied for client session");
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_authz_worker: authorization denied for client session");
 	ap_note_auth_failure(r);
 
 	return HTTP_UNAUTHORIZED;
@@ -240,7 +251,7 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t *const claims, cons
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 /*
- * Apache >=2.4 authorizatio routine: match the claims from the authenticated user against the Require primitive
+ * Apache >=2.4 authorization routine: match the claims from the authenticated user against the Require primitive
  */
 authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const claims, const char *require_args) {
 
@@ -276,7 +287,7 @@ authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const 
 	/* if there wasn't anything after the Require claims directive... */
 	if (count_oauth_claims == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_authz_worker24: 'require claim' missing specification(s) in configuration. Denying.");
+				"oidc_authz_worker24: 'require claim' missing specification(s) in configuration, denying");
 	}
 
 	return AUTHZ_DENIED;

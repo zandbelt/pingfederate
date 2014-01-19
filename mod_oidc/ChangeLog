@@ -1,8 +1,14 @@
-15/1/2014
+1/19/2014
+- fix registration-endpoint-does-not-exist-in-metadata logic null pointer core dump
+- fixes in debug/error printout, spelling, syntax etc.
+- apply eclipse code formatting and indentation
+
+1/15/2014
 - check for mandatory settings in the configuration
 - present user facing text in discovery errors
 - use proper (curl) url-encode/url-decode routines
 - re-organize metadata handling (incl. validation)
 - move stuff around to oidc_util.c, oidc_proto.c and some renaming
-9/1/2014
+
+1/9/2014
 - version 1.0
