@@ -1,5 +1,6 @@
 1/19/2014
 - fix registration-endpoint-does-not-exist-in-metadata logic null pointer core dump
+- Apache 2.4 fix in oidc_authz.c
 - fixes in debug/error printout, spelling, syntax etc.
 - apply eclipse code formatting and indentation
 
