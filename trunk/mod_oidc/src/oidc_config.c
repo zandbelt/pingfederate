@@ -93,15 +93,18 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
  * set a boolean value in the server config
  */
 const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
-    return ap_set_flag_slot(cmd, cfg, arg);
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	return ap_set_flag_slot(cmd, cfg, arg);
 }
 
 /*
  * set a string value in the server config
  */
-const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr,
+		const char *arg) {
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
@@ -109,7 +112,8 @@ const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *a
  * set an integer value in the server config
  */
 const char *oidc_set_int_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	return ap_set_int_slot(cmd, cfg, arg);
 }
 
@@ -117,16 +121,25 @@ const char *oidc_set_int_slot(cmd_parms *cmd, void *struct_ptr, const char *arg)
  * set a URL value in the server config
  */
 const char *oidc_set_url_slot(cmd_parms *cmd, void *ptr, const char *arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	apr_uri_t url;
 	if (apr_uri_parse(cmd->pool, arg, &url) != APR_SUCCESS) {
-		return apr_psprintf(cmd->pool, "oidc_set_url_slot: configuration value '%s' could not be parsed as a URL!", arg);
+		return apr_psprintf(cmd->pool,
+				"oidc_set_url_slot: configuration value '%s' could not be parsed as a URL!",
+				arg);
 	}
-	if ( (url.scheme == NULL) || ( (strcmp(url.scheme, "http") != 0) && (strcmp(url.scheme, "https") != 0) ) ) {
-		return apr_psprintf(cmd->pool, "oidc_set_url_slot: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (scheme != http/https)!", arg);
+	if ((url.scheme == NULL)
+			|| ((strcmp(url.scheme, "http") != 0)
+					&& (strcmp(url.scheme, "https") != 0))) {
+		return apr_psprintf(cmd->pool,
+				"oidc_set_url_slot: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (scheme != http/https)!",
+				arg);
 	}
 	if (url.hostname == NULL) {
-		return apr_psprintf(cmd->pool, "oidc_set_url_slot: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (no hostname set, check your slashes)!", arg);
+		return apr_psprintf(cmd->pool,
+				"oidc_set_url_slot: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (no hostname set, check your slashes)!",
+				arg);
 	}
 	return ap_set_string_slot(cmd, cfg, arg);
 }
@@ -136,7 +149,8 @@ const char *oidc_set_url_slot(cmd_parms *cmd, void *ptr, const char *arg) {
  */
 // TODO: it's not really a syntax error... (could be fixed at runtime but then we'd have to restart the server)
 const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 
 	char s_err[128];
 	apr_dir_t *dir;
@@ -144,12 +158,16 @@ const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
 
 	/* ensure the directory exists */
 	if ((rc = apr_dir_open(&dir, arg, cmd->pool)) != APR_SUCCESS) {
-		return apr_psprintf(cmd->pool, "oidc_set_dir_slot: could not access directory '%s' (%s)", arg,  apr_strerror(rc, s_err, sizeof(s_err)));
+		return apr_psprintf(cmd->pool,
+				"oidc_set_dir_slot: could not access directory '%s' (%s)", arg,
+				apr_strerror(rc, s_err, sizeof(s_err)));
 	}
 
 	/* and cleanup... */
 	if ((rc = apr_dir_close(dir)) != APR_SUCCESS) {
-		return apr_psprintf(cmd->pool, "oidc_set_dir_slot: could not close directory '%s' (%s)", arg,  apr_strerror(rc, s_err, sizeof(s_err)));
+		return apr_psprintf(cmd->pool,
+				"oidc_set_dir_slot: could not close directory '%s' (%s)", arg,
+				apr_strerror(rc, s_err, sizeof(s_err)));
 	}
 
 	return ap_set_string_slot(cmd, cfg, arg);
@@ -180,12 +198,13 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
 /*
  * set an authenication method for an endpoint and check it is one that we support
  */
-const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr,
+		const char *arg) {
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 
 	if ((apr_strnatcmp(arg, "client_secret_post") == 0)
-		||
-		(apr_strnatcmp(arg, "client_secret_basic") == 0) ) {
+			|| (apr_strnatcmp(arg, "client_secret_basic") == 0)) {
 
 		return ap_set_string_slot(cmd, cfg, arg);
 	}
@@ -218,11 +237,13 @@ char *oidc_get_cookie_path(request_rec *r) {
 		if (strncmp(d->cookie_path, requestPath, strlen(d->cookie_path)) == 0)
 			rv = d->cookie_path;
 		else {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_get_cookie_path: OIDCCookiePath (%s) not a substring of request path, using request path (%s) for cookie", d->cookie_path, requestPath);
+			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+					"oidc_get_cookie_path: OIDCCookiePath (%s) not a substring of request path, using request path (%s) for cookie",
+					d->cookie_path, requestPath);
 			rv = requestPath;
 		}
 	} else {
-			rv = requestPath;
+		rv = requestPath;
 	}
 	return (rv);
 }
@@ -243,7 +264,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.token_endpoint_url = NULL;
 	c->provider.token_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
 	c->provider.userinfo_endpoint_url = NULL;
-	c->provider.client_id  = NULL;
+	c->provider.client_id = NULL;
 	c->provider.client_secret = NULL;
 
 	c->provider.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
@@ -258,7 +279,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->oauth.validate_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
 
 	/* by default we'll use the OS specified /tmp dir for cache files */
-	apr_temp_dir_get((const char **)&c->cache_dir, pool);
+	apr_temp_dir_get((const char **) &c->cache_dir, pool);
 	c->metadata_dir = NULL;
 
 	c->http_timeout_long = OIDC_DEFAULT_HTTP_TIMEOUT_LONG;
@@ -284,40 +305,99 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 
 	c->merged = TRUE;
 
-	c->redirect_uri = add->redirect_uri != NULL ? add->redirect_uri : base->redirect_uri;
-	c->discover_url = add->discover_url != NULL ? add->discover_url : base->discover_url;
+	c->redirect_uri =
+			add->redirect_uri != NULL ? add->redirect_uri : base->redirect_uri;
+	c->discover_url =
+			add->discover_url != NULL ? add->discover_url : base->discover_url;
 
-	c->provider.issuer = add->provider.issuer != NULL ? add->provider.issuer : base->provider.issuer;
-	c->provider.authorization_endpoint_url = add->provider.authorization_endpoint_url != NULL ? add->provider.authorization_endpoint_url : base->provider.authorization_endpoint_url;
-	c->provider.token_endpoint_url = add->provider.token_endpoint_url != NULL ? add->provider.token_endpoint_url : base->provider.token_endpoint_url;
-	c->provider.token_endpoint_auth = add->provider.token_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ? add->provider.token_endpoint_auth : base->provider.token_endpoint_auth;
-	c->provider.userinfo_endpoint_url = add->provider.userinfo_endpoint_url != NULL ? add->provider.userinfo_endpoint_url : base->provider.userinfo_endpoint_url;
-	c->provider.client_id = add->provider.client_id != NULL ? add->provider.client_id : base->provider.client_id;
-	c->provider.client_secret = add->provider.client_secret != NULL ? add->provider.client_secret : base->provider.client_secret;
+	c->provider.issuer =
+			add->provider.issuer != NULL ?
+					add->provider.issuer : base->provider.issuer;
+	c->provider.authorization_endpoint_url =
+			add->provider.authorization_endpoint_url != NULL ?
+					add->provider.authorization_endpoint_url :
+					base->provider.authorization_endpoint_url;
+	c->provider.token_endpoint_url =
+			add->provider.token_endpoint_url != NULL ?
+					add->provider.token_endpoint_url :
+					base->provider.token_endpoint_url;
+	c->provider.token_endpoint_auth =
+			add->provider.token_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ?
+					add->provider.token_endpoint_auth :
+					base->provider.token_endpoint_auth;
+	c->provider.userinfo_endpoint_url =
+			add->provider.userinfo_endpoint_url != NULL ?
+					add->provider.userinfo_endpoint_url :
+					base->provider.userinfo_endpoint_url;
+	c->provider.client_id =
+			add->provider.client_id != NULL ?
+					add->provider.client_id : base->provider.client_id;
+	c->provider.client_secret =
+			add->provider.client_secret != NULL ?
+					add->provider.client_secret : base->provider.client_secret;
 
-	c->provider.ssl_validate_server = add->provider.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->provider.ssl_validate_server : base->provider.ssl_validate_server;
-	c->provider.client_name = add->provider.client_name != OIDC_DEFAULT_CLIENT_NAME ? add->provider.client_name : base->provider.client_name;
-	c->provider.client_contact = add->provider.client_contact != NULL ? add->provider.client_contact : base->provider.client_contact;
-	c->provider.scope = add->provider.scope != OIDC_DEFAULT_SCOPE ? add->provider.scope : base->provider.scope;
+	c->provider.ssl_validate_server =
+			add->provider.ssl_validate_server
+			!= OIDC_DEFAULT_SSL_VALIDATE_SERVER ?
+					add->provider.ssl_validate_server :
+					base->provider.ssl_validate_server;
+	c->provider.client_name =
+			add->provider.client_name != OIDC_DEFAULT_CLIENT_NAME ?
+					add->provider.client_name : base->provider.client_name;
+	c->provider.client_contact =
+			add->provider.client_contact != NULL ?
+					add->provider.client_contact :
+					base->provider.client_contact;
+	c->provider.scope =
+			add->provider.scope != OIDC_DEFAULT_SCOPE ?
+					add->provider.scope : base->provider.scope;
 
-	c->oauth.ssl_validate_server = add->oauth.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ? add->oauth.ssl_validate_server : base->oauth.ssl_validate_server;
-	c->oauth.client_id = add->oauth.client_id != NULL ? add->oauth.client_id : base->oauth.client_id;
-	c->oauth.client_secret = add->oauth.client_secret != NULL ? add->oauth.client_secret : base->oauth.client_secret;
-	c->oauth.validate_endpoint_url = add->oauth.validate_endpoint_url != NULL ? add->oauth.validate_endpoint_url : base->oauth.validate_endpoint_url;
-	c->oauth.validate_endpoint_auth = add->oauth.validate_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ? add->oauth.validate_endpoint_auth : base->oauth.validate_endpoint_auth;
+	c->oauth.ssl_validate_server =
+			add->oauth.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ?
+					add->oauth.ssl_validate_server :
+					base->oauth.ssl_validate_server;
+	c->oauth.client_id =
+			add->oauth.client_id != NULL ?
+					add->oauth.client_id : base->oauth.client_id;
+	c->oauth.client_secret =
+			add->oauth.client_secret != NULL ?
+					add->oauth.client_secret : base->oauth.client_secret;
+	c->oauth.validate_endpoint_url =
+			add->oauth.validate_endpoint_url != NULL ?
+					add->oauth.validate_endpoint_url :
+					base->oauth.validate_endpoint_url;
+	c->oauth.validate_endpoint_auth =
+			add->oauth.validate_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ?
+					add->oauth.validate_endpoint_auth :
+					base->oauth.validate_endpoint_auth;
 
-	c->http_timeout_long = add->http_timeout_long != OIDC_DEFAULT_HTTP_TIMEOUT_LONG ? add->http_timeout_long : base->http_timeout_long;
-	c->http_timeout_short = add->http_timeout_short != OIDC_DEFAULT_HTTP_TIMEOUT_SHORT ? add->http_timeout_short : base->http_timeout_short;
+	c->http_timeout_long =
+			add->http_timeout_long != OIDC_DEFAULT_HTTP_TIMEOUT_LONG ?
+					add->http_timeout_long : base->http_timeout_long;
+	c->http_timeout_short =
+			add->http_timeout_short != OIDC_DEFAULT_HTTP_TIMEOUT_SHORT ?
+					add->http_timeout_short : base->http_timeout_short;
 
 	c->cache_dir = add->cache_dir != NULL ? add->cache_dir : base->cache_dir;
-	c->metadata_dir = add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
+	c->metadata_dir =
+			add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
 
-	c->cookie_domain = add->cookie_domain != NULL ? add->cookie_domain : base->cookie_domain;
-	c->claim_delimiter = add->claim_delimiter != OIDC_DEFAULT_CLAIM_DELIMITER ? add->claim_delimiter : base->claim_delimiter;
-	c->claim_prefix = add->claim_prefix != OIDC_DEFAULT_CLAIM_PREFIX ? add->claim_prefix : base->claim_prefix;
-	c->crypto_passphrase = add->crypto_passphrase != NULL ? add->crypto_passphrase : base->crypto_passphrase;
+	c->cookie_domain =
+			add->cookie_domain != NULL ?
+					add->cookie_domain : base->cookie_domain;
+	c->claim_delimiter =
+			add->claim_delimiter != OIDC_DEFAULT_CLAIM_DELIMITER ?
+					add->claim_delimiter : base->claim_delimiter;
+	c->claim_prefix =
+			add->claim_prefix != OIDC_DEFAULT_CLAIM_PREFIX ?
+					add->claim_prefix : base->claim_prefix;
+	c->crypto_passphrase =
+			add->crypto_passphrase != NULL ?
+					add->crypto_passphrase : base->crypto_passphrase;
 
-	c->scrub_request_headers = add->scrub_request_headers != OIDC_DEFAULT_SCRUB_REQUEST_HEADERS ? add->scrub_request_headers : base->scrub_request_headers;
+	c->scrub_request_headers =
+			add->scrub_request_headers != OIDC_DEFAULT_SCRUB_REQUEST_HEADERS ?
+					add->scrub_request_headers : base->scrub_request_headers;
 
 	return c;
 }
@@ -330,7 +410,7 @@ void *oidc_create_dir_config(apr_pool_t *pool, char *path) {
 	c->cookie = OIDC_DEFAULT_COOKIE;
 	c->cookie_path = NULL;
 	c->authn_header = OIDC_DEFAULT_AUTHN_HEADER;
-	return(c);
+	return (c);
 }
 
 /*
@@ -355,8 +435,12 @@ void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD) {
  * report a config error
  */
 static int oidc_check_config_error(request_rec *r, const char *config_str) {
-	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_check_config_error: mandatory parameter \"%s\" is not set", config_str);
-	return oidc_util_http_sendstring(r, "mod_oidc configuration error: contact the administrator.", HTTP_INTERNAL_SERVER_ERROR);
+	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+			"oidc_check_config_error: mandatory parameter '%s' is not set",
+			config_str);
+	return oidc_util_http_sendstring(r,
+			"mod_oidc configuration error: contact the administrator.",
+			HTTP_INTERNAL_SERVER_ERROR);
 }
 
 /*
@@ -366,7 +450,7 @@ int oidc_check_config_oidc(request_rec *r, oidc_cfg *c) {
 
 	if ((c->metadata_dir == NULL) && (c->provider.issuer == NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_config_oidc: one of \"OIDCProviderIssuer\" or \"OIDCMetadataDir\" must be set");
+				"oidc_check_config_oidc: one of 'OIDCProviderIssuer' or 'OIDCMetadataDir' must be set");
 		return oidc_util_http_sendstring(r,
 				"mod_oidc configuration error: contact the administrator.",
 				HTTP_INTERNAL_SERVER_ERROR);
@@ -419,7 +503,8 @@ int oidc_check_config_oauth(request_rec *r, oidc_cfg *c) {
 static apr_thread_mutex_t **ssl_locks;
 static int ssl_num_locks;
 
-static void oidc_ssl_locking_callback(int mode, int type, const char *file, int line) {
+static void oidc_ssl_locking_callback(int mode, int type, const char *file,
+		int line) {
 	if (type < ssl_num_locks) {
 		if (mode & CRYPTO_LOCK)
 			apr_thread_mutex_lock(ssl_locks[type]);
@@ -433,8 +518,7 @@ static unsigned long oidc_ssl_id_callback(void) {
 	return (unsigned long) apr_os_thread_current();
 }
 #else
-static void oidc_ssl_id_callback(CRYPTO_THREADID *id)
-{
+static void oidc_ssl_id_callback(CRYPTO_THREADID *id) {
 	CRYPTO_THREADID_set_numeric(id, (unsigned long) apr_os_thread_current());
 }
 #endif /* OPENSSL_NO_THREADID */
@@ -461,12 +545,14 @@ apr_status_t oidc_cleanup(void *data) {
 /*
  * handler that is called (twice) after the configuration phase; check if everything is OK
  */
-int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_rec *s) {
+int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
+		server_rec *s) {
 	const char *userdata_key = "auth_oidc_init";
 	void *data = NULL;
 	int i;
 
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s, "oidc_post_config: called for (%pp)", s);
+	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s,
+			"oidc_post_config: called for (%pp)", s);
 
 	/* Since the post_config hook is invoked twice (once
 	 * for 'sanity checking' of the config and once for
@@ -475,18 +561,21 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 	 */
 	apr_pool_userdata_get(&data, userdata_key, s->process->pool);
 	if (data == NULL) {
-		apr_pool_userdata_set((const void *)1, userdata_key, apr_pool_cleanup_null, s->process->pool);
+		apr_pool_userdata_set((const void *) 1, userdata_key,
+				apr_pool_cleanup_null, s->process->pool);
 		return OK;
 	}
-		
+
 	curl_global_init(CURL_GLOBAL_ALL);
 
 #if (defined(OPENSSL_THREADS) && APR_HAS_THREADS)
 	ssl_num_locks = CRYPTO_num_locks();
-	ssl_locks = apr_pcalloc(s->process->pool, ssl_num_locks * sizeof(*ssl_locks));
+	ssl_locks =
+			apr_pcalloc(s->process->pool, ssl_num_locks * sizeof(*ssl_locks));
 
-	for(i = 0; i < ssl_num_locks; i++)
-		apr_thread_mutex_create(&(ssl_locks[i]), APR_THREAD_MUTEX_DEFAULT, s->process->pool);
+	for (i = 0; i < ssl_num_locks; i++)
+		apr_thread_mutex_create(&(ssl_locks[i]), APR_THREAD_MUTEX_DEFAULT,
+				s->process->pool);
 
 #ifdef OPENSSL_NO_THREADID
 	if (CRYPTO_get_locking_callback() == NULL && CRYPTO_get_id_callback() == NULL) {
@@ -494,7 +583,8 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 		CRYPTO_set_id_callback(oidc_ssl_id_callback);
 	}
 #else
-	if (CRYPTO_get_locking_callback() == NULL && CRYPTO_THREADID_get_callback() == NULL) {
+	if (CRYPTO_get_locking_callback() == NULL
+			&& CRYPTO_THREADID_get_callback() == NULL) {
 		CRYPTO_set_locking_callback(oidc_ssl_locking_callback);
 		CRYPTO_THREADID_set_callback(oidc_ssl_id_callback);
 	}
@@ -517,18 +607,17 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2, server_re
 	 *    These vhosts have a merged config.
 	 *    All merged configs need to be checked.
 	 */
-//	if (!merged_vhost_configs_exist(s)) {
-		/* nothing merged, only check the base vhost */
-//		return check_vhost_config(pool, s);
-//	}
-
+	//	if (!merged_vhost_configs_exist(s)) {
+	/* nothing merged, only check the base vhost */
+	//		return check_vhost_config(pool, s);
+	//	}
 	return OK;
 }
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 static const authz_provider authz_oidc_provider = {
-    &oidc_authz_checker,
-    NULL,
+		&oidc_authz_checker,
+		NULL,
 };
 #endif
 
@@ -536,7 +625,7 @@ static const authz_provider authz_oidc_provider = {
  * register our authentication and authorization functions
  */
 void oidc_register_hooks(apr_pool_t *pool) {
-	static const char *const authzSucc[] = { "mod_authz_user.c", NULL };
+	static const char * const authzSucc[] = { "mod_authz_user.c", NULL };
 	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 	ap_hook_check_authn(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_CONF);
