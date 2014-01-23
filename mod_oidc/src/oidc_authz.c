@@ -48,7 +48,7 @@
  *
  * mostly copied from mod_auth_cas
  *
- * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
+ * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
  */
 
 #include <http_core.h>

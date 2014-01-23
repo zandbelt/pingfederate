@@ -48,7 +48,7 @@
  *
  * based on http://saju.net.in/code/misc/openssl_aes.c.txt
  *
- * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
+ * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
  */
 
 #include <httpd.h>
