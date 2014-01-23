@@ -231,7 +231,6 @@ static char *oidc_get_path(request_rec *r) {
  */
 char *oidc_get_cookie_path(request_rec *r) {
 	char *rv = NULL, *requestPath = oidc_get_path(r);
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 	if (d->cookie_path != NULL) {
 		if (strncmp(d->cookie_path, requestPath, strlen(d->cookie_path)) == 0)
