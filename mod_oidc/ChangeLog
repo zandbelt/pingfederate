@@ -1,5 +1,6 @@
 1/23/2014
 - adhere to more strict JSON compliancy in what we send
+- be more liberal in accepting "iss" values ending with a trailing slash
 
 1/19/2014
 - fix registration-endpoint-does-not-exist-in-metadata logic null pointer core dump
