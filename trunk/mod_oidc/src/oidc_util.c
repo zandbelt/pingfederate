@@ -347,16 +347,17 @@ static int oidc_http_add_form_url_encoded_param(void* rec, const char* key,
 static int oidc_http_add_json_param(void* rec, const char* key,
 		const char* value) {
 	oidc_http_encode_t *ctx = (oidc_http_encode_t*) rec;
+	const char *sep = apr_strnatcmp(ctx->encoded_params, "") == 0 ? "" : ",";
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r,
 			"oidc_http_add_json_param: adding parameter: %s=%s to %s", key,
 			value, ctx->encoded_params);
 	if (value[0] == '[') {
 		// TODO hacky hacky, we need an array so we already encoded it :-)
-		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s\"%s\" : %s,\n",
-				ctx->encoded_params, key, value);
+		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s%s\"%s\" : %s",
+				ctx->encoded_params, sep, key, value);
 	} else {
-		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s\"%s\" : \"%s\",\n",
-				ctx->encoded_params, key, value);
+		ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s%s\"%s\": \"%s\"",
+				ctx->encoded_params, sep, key, value);
 	}
 	return 1;
 }
@@ -457,7 +458,7 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 			/* add the parameters in JSON formatting */
 			apr_table_do(oidc_http_add_json_param, &data, params, NULL);
 			/* surround it by brackets to make it a valid JSON object */
-			data.encoded_params = apr_psprintf(r->pool, "{\n%s\n}",
+			data.encoded_params = apr_psprintf(r->pool, "{ %s }",
 					data.encoded_params);
 
 			/* set the data and log the event */
