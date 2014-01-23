@@ -579,7 +579,6 @@ void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
  */
 char *oidc_get_cookie(request_rec *r, char *cookieName) {
 	char *cookie, *tokenizerCtx, *rv = NULL;
-	apr_byte_t cookieFound = FALSE;
 
 	/* get the Cookie value */
 	char *cookies = apr_pstrdup(r->pool,
@@ -597,7 +596,6 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
 
 			/* see if we've found the cookie that we're looking for */
 			if (strncmp(cookie, cookieName, strlen(cookieName)) == 0) {
-				cookieFound = TRUE;
 
 				/* skip to the meat of the parameter (the value after the '=') */
 				cookie += (strlen(cookieName) + 1);
