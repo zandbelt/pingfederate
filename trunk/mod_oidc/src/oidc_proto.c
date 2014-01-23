@@ -201,9 +201,9 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 			/* check if this is a multi-valued audience */
 		} else if (aud->type == APR_JSON_ARRAY) {
 
-			if (azp == NULL) {
+			if ((aud->value.array->nelts > 1) && (azp == NULL)) {
 				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-						"oidc_proto_is_valid_idtoken: \"aud\" is an array, but \"azp\" claim is not present (a SHOULD in the spec...)");
+						"oidc_proto_is_valid_idtoken: \"aud\" is an array with more than 1 element, but \"azp\" claim is not present (a SHOULD in the spec...)");
 			}
 
 			/* loop over the audience values */
@@ -261,7 +261,7 @@ static apr_byte_t oidc_proto_is_valid_idtoken_payload(request_rec *r,
 		apr_json_value_t **result, apr_time_t *expires) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_proto_is_valid_idtoken_payload: entering");
+			"oidc_proto_is_valid_idtoken_payload: entering (%s)", s_idtoken_payload);
 
 	/* decode the string in to a JSON structure */
 	if (apr_json_decode(result, s_idtoken_payload, strlen(s_idtoken_payload),

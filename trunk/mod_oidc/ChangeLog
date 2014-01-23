@@ -1,6 +1,8 @@
 1/23/2014
 - adhere to more strict JSON compliancy in what we send
 - be more liberal in accepting "iss" values ending with a trailing slash
+- debug printout of id_token payload on validating it
+- avoid complaining about aud/azp matching if there's only one value in the aud array
 
 1/19/2014
 - fix registration-endpoint-does-not-exist-in-metadata logic null pointer core dump
