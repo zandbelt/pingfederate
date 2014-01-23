@@ -55,7 +55,7 @@
  * session handling: Apache 2.4 mod_session.c
  * session handling backport: http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
  *
- * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
+ * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
  *
  **************************************************************************/
 

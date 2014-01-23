@@ -48,7 +48,7 @@
  *
  * mem_cache-like interface and semantics (string keys/values) using a file storage backend
  *
- * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
+ * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
  */
 
 #include <apr_hash.h>
