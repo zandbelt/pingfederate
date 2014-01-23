@@ -678,7 +678,7 @@ apr_byte_t oidc_util_request_has_parameter(request_rec *r, const char* param) {
 apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name,
 		char **value) {
 	// TODO: we should really check with ? and & and avoid any <bogus>code= stuff to trigger true
-	char *tokenizer_ctx, *p, *args, *rv = NULL;
+	char *tokenizer_ctx, *p, *args;
 	const char *k_param = apr_psprintf(r->pool, "%s=", name);
 	const size_t k_param_sz = strlen(k_param);
 

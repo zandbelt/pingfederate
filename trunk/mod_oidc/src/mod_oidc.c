@@ -909,7 +909,6 @@ authz_status oidc_authz_checker(request_rec *r, const char *require_args, const 
  * handles both OpenID Connect and OAuth 2.0 in the same way, based on the claims stored in the request context
  */
 int oidc_auth_checker(request_rec *r) {
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	/* get the set of claims from the request state (they've been set in the authentication part earlier) */
 	apr_json_value_t *attrs = (apr_json_value_t *) oidc_request_state_get(r,

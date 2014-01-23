@@ -372,8 +372,8 @@ static apr_byte_t oidc_proto_parse_idtoken(request_rec *r,
 	*user = apr_pstrdup(r->pool, username->value.string.p);
 
 	/* find the signature, no further checking yet */
-	s = ++p;
-	char *signature = apr_pstrdup(r->pool, s);
+	//s = ++p;
+	//char *signature = apr_pstrdup(r->pool, s);
 
 	/* log our results */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,

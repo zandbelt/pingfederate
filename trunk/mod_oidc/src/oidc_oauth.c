@@ -193,9 +193,6 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
 
 int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c) {
 
-	char *decoded_line;
-	int length;
-
 	/* first check the config required for the OAuth 2.0 RS role */
 	if (oidc_check_config_oauth(r, c) != OK)
 		return HTTP_INTERNAL_SERVER_ERROR;
@@ -227,7 +224,7 @@ int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c) {
 		return HTTP_UNAUTHORIZED;
 
 	/* validate the obtained access token against the OAuth AS validation endpoint */
-	apr_json_value_t *result, *token = NULL;
+	apr_json_value_t *token = NULL;
 	if (oidc_oauth_resolve_access_token(r, c, access_token, &token) == FALSE)
 		return HTTP_UNAUTHORIZED;
 
