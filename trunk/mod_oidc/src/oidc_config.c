@@ -321,7 +321,7 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 					add->provider.token_endpoint_url :
 					base->provider.token_endpoint_url;
 	c->provider.token_endpoint_auth =
-			add->provider.token_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ?
+			strcmp(add->provider.token_endpoint_auth, OIDC_DEFAULT_ENDPOINT_AUTH) != 0 ?
 					add->provider.token_endpoint_auth :
 					base->provider.token_endpoint_auth;
 	c->provider.userinfo_endpoint_url =
@@ -341,14 +341,14 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 					add->provider.ssl_validate_server :
 					base->provider.ssl_validate_server;
 	c->provider.client_name =
-			add->provider.client_name != OIDC_DEFAULT_CLIENT_NAME ?
+			strcmp(add->provider.client_name, OIDC_DEFAULT_CLIENT_NAME) != 0 ?
 					add->provider.client_name : base->provider.client_name;
 	c->provider.client_contact =
 			add->provider.client_contact != NULL ?
 					add->provider.client_contact :
 					base->provider.client_contact;
 	c->provider.scope =
-			add->provider.scope != OIDC_DEFAULT_SCOPE ?
+			strcmp(add->provider.scope, OIDC_DEFAULT_SCOPE) != 0 ?
 					add->provider.scope : base->provider.scope;
 
 	c->oauth.ssl_validate_server =
@@ -366,7 +366,7 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 					add->oauth.validate_endpoint_url :
 					base->oauth.validate_endpoint_url;
 	c->oauth.validate_endpoint_auth =
-			add->oauth.validate_endpoint_auth != OIDC_DEFAULT_ENDPOINT_AUTH ?
+			strcmp(add->oauth.validate_endpoint_auth, OIDC_DEFAULT_ENDPOINT_AUTH) != 0 ?
 					add->oauth.validate_endpoint_auth :
 					base->oauth.validate_endpoint_auth;
 
@@ -385,10 +385,10 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->cookie_domain != NULL ?
 					add->cookie_domain : base->cookie_domain;
 	c->claim_delimiter =
-			add->claim_delimiter != OIDC_DEFAULT_CLAIM_DELIMITER ?
+			strcmp(add->claim_delimiter, OIDC_DEFAULT_CLAIM_DELIMITER) != 0 ?
 					add->claim_delimiter : base->claim_delimiter;
 	c->claim_prefix =
-			add->claim_prefix != OIDC_DEFAULT_CLAIM_PREFIX ?
+			strcmp(add->claim_prefix, OIDC_DEFAULT_CLAIM_PREFIX) != 0 ?
 					add->claim_prefix : base->claim_prefix;
 	c->crypto_passphrase =
 			add->crypto_passphrase != NULL ?
@@ -624,12 +624,12 @@ static const authz_provider authz_oidc_provider = {
  * register our authentication and authorization functions
  */
 void oidc_register_hooks(apr_pool_t *pool) {
-	static const char * const authzSucc[] = { "mod_authz_user.c", NULL };
 	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 	ap_hook_check_authn(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_CONF);
 	ap_register_auth_provider(pool, AUTHZ_PROVIDER_GROUP, "attribute", "0", &authz_oidc_provider, AP_AUTH_INTERNAL_PER_CONF);
 #else
+	static const char * const authzSucc[] = { "mod_authz_user.c", NULL };
 	ap_hook_check_user_id(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE);
 	ap_hook_auth_checker(oidc_auth_checker, NULL, authzSucc, APR_HOOK_MIDDLE);
 #endif
