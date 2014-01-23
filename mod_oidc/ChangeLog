@@ -5,6 +5,7 @@
 - avoid complaining about aud/azp matching if there's only one value in the aud array
 - change author's e-mail address
 - remove some unused variables and silence compiler warnings
+- add autoconfigure/automake stuff
 
 1/19/2014
 - fix registration-endpoint-does-not-exist-in-metadata logic null pointer core dump
