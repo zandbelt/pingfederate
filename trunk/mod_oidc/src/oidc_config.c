@@ -120,28 +120,55 @@ const char *oidc_set_int_slot(cmd_parms *cmd, void *struct_ptr, const char *arg)
 /*
  * set a URL value in the server config
  */
-const char *oidc_set_url_slot(cmd_parms *cmd, void *ptr, const char *arg) {
+static const char *oidc_set_url_slot_type(cmd_parms *cmd, void *ptr, const char *arg, const char *type) {
 	oidc_cfg *cfg =
 			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
 	apr_uri_t url;
 	if (apr_uri_parse(cmd->pool, arg, &url) != APR_SUCCESS) {
 		return apr_psprintf(cmd->pool,
-				"oidc_set_url_slot: configuration value '%s' could not be parsed as a URL!",
+				"oidc_set_url_slot_type: configuration value '%s' could not be parsed as a URL!",
 				arg);
 	}
-	if ((url.scheme == NULL)
-			|| ((strcmp(url.scheme, "http") != 0)
-					&& (strcmp(url.scheme, "https") != 0))) {
+
+	if (url.scheme == NULL) {
 		return apr_psprintf(cmd->pool,
-				"oidc_set_url_slot: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (scheme != http/https)!",
+				"oidc_set_url_slot_type: configuration value '%s' could not be parsed as a URL (no scheme set)!",
 				arg);
 	}
+
+	if (type == NULL) {
+		if ((strcmp(url.scheme, "http") != 0)
+				&& (strcmp(url.scheme, "https") != 0)) {
+			return apr_psprintf(cmd->pool,
+					"oidc_set_url_slot_type: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (scheme != http/https)!",
+					arg);
+		}
+	} else if (strcmp(url.scheme, type) != 0) {
+		return apr_psprintf(cmd->pool,
+				"oidc_set_url_slot_type: configuration value '%s' could not be parsed as a \"%s\" URL (scheme == %s != \"%s\")!",
+				arg, type, url.scheme, type);
+	}
+
 	if (url.hostname == NULL) {
 		return apr_psprintf(cmd->pool,
-				"oidc_set_url_slot: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (no hostname set, check your slashes)!",
+				"oidc_set_url_slot_type: configuration value '%s' could not be parsed as a HTTP/HTTPs URL (no hostname set, check your slashes)!",
 				arg);
 	}
 	return ap_set_string_slot(cmd, cfg, arg);
+}
+
+/*
+ * set a HTTPS value in the server config
+ */
+const char *oidc_set_https_slot(cmd_parms *cmd, void *ptr, const char *arg) {
+	return oidc_set_url_slot_type(cmd, ptr, arg, "https");
+}
+
+/*
+ * set a HTTPS/HTTP value in the server config
+ */
+const char *oidc_set_url_slot(cmd_parms *cmd, void *ptr, const char *arg) {
+	return oidc_set_url_slot_type(cmd, ptr, arg, NULL);
 }
 
 /*

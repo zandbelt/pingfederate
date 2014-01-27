@@ -200,6 +200,7 @@ void oidc_register_hooks(apr_pool_t *pool);
 const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg);
 const char *oidc_set_int_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
+const char *oidc_set_https_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_url_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
