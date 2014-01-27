@@ -1,3 +1,6 @@
+1/27/2014
+- require TLS for AS/OP endpoints
+
 1/23/2014
 - adhere to more strict JSON compliancy in what we send
 - be more liberal in accepting "iss" values ending with a trailing slash
