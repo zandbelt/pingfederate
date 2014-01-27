@@ -364,17 +364,6 @@ static int oidc_http_add_json_param(void* rec, const char* key,
 
 /*
  * execute a HTTP (GET or POST) request
- *
- * TODO: solve a spurious SSL error against PingFederate 7.1.0-R2, multi-process/threading issue?
- *
- *       oidc_util_http_call: curl_easy_perform() failed (Unknown SSL protocol error in connection to <authorization-host> )
- *
- *       happens on Ubuntu 12.04 and 13.10 but not on Mac OS X macports (although it could still be a timing/server issue)
- *       all environments non-threaded, but pre-fork MPM
- *
- *       OK: Mac OS X 10.9.1, MacPorts 2.2.0, Apache 2.2.25, OpenSSL 1.0.1e, Curl 7.32.0
- *       ERR: Ubuntu 13.10: Apache 2.4.6,  OpenSSL 1.0.1e, Curl 7.32.0
- *       ERR: Ubuntu 12.04: Apache 2.2.22, OpenSSL 1.0.1,  Curl 7.22.0
  */
 apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 		const apr_table_t *params, const char *basic_auth,

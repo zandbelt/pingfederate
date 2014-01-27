@@ -80,7 +80,6 @@
 // TODO: check the Apache 2.4 compilation/#defines
 // TODO: require SSL
 // TODO: user documentation (at least of configuration primitives)
-// TODO: fix the http_call SSL error on Ubuntu?
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
