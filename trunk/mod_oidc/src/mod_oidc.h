@@ -208,9 +208,6 @@ const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg);
 
 char *oidc_get_cookie_path(request_rec *r);
 
-int oidc_check_config_oidc(request_rec *r, oidc_cfg *c);
-int oidc_check_config_oauth(request_rec *r, oidc_cfg *c);
-
 // oidc_util.c
 int oidc_strnenvcmp(const char *a, const char *b, int len);
 int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding);
