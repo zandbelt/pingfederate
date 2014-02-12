@@ -460,45 +460,41 @@ void *oidc_merge_dir_config(apr_pool_t *pool, void *BASE, void *ADD) {
 /*
  * report a config error
  */
-static int oidc_check_config_error(request_rec *r, const char *config_str) {
-	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+static int oidc_check_config_error(server_rec *s, const char *config_str) {
+	ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
 			"oidc_check_config_error: mandatory parameter '%s' is not set",
 			config_str);
-	return oidc_util_http_sendstring(r,
-			"mod_oidc configuration error: contact the administrator.",
-			HTTP_INTERNAL_SERVER_ERROR);
+	return HTTP_INTERNAL_SERVER_ERROR;
 }
 
 /*
  * check the config required for the OpenID Connect RP role
  */
-int oidc_check_config_oidc(request_rec *r, oidc_cfg *c) {
+static int oidc_check_config_oidc(server_rec *s, oidc_cfg *c) {
 
 	if ((c->metadata_dir == NULL) && (c->provider.issuer == NULL)) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
 				"oidc_check_config_oidc: one of 'OIDCProviderIssuer' or 'OIDCMetadataDir' must be set");
-		return oidc_util_http_sendstring(r,
-				"mod_oidc configuration error: contact the administrator.",
-				HTTP_INTERNAL_SERVER_ERROR);
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	if (c->redirect_uri == NULL)
-		return oidc_check_config_error(r, "OIDCRedirectURI");
+		return oidc_check_config_error(s, "OIDCRedirectURI");
 	if (c->crypto_passphrase == NULL)
-		return oidc_check_config_error(r, "OIDCCryptoPassphrase");
+		return oidc_check_config_error(s, "OIDCCryptoPassphrase");
 
 	if (c->metadata_dir == NULL) {
 		if (c->provider.issuer == NULL)
-			return oidc_check_config_error(r, "OIDCProviderIssuer");
+			return oidc_check_config_error(s, "OIDCProviderIssuer");
 		if (c->provider.authorization_endpoint_url == NULL)
-			return oidc_check_config_error(r,
+			return oidc_check_config_error(s,
 					"OIDCProviderAuthorizationEndpoint");
 		if (c->provider.token_endpoint_url == NULL)
-			return oidc_check_config_error(r, "OIDCProviderTokenEndpoint");
+			return oidc_check_config_error(s, "OIDCProviderTokenEndpoint");
 		if (c->provider.client_id == NULL)
-			return oidc_check_config_error(r, "OIDCClientID");
+			return oidc_check_config_error(s, "OIDCClientID");
 		if (c->provider.client_secret == NULL)
-			return oidc_check_config_error(r, "OIDCClientSecret");
+			return oidc_check_config_error(s, "OIDCClientSecret");
 	}
 
 	return OK;
@@ -507,18 +503,67 @@ int oidc_check_config_oidc(request_rec *r, oidc_cfg *c) {
 /*
  * check the config required for the OAuth 2.0 RS role
  */
-int oidc_check_config_oauth(request_rec *r, oidc_cfg *c) {
+static int oidc_check_config_oauth(server_rec *s, oidc_cfg *c) {
 
-	if (c->provider.client_id == NULL)
-		return oidc_check_config_error(r, "OIDCOAuthClientID");
+	if (c->oauth.client_id == NULL)
+		return oidc_check_config_error(s, "OIDCOAuthClientID");
 
-	if (c->provider.client_secret == NULL)
-		return oidc_check_config_error(r, "OIDCOAuthClientSecret");
+	if (c->oauth.client_secret == NULL)
+		return oidc_check_config_error(s, "OIDCOAuthClientSecret");
 
-	if (c->provider.token_endpoint_url == NULL)
-		return oidc_check_config_error(r, "OIDCOAuthEndpoint");
+	if (c->oauth.validate_endpoint_url == NULL)
+		return oidc_check_config_error(s, "OIDCOAuthEndpoint");
 
 	return OK;
+}
+
+/*
+ * check the config of a vhost
+ */
+static int oidc_config_check_vhost_config(apr_pool_t *pool, server_rec *s) {
+	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
+
+	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s, "oidc_config_check_vhost_config: entering");
+
+	if ( (cfg->metadata_dir != NULL) || (cfg->provider.issuer == NULL) || (cfg->redirect_uri != NULL) || (cfg->crypto_passphrase != NULL) ) {
+		if (oidc_check_config_oidc(s, cfg) != OK) return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	if ( (cfg->oauth.client_id != NULL) || (cfg->oauth.client_secret != NULL) || (cfg->oauth.validate_endpoint_url != NULL) ) {
+		if (oidc_check_config_oauth(s, cfg) != OK) return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	return OK;
+}
+
+/*
+ * check the config of a merged vhost
+ */
+static int oidc_config_check_merged_vhost_configs(apr_pool_t *pool, server_rec *s) {
+	int status = OK;
+	while (s != NULL && status == OK) {
+		oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
+		if (cfg->merged) {
+			status = oidc_config_check_vhost_config(pool, s);
+		}
+		s = s->next;
+	}
+	return status;
+}
+
+
+/*
+ * check if any merged vhost configs exist
+ */
+static int oidc_config_merged_vhost_configs_exist(server_rec *s) {
+	while (s != NULL) {
+		oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
+		if (cfg->merged) {
+			return TRUE;
+		}
+		s = s->next;
+	}
+	return FALSE;
 }
 
 /*
@@ -633,11 +678,11 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
 	 *    These vhosts have a merged config.
 	 *    All merged configs need to be checked.
 	 */
-	//	if (!merged_vhost_configs_exist(s)) {
-	/* nothing merged, only check the base vhost */
-	//		return check_vhost_config(pool, s);
-	//	}
-	return OK;
+	if (!oidc_config_merged_vhost_configs_exist(s)) {
+		/* nothing merged, only check the base vhost */
+		return oidc_config_check_vhost_config(pool, s);
+	}
+	return oidc_config_check_merged_vhost_configs(pool, s);
 }
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714

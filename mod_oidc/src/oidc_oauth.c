@@ -193,10 +193,6 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
 
 int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c) {
 
-	/* first check the config required for the OAuth 2.0 RS role */
-	if (oidc_check_config_oauth(r, c) != OK)
-		return HTTP_INTERNAL_SERVER_ERROR;
-
 	/* check if this is a sub-request or an initial request */
 	if (!ap_is_initial_req(r)) {
 

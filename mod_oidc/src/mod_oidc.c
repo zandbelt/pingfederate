@@ -77,6 +77,7 @@
 
 #include "mod_oidc.h"
 
+// TODO: add configurable non-session/non-cache zero-state mode
 // TODO: check the Apache 2.4 compilation/#defines
 // TODO: user documentation (at least of configuration primitives)
 
@@ -796,10 +797,6 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
  */
 static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 
-	/* first check the config required for the OpenID Connect RP role */
-	if (oidc_check_config_oidc(r, c) != OK)
-		return HTTP_INTERNAL_SERVER_ERROR;
-
 	/* check if this is a sub-request or an initial request */
 	if (ap_is_initial_req(r)) {
 
@@ -945,12 +942,12 @@ const command_rec oidc_config_cmds[] =
 		AP_INIT_TAKE1("OIDCClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.client_id), RSRC_CONF, "Client identifier used in calls to OpenID Connect OP."),
 		AP_INIT_TAKE1("OIDCClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.client_secret), RSRC_CONF, "Client secret used in calls to OpenID Connect OP."),
 
-		AP_INIT_TAKE1("OIDCRedirectURI", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, redirect_uri), RSRC_CONF, "Define the Redirect URI (e.g.: https://localhost:9031/protected/return/uri"),
+		AP_INIT_TAKE1("OIDCRedirectURI", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, redirect_uri), RSRC_CONF, "Define the Redirect URI (e.g.: https://localhost:9031/protected/example/)"),
 		AP_INIT_TAKE1("OIDCDiscoverURL", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, discover_url), RSRC_CONF, "Defines an external IDP Discovery page"),
 		AP_INIT_TAKE1("OIDCCookieDomain", oidc_set_cookie_domain, NULL, RSRC_CONF, "Specify domain element for OIDC session cookie."),
 		AP_INIT_TAKE1("OIDCCryptoPassphrase", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase), RSRC_CONF, "Passphrase used for AES crypto on cookies and state."),
 		AP_INIT_TAKE1("OIDCClaimDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued claims in the HTTP headers."),
-		AP_INIT_TAKE1("OIDCClaimPrefix ", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_prefix), RSRC_CONF, "The prefix to use when setting claims in the HTTP headers."),
+		AP_INIT_TAKE1("OIDCClaimPrefix", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_prefix), RSRC_CONF, "The prefix to use when setting claims in the HTTP headers."),
 
 		AP_INIT_TAKE1("OIDCOAuthClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.client_id), RSRC_CONF, "Client identifier used in calls to OAuth 2.0 Authorization server validation calls."),
 		AP_INIT_TAKE1("OIDCOAuthClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.client_secret), RSRC_CONF, "Client secret used in calls to OAuth 2.0 Authorization server validation calls."),

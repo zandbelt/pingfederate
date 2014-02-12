@@ -1,3 +1,7 @@
+2/12/2014
+- minor correction in documentation on config primitives
+- move config checks from request handler to post_config hook (and fix oauth config check at the same time)
+
 1/27/2014
 - require TLS for AS/OP endpoints
 
