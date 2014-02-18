@@ -80,6 +80,11 @@
 /* parameter name of an account name in the discovery response */
 #define OIDC_DISC_ACCT_PARAM "oidc_acct"
 
+/* value that indicates to use cache-file based session tracking */
+#define OIDC_SESSION_TYPE_22_CACHE_FILE 0
+/* value that indicates to use cookie based session tracking */
+#define OIDC_SESSION_TYPE_22_COOKIE 1
+
 /* name of the cookie that binds the state in the authorization request/response to the browser */
 #define OIDCStateCookieName  "oidc-state"
 /* separator used to distinghuish different values in the state cookie */
@@ -138,6 +143,8 @@ typedef struct oidc_cfg {
 	char *cache_dir;
 	/* directory that holds the provider & client metadata files */
 	char *metadata_dir;
+	/* type of session management/storage */
+	int session_type;
 
 	/* tell the module to strip any mod_oidc related headers that already have been set by the user-agent, normally required for secure operation */
 	int scrub_request_headers;
@@ -205,6 +212,7 @@ const char *oidc_set_url_slot(cmd_parms *cmd, void *struct_ptr, const char *arg)
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
 const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg);
+const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg);
 
 char *oidc_get_cookie_path(request_rec *r);
 
