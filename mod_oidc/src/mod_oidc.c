@@ -959,7 +959,7 @@ const command_rec oidc_config_cmds[] =
 
 		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, cache_dir), RSRC_CONF, "Directory used for file-based caching."),
 		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains provider and client metadata files."),
-		AP_INIT_TAKE1("OIDCSessionType", oidc_set_session_type, (void*)APR_OFFSETOF(oidc_cfg, session_type), RSRC_CONF, "OpenID Connect session storage type (Apache 2.0/2.2 only)."),
+		AP_INIT_TAKE1("OIDCSessionType", oidc_set_session_type, (void*)APR_OFFSETOF(oidc_cfg, session_type), RSRC_CONF, "OpenID Connect session storage type (Apache 2.0/2.2 only). Must be one of \"file\" or \"cookie\"."),
 		AP_INIT_FLAG("OIDCScrubRequestHeaders", oidc_set_flag_slot, (void *) APR_OFFSETOF(oidc_cfg, scrub_request_headers), RSRC_CONF, "Scrub user name and claim headers from the user's request."),
 
 		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, authn_header), ACCESS_CONF|OR_AUTHCFG, "Specify the HTTP header variable to set with the name of the authenticated user. By default no headers are added."),
