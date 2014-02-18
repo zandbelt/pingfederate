@@ -97,3 +97,6 @@
 
 *OIDCCookie*
  Define the cookie name for the session cookie.
+
+*OIDCSessionType*
+ OpenID Connect session storage type (Apache 2.0/2.2 only). Must be one of \"file\" or \"cookie\".
