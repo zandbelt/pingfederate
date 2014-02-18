@@ -86,6 +86,8 @@
 #define OIDC_DEFAULT_HTTP_TIMEOUT_LONG  60
 /* timeouts for HTTP calls that should take a short time (registry/discovery related) */
 #define OIDC_DEFAULT_HTTP_TIMEOUT_SHORT  5
+/* default session storage type */
+#define OIDC_DEFAULT_SESSION_TYPE OIDC_SESSION_TYPE_22_CACHE_FILE
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -223,6 +225,26 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
 }
 
 /*
+ * set the session storage type
+ */
+const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg) {
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+
+	if (strcmp(arg, "file") == 0) {
+		cfg->session_type = OIDC_SESSION_TYPE_22_CACHE_FILE;
+	} else if (strcmp(arg, "cookie") == 0) {
+		cfg->session_type = OIDC_SESSION_TYPE_22_COOKIE;
+	} else {
+		return (apr_psprintf(cmd->pool,
+				"oidc_set_session_type: invalid value for OIDCSessionType (%s); must be one of \"file\" or \"cookie\"",
+				arg));
+	}
+
+	return NULL;
+}
+
+/*
  * set an authenication method for an endpoint and check it is one that we support
  */
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr,
@@ -307,6 +329,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	/* by default we'll use the OS specified /tmp dir for cache files */
 	apr_temp_dir_get((const char **) &c->cache_dir, pool);
 	c->metadata_dir = NULL;
+	c->session_type = OIDC_DEFAULT_SESSION_TYPE;
 
 	c->http_timeout_long = OIDC_DEFAULT_HTTP_TIMEOUT_LONG;
 	c->http_timeout_short = OIDC_DEFAULT_HTTP_TIMEOUT_SHORT;
@@ -407,6 +430,9 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->cache_dir = add->cache_dir != NULL ? add->cache_dir : base->cache_dir;
 	c->metadata_dir =
 			add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
+	c->session_type =
+			add->session_type != OIDC_DEFAULT_SESSION_TYPE ?
+					add->session_type : base->session_type;
 
 	c->cookie_domain =
 			add->cookie_domain != NULL ?

@@ -1,3 +1,6 @@
+2/18/2014
+- add configurable cookie-only-based (zero server state) session mode
+
 2/12/2014
 - minor correction in documentation on config primitives
 - move config checks from request handler to post_config hook (and fix oauth config check at the same time)

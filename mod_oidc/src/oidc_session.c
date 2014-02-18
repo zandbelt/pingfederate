@@ -59,14 +59,38 @@
 
 #include "mod_oidc.h"
 
-#ifndef OIDC_SESSION_USE_APACHE_SESSIONS
-
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
 /* the name of the remote-user attribute in the session  */
 #define OIDC_SESSION_REMOTE_USER_KEY "remote-user"
 /* the name of the session expiry attribute in the session */
 #define OIDC_SESSION_EXPIRY_KEY      "oidc-expiry"
+
+static apr_status_t (*ap_session_load_fn)(request_rec *r, session_rec **z) = NULL;
+static apr_status_t (*ap_session_get_fn)(request_rec *r, session_rec *z, const char *key, const char **value) = NULL;
+static apr_status_t (*ap_session_set_fn)(request_rec *r, session_rec *z, const char *key, const char *value) = NULL;
+static apr_status_t (*ap_session_save_fn)(request_rec *r, session_rec *z) = NULL;
+
+apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
+	apr_status_t rc = ap_session_load_fn(r, zz);
+	(*zz)->remote_user = apr_table_get((*zz)->entries, OIDC_SESSION_REMOTE_USER_KEY);
+	return rc;
+}
+
+apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
+	oidc_session_set(r, z, OIDC_SESSION_REMOTE_USER_KEY, z->remote_user);
+	return ap_session_save_fn(r, z);
+}
+
+apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value) {
+	return ap_session_get_fn(r, z, key, value);
+}
+
+apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value) {
+	return ap_session_set_fn(r, z, key, value);
+}
+
+#ifndef OIDC_SESSION_USE_APACHE_SESSIONS
 
 // compatibility stuff copied from:
 // http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
@@ -330,17 +354,31 @@ static apr_status_t oidc_session_save_cache(request_rec *r, session_rec *z) {
 	return APR_SUCCESS;
 }
 
-/*
- * session initialization, nothing needed for this pre-2.4 part
- */
-apr_status_t oidc_session_init() {
+static apr_status_t oidc_session_load_cookie(request_rec *r, session_rec *z) {
+	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
+
+	char *cookieValue = oidc_get_cookie(r, d->cookie);
+	oidc_base64url_decode_decrypt_string(r, (char **)&z->encoded, cookieValue);
+
+	return APR_SUCCESS;
+}
+
+static apr_status_t oidc_session_save_cookie(request_rec *r, session_rec *z) {
+	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
+
+	char *cookieValue = NULL;
+	oidc_encrypt_base64url_encode_string(r, &cookieValue, z->encoded);
+	oidc_set_cookie(r, d->cookie, cookieValue);
+
 	return APR_SUCCESS;
 }
 
 /*
  * load the session from the request context, create a new one if no luck
  */
-apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
+static apr_status_t oidc_session_load_22(request_rec *r, session_rec **zz) {
+
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	/* first see if this is a sub-request and it was set already in the main request */
 	if (((*zz) = (session_rec *) oidc_request_state_get(r, "session")) != NULL) {
@@ -361,33 +399,49 @@ apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 	z->encoded = NULL;
 	z->entries = apr_table_make(z->pool, 10);
 
-	/* load the session from the cache */
-	apr_status_t rc = oidc_session_load_cache(r, z);
+	apr_status_t rc = APR_SUCCESS;
+	if (c->session_type == OIDC_SESSION_TYPE_22_CACHE_FILE) {
+		/* load the session from the cache */
+		rc = oidc_session_load_cache(r, z);
+	} else if (c->session_type == OIDC_SESSION_TYPE_22_COOKIE) {
+		/* load the session from a self-contained cookie */
+		rc = oidc_session_load_cookie(r, z);
+	} else {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_session_load_22: unknown session type: %d",
+				c->session_type);
+		rc = APR_EGENERAL;
+	}
 
 	/* see if it worked out */
-	if (rc == APR_SUCCESS) {
+	if (rc != APR_SUCCESS)
+		return rc;
 
-		/* yup, now decode the info */
-		if ((rc = oidc_session_identity_decode(r, z)) == APR_SUCCESS)
+	/* yup, now decode the info */
+	if (oidc_session_identity_decode(r, z) != APR_SUCCESS)
+		return APR_EGENERAL;
 
-			/* and set the remote_user explicitly */
-			z->remote_user = apr_table_get(z->entries,
-					OIDC_SESSION_REMOTE_USER_KEY);
+	/* check whether it has expired */
+	if (apr_time_now() > z->expiry) {
+
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+				"oidc_session_load_22: session restored from cache has expired");
+		apr_table_clear(z->entries);
+		return APR_EGENERAL;
 	}
 
 	/* store this session in the request context, so it is available to sub-requests */
 	oidc_request_state_set(r, "session", (const char *) z);
 
-	return rc;
+	return APR_SUCCESS;
 }
 
 /*
  * save a session to the cache
  */
-apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
+static apr_status_t oidc_session_save_22(request_rec *r, session_rec *z) {
 
-	/* first set the remote_user key */
-	apr_table_set(z->entries, OIDC_SESSION_REMOTE_USER_KEY, z->remote_user);
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 
 	/* encode the actual state in to the encoded string */
 	oidc_session_identity_encode(r, z);
@@ -395,14 +449,26 @@ apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
 	/* store this session in the request context, so it is available to sub-requests as a quicker-than-file-backend cache */
 	oidc_request_state_set(r, "session", (const char *) z);
 
-	/* store the session in the cache */
-	return oidc_session_save_cache(r, z);
+	apr_status_t rc = APR_SUCCESS;
+	if (c->session_type == OIDC_SESSION_TYPE_22_CACHE_FILE) {
+		/* store the session in the cache */
+		rc = oidc_session_save_cache(r, z);
+	} else if (c->session_type == OIDC_SESSION_TYPE_22_COOKIE) {
+		/* store the session in a self-contained cookie */
+		rc = oidc_session_save_cookie(r, z);
+	} else {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_session_save_22: unknown session type: %d", c->session_type);
+		rc = APR_EGENERAL;
+	}
+
+	return rc;
 }
 
 /*
  * get a value from the session based on the name from a name/value pair
  */
-apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key,
+static apr_status_t oidc_session_get_22(request_rec *r, session_rec *z, const char *key,
 		const char **value) {
 
 	/* just return the value for the key */
@@ -414,7 +480,7 @@ apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key,
 /*
  * set a name/value key pair in the session
  */
-apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key,
+static apr_status_t oidc_session_set_22(request_rec *r, session_rec *z, const char *key,
 		const char *value) {
 
 	/* only set it if non-NULL, otherwise delete the entry */
@@ -422,6 +488,19 @@ apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key,
 		apr_table_set(z->entries, key, value);
 	} else {
 		apr_table_unset(z->entries, key);
+	}
+	return OK;
+}
+
+/*
+ * session initialization for pre-2.4
+ */
+apr_status_t oidc_session_init() {
+	if (!ap_session_load_fn || !ap_session_get_fn || !ap_session_set_fn || !ap_session_save_fn) {
+		ap_session_load_fn = oidc_session_load_22;
+		ap_session_get_fn = oidc_session_get_22;
+		ap_session_set_fn = oidc_session_set_22;
+		ap_session_save_fn = oidc_session_save_22;
 	}
 	return OK;
 }
@@ -434,11 +513,6 @@ apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key,
 
 #include <apr_optional.h>
 
-static apr_status_t (*ap_session_load_fn)(request_rec *r, session_rec **z) = NULL;
-static apr_status_t (*ap_session_get_fn)(request_rec *r, session_rec *z, const char *key, const char **value) = NULL;
-static apr_status_t (*ap_session_set_fn)(request_rec *r, session_rec *z, const char *key, const char *value) = NULL;
-static apr_status_t (*ap_session_save_fn)(request_rec *r, session_rec *z) = NULL;
-
 apr_status_t oidc_session_init() {
 	if (!ap_session_load_fn || !ap_session_get_fn || !ap_session_set_fn || !ap_session_save_fn) {
 		ap_session_load_fn = APR_RETRIEVE_OPTIONAL_FN(ap_session_load);
@@ -449,22 +523,4 @@ apr_status_t oidc_session_init() {
 	return OK;
 }
 
-apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
-	apr_status_t rc = ap_session_load_fn(r, zz);
-	(*zz)->remote_user = apr_table_get((*zz)->entries, "remote-user");
-	return rc;
-}
-
-apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
-	oidc_session_set(r, z, "remote-user", z->remote_user);
-	return ap_session_save_fn(r, z);
-}
-
-apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value) {
-	return ap_session_get_fn(r, z, key, value);
-}
-
-apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value) {
-	return ap_session_set_fn(r, z, key, value);
-}
 #endif
