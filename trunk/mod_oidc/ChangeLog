@@ -1,3 +1,6 @@
+2/19/2014
+- correct OP metadata validation: userinfo_endpoint is optional, not mandatory
+
 2/18/2014
 - add configurable cookie-only-based (zero server state) session mode
 

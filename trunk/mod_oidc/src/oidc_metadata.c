@@ -284,11 +284,12 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 	/* get a handle to the user_info endpoint */
 	apr_json_value_t *j_userinfo_endpoint = apr_hash_get(
 			j_provider->value.object, "userinfo_endpoint", APR_HASH_KEY_STRING);
-	if ((j_userinfo_endpoint == NULL)
-			|| (j_userinfo_endpoint->type != APR_JSON_STRING)) {
+	if ((j_userinfo_endpoint != NULL)
+			&& (j_userinfo_endpoint->type != APR_JSON_STRING)) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"userinfo_endpoint\" string");
+				"oidc_metadata_provider_is_valid: provider JSON object contains a \"userinfo_endpoint\" entry, but it is not a string value");
 	}
+	// TODO: check for valid URL
 
 	/* find out what type of authentication the token endpoint supports (we only support post or basic) */
 	apr_json_value_t *j_token_endpoint_auth_methods_supported = apr_hash_get(
