@@ -82,12 +82,14 @@
 #define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS 1
 /* default client_name the client uses for dynamic client registration */
 #define OIDC_DEFAULT_CLIENT_NAME "OpenID Connect Apache Module (mod_oidc)"
-/* timeouts for HTTP calls that may take a long time */
+/* timeouts in seconds for HTTP calls that may take a long time */
 #define OIDC_DEFAULT_HTTP_TIMEOUT_LONG  60
-/* timeouts for HTTP calls that should take a short time (registry/discovery related) */
+/* timeouts in seconds for HTTP calls that should take a short time (registry/discovery related) */
 #define OIDC_DEFAULT_HTTP_TIMEOUT_SHORT  5
 /* default session storage type */
 #define OIDC_DEFAULT_SESSION_TYPE OIDC_SESSION_TYPE_22_CACHE_FILE
+/* timeout in seconds after which state expires */
+#define OIDC_DEFAULT_STATE_TIMEOUT 300
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -333,6 +335,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 
 	c->http_timeout_long = OIDC_DEFAULT_HTTP_TIMEOUT_LONG;
 	c->http_timeout_short = OIDC_DEFAULT_HTTP_TIMEOUT_SHORT;
+	c->state_timeout = OIDC_DEFAULT_STATE_TIMEOUT;
 
 	c->cookie_domain = NULL;
 	c->claim_delimiter = OIDC_DEFAULT_CLAIM_DELIMITER;
@@ -426,6 +429,9 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->http_timeout_short =
 			add->http_timeout_short != OIDC_DEFAULT_HTTP_TIMEOUT_SHORT ?
 					add->http_timeout_short : base->http_timeout_short;
+	c->state_timeout =
+			add->state_timeout != OIDC_DEFAULT_STATE_TIMEOUT ?
+					add->state_timeout : base->state_timeout;
 
 	c->cache_dir = add->cache_dir != NULL ? add->cache_dir : base->cache_dir;
 	c->metadata_dir =

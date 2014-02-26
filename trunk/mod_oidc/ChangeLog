@@ -1,3 +1,6 @@
+2/26/2014
+- add configurable timestamp check in state
+
 2/19/2014
 - correct OP metadata validation: userinfo_endpoint is optional, not mandatory
 
