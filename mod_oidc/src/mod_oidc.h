@@ -151,6 +151,7 @@ typedef struct oidc_cfg {
 
 	int http_timeout_long;
 	int http_timeout_short;
+	int state_timeout;
 
 	char *cookie_domain;
 	char *claim_delimiter;

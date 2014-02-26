@@ -182,8 +182,8 @@ static char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
 /*
  * see if the state that came back from the OP matches what we've stored in the cookie
  */
-static int oidc_check_state(request_rec *r, char *state, char **original_url,
-		char **issuer) {
+static int oidc_check_state(request_rec *r, oidc_cfg *c, char *state,
+		char **original_url, char **issuer) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: entering");
 
@@ -238,7 +238,7 @@ static int oidc_check_state(request_rec *r, char *state, char **original_url,
 			"oidc_check_state: \"original_url\" restored from cookie: %s",
 			*original_url);
 
-	/* lastly, get the issuer as the third and last value stored in the cookie */
+	/* thirdly, get the issuer value stored in the cookie */
 	*issuer = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
 	if (*issuer == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
@@ -248,6 +248,33 @@ static int oidc_check_state(request_rec *r, char *state, char **original_url,
 	}
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_check_state: \"issuer\" restored from cookie: %s", *issuer);
+
+	/* lastly, get the timestamp value stored in the cookie */
+	char *timestamp = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
+	if (timestamp == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_check_state: no third separator (%s) found in \"%s\" cookie (%s)",
+				OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
+		return FALSE;
+	}
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_check_state: \"timestamp\" restored from cookie: %s",
+			timestamp);
+
+	apr_time_t then;
+	if (sscanf(timestamp, "%" APR_TIME_T_FMT, &then) != 1) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_check_state: could not parse timestamp restored from state cookie (%s)",
+				timestamp);
+		return FALSE;
+	}
+
+	apr_time_t now = apr_time_sec(apr_time_now());
+	if (now > then + c->state_timeout) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_check_state: state has expired");
+		return FALSE;
+	}
 
 	/* we've made it */
 	return TRUE;
@@ -274,11 +301,13 @@ static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url,
 	apr_base64_encode(b64, (const char *) brnd, randomLen);
 
 	/*
-	 * create a cookie consisting of 3 elements:
-	 * random value, original URL and issuer separated by a defined separator
+	 * create a cookie consisting of 4 elements:
+	 * random value, original URL, issuer and timestamp separated by a defined separator
 	 */
-	char *rvalue = apr_psprintf(r->pool, "%s%s%s%s%s", b64, OIDCStateCookieSep,
-			url, OIDCStateCookieSep, issuer);
+	apr_time_t now = apr_time_sec(apr_time_now());
+	char *rvalue = apr_psprintf(r->pool, "%s%s%s%s%s%s%" APR_TIME_T_FMT, b64,
+			OIDCStateCookieSep, url, OIDCStateCookieSep, issuer,
+			OIDCStateCookieSep, now);
 
 	/* encrypt the resulting value and set it as a cookie */
 	oidc_encrypt_base64url_encode_string(r, &cookieValue, rvalue);
@@ -535,7 +564,7 @@ static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c,
 	oidc_util_get_request_parameter(r, "state", &state);
 
 	/* check the state parameter against what we stored in a cookie */
-	if (oidc_check_state(r, state, &original_url, &issuer) == FALSE) {
+	if (oidc_check_state(r, c, state, &original_url, &issuer) == FALSE) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_handle_authorization_response: unable to restore state, returning internal server error");
 		return HTTP_INTERNAL_SERVER_ERROR;
@@ -956,6 +985,7 @@ const command_rec oidc_config_cmds[] =
 
 		AP_INIT_TAKE1("OIDCHTTPTimeoutLong", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, http_timeout_long), RSRC_CONF, "Timeout for long duration HTTP calls (default)."),
 		AP_INIT_TAKE1("OIDCHTTPTimeoutShort", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, http_timeout_short), RSRC_CONF, "Timeout for short duration HTTP calls (registry/discovery)."),
+		AP_INIT_TAKE1("OIDCStateTimeout", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, state_timeout), RSRC_CONF, "Time to live in seconds for state parameter (cq. interval in which the authorization request and the corresponding response need to be completed)."),
 
 		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, cache_dir), RSRC_CONF, "Directory used for file-based caching."),
 		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains provider and client metadata files."),
