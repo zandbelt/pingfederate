@@ -412,7 +412,11 @@ apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg,
 		apr_table_addn(params, "client_id", provider->client_id);
 		apr_table_addn(params, "client_secret", provider->client_secret);
 	}
-
+/*
+	if (strcmp(provider->issuer, "https://sts.windows.net/b4ea3de6-839e-4ad1-ae78-c78e5c0cdc06/") == 0) {
+		apr_table_addn(params, "resource", "https://graph.windows.net");
+	}
+*/
 	/* resolve the code against the token endpoint */
 	if (oidc_util_http_call(r, provider->token_endpoint_url,
 			OIDC_HTTP_POST_FORM, params, basic_auth, NULL,
