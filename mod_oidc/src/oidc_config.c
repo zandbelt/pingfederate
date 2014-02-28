@@ -90,6 +90,8 @@
 #define OIDC_DEFAULT_SESSION_TYPE OIDC_SESSION_TYPE_22_CACHE_FILE
 /* timeout in seconds after which state expires */
 #define OIDC_DEFAULT_STATE_TIMEOUT 300
+/* default OpenID Connect authorization response type */
+#define OIDC_DEFAULT_RESPONSE_TYPE "code"
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -263,6 +265,22 @@ const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr,
 }
 
 /*
+ * set the response type used
+ */
+const char *oidc_set_response_type(cmd_parms *cmd, void *struct_ptr,
+		const char *arg) {
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+
+	if ((apr_strnatcmp(arg, "code") == 0)
+			|| (apr_strnatcmp(arg, "id_token") == 0) || (apr_strnatcmp(arg, "id_token token") == 0) || (apr_strnatcmp(arg, "token id_token") == 0)) {
+
+		return ap_set_string_slot(cmd, cfg, arg);
+	}
+	return "parameter must be 'code', 'id_token', 'id_token token' or 'token id_token'";
+}
+
+/*
  * get the current path from the request in a normalized way
  */
 static char *oidc_get_path(request_rec *r) {
@@ -321,6 +339,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.client_name = OIDC_DEFAULT_CLIENT_NAME;
 	c->provider.client_contact = NULL;
 	c->provider.scope = OIDC_DEFAULT_SCOPE;
+	c->provider.response_type = OIDC_DEFAULT_RESPONSE_TYPE;
 
 	c->oauth.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
 	c->oauth.client_id = NULL;
@@ -403,6 +422,10 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->provider.scope =
 			strcmp(add->provider.scope, OIDC_DEFAULT_SCOPE) != 0 ?
 					add->provider.scope : base->provider.scope;
+	c->provider.response_type =
+			strcmp(add->provider.response_type, OIDC_DEFAULT_RESPONSE_TYPE) != 0 ?
+					add->provider.response_type :
+					base->provider.response_type;
 
 	c->oauth.ssl_validate_server =
 			add->oauth.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ?

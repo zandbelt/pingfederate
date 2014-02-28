@@ -58,6 +58,8 @@
 
 #include <openssl/evp.h>
 #include <openssl/aes.h>
+#include <openssl/rsa.h>
+#include <openssl/err.h>
 
 #include "mod_oidc.h"
 
@@ -97,7 +99,7 @@ static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 	if (!EVP_EncryptInit_ex(cfg->encrypt_ctx, EVP_aes_256_cbc(), NULL, key,
 			iv)) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
-				"oidc_crypto_init: EVP_EncryptInit_ex on the encrypt context failed!");
+				"oidc_crypto_init: EVP_EncryptInit_ex on the encrypt context failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return FALSE;
 	}
 
@@ -106,7 +108,7 @@ static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 	if (!EVP_DecryptInit_ex(cfg->decrypt_ctx, EVP_aes_256_cbc(), NULL, key,
 			iv)) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
-				"oidc_crypto_init: EVP_DecryptInit_ex on the decrypt context failed!");
+				"oidc_crypto_init: EVP_DecryptInit_ex on the decrypt context failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return FALSE;
 	}
 
@@ -126,7 +128,7 @@ unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg,
 	/* allows reusing of 'e' for multiple encryption cycles */
 	if (!EVP_EncryptInit_ex(cfg->encrypt_ctx, NULL, NULL, NULL, NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_encrypt: EVP_EncryptInit_ex failed!");
+				"oidc_crypto_aes_encrypt: EVP_EncryptInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
@@ -134,14 +136,14 @@ unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg,
 	if (!EVP_EncryptUpdate(cfg->encrypt_ctx, ciphertext, &c_len, plaintext,
 			*len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_encrypt: EVP_EncryptUpdate failed!");
+				"oidc_crypto_aes_encrypt: EVP_EncryptUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
 	/* update ciphertext with the final remaining bytes */
 	if (!EVP_EncryptFinal_ex(cfg->encrypt_ctx, ciphertext + c_len, &f_len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_encrypt: EVP_EncryptFinal_ex failed!");
+				"oidc_crypto_aes_encrypt: EVP_EncryptFinal_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
@@ -163,7 +165,7 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
 	/* allows reusing of 'e' for multiple encryption cycles */
 	if (!EVP_DecryptInit_ex(cfg->decrypt_ctx, NULL, NULL, NULL, NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_decrypt: EVP_DecryptInit_ex failed!");
+				"oidc_crypto_aes_decrypt: EVP_DecryptInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
@@ -171,18 +173,125 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
 	if (!EVP_DecryptUpdate(cfg->decrypt_ctx, plaintext, &p_len, ciphertext,
 			*len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_decrypt: EVP_DecryptUpdate failed!");
+				"oidc_crypto_aes_decrypt: EVP_DecryptUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
 	/* update plaintext with the final remaining bytes */
 	if (!EVP_DecryptFinal_ex(cfg->decrypt_ctx, plaintext + p_len, &f_len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_decrypt: EVP_DecryptFinal_ex failed!");
+				"oidc_crypto_aes_decrypt: EVP_DecryptFinal_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
 	*len = p_len + f_len;
 
 	return plaintext;
+}
+
+char *oidc_crypto_jwt_alg2digest(const char *alg) {
+	if ((strcmp(alg, "RS256") == 0) || (strcmp(alg, "PS256") == 0)) {
+		return "sha256";
+	}
+	if ((strcmp(alg, "RS384") == 0) || (strcmp(alg, "PS384") == 0)) {
+		return "sha384";
+	}
+	if ((strcmp(alg, "RS512") == 0) || (strcmp(alg, "PS512") == 0)) {
+		return "sha512";
+	}
+	if (strcmp(alg, "NONE") == 0) {
+		return "NONE";
+	}
+	return NULL;
+}
+
+static int oidc_crypto_jwt_alg2padding(const char *alg) {
+	if ((strcmp(alg, "RS256") == 0) || (strcmp(alg, "RS384") == 0) || (strcmp(alg, "RS512") == 0)) {
+		return RSA_PKCS1_PADDING;
+	}
+	if ((strcmp(alg, "PS256") == 0) || (strcmp(alg, "PS384") == 0) || (strcmp(alg, "PS512") == 0)) {
+		return RSA_PKCS1_PSS_PADDING;
+	}
+	return -1;
+}
+
+apr_byte_t oidc_crypto_rsa_verify(request_rec *r, const char *alg, unsigned char* sig, int sig_len, unsigned char* msg,
+		int msg_len, unsigned char *mod, int mod_len, unsigned char *exp, int exp_len) {
+
+
+	apr_byte_t rc = FALSE;
+
+	char *digest = oidc_crypto_jwt_alg2digest(alg);
+
+	EVP_MD_CTX ctx;
+	EVP_MD_CTX_init(&ctx);
+
+	RSA * pubkey = RSA_new();
+
+	BIGNUM * modulus = BN_new();
+	BIGNUM * exponent = BN_new();
+
+	BN_bin2bn(mod, mod_len, modulus);
+	BN_bin2bn(exp, exp_len, exponent);
+
+	pubkey->n = modulus;
+	pubkey->e = exponent;
+
+	EVP_PKEY* pRsaKey = EVP_PKEY_new();
+    if (!EVP_PKEY_assign_RSA(pRsaKey, pubkey)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_rsa_verify: EVP_PKEY_assign_RSA failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		pRsaKey = NULL;
+		goto end;
+    }
+
+    ctx.pctx = EVP_PKEY_CTX_new(pRsaKey, NULL);
+    if (!EVP_PKEY_verify_init(ctx.pctx)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_rsa_verify: EVP_PKEY_verify_init failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		goto end;
+    }
+	if (!EVP_PKEY_CTX_set_rsa_padding(ctx.pctx, oidc_crypto_jwt_alg2padding(alg))) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_rsa_verify: EVP_PKEY_CTX_set_rsa_padding failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		goto end;
+	}
+
+    //OpenSSL_add_all_digests();
+	const EVP_MD *dgst = EVP_get_digestbyname(digest);
+	if (dgst == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_rsa_verify: EVP_get_digestbyname failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		goto end;
+	}
+
+	if (!EVP_VerifyInit_ex(&ctx, dgst, NULL)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_rsa_verify: EVP_VerifyInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		goto end;
+	}
+
+	if (!EVP_VerifyUpdate(&ctx, msg, msg_len)){
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_rsa_verify: EVP_VerifyUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		goto end;
+	}
+
+	if (!EVP_VerifyFinal(&ctx, sig, sig_len, pRsaKey)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_rsa_verify: EVP_VerifyFinal failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		goto end;
+	}
+
+	rc = TRUE;
+
+end:
+	if (pRsaKey) {
+		EVP_PKEY_free(pRsaKey);
+	} else if (pubkey) {
+		RSA_free(pubkey);
+	}
+	EVP_MD_CTX_cleanup(&ctx);
+
+	return rc;
 }

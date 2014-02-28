@@ -2,7 +2,7 @@ mod_oidc is an Apache authentication/authorization module that allows an Apache 
 to operate as an OpenID Connect Relying Party.
 
 It requires users to authenticate at an external OpenID Connect Identity Provider
-using the OpenID Connect Basic Client profile (cq. a backchannel flow aka. "code" flow).
+using the OpenID Connect Basic Client or Implict Client profile.
 
 It sets the REMOTE_USER variable to the id_token sub claim, other id_token claims
 are passed in HTTP headers, together with those (optionally) obtained from the user info endpoint
@@ -40,6 +40,7 @@ OIDCProviderAuthorizationEndpoint https://accounts.google.com/o/oauth2/auth?hd=<
 OIDCProviderTokenEndpoint https://accounts.google.com/o/oauth2/token
 OIDCProviderTokenEndpointAuth client_secret_post
 OIDCProviderUserInfoEndpoint https://www.googleapis.com/oauth2/v3/userinfo
+OIDCProviderJwksUri https://www.googleapis.com/oauth2/v1/certs
 
 OIDCClientID <your-client-id-administered-through-the-google-api-console>
 OIDCClientSecret <your-client-secret-administered-through-the-google-api-console>
@@ -112,6 +113,7 @@ OIDCProviderAuthorizationEndpoint https://macbook:9031/as/authorization.oauth2
 OIDCProviderTokenEndpoint https://macbook:9031/as/token.oauth2
 OIDCProviderTokenEndpointAuth client_secret_basic
 OIDCProviderUserInfoEndpoint https://macbook:9031/idp/userinfo.openid
+OIDCProviderJwksUri https://macbook:9031/pf/JWKS
 
 OIDCSSLValidateServer Off
 OIDCClientID ac_oic_client

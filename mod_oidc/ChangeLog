@@ -1,3 +1,7 @@
+2/28/2014
+- add implicit client support
+- support passing long/float values in app headers
+
 2/26/2014
 - add configurable timestamp check in state
 

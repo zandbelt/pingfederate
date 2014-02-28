@@ -88,7 +88,7 @@ static const char *oidc_cache_filename(request_rec *r, const char *key) {
 /*
  * return the fully qualified path name to a cache file for a specified key
  */
-static const char *oidc_cache_file_path(request_rec *r, const char *key) {
+const char *oidc_cache_file_path(request_rec *r, const char *key) {
 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
 	return apr_psprintf(r->pool, "%s/%s", cfg->cache_dir,
 			oidc_cache_filename(r, key));

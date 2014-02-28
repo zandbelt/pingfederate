@@ -777,3 +777,102 @@ int oidc_util_http_sendstring(request_rec *r, const char *html,
 	return success_rvalue;
 }
 
+int oidc_base64url_decode_rsa_verify(request_rec *r, const char *alg, const char *signature, const char *message, const char *modulus, const char *exponent) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_base64url_decode_rsa_verify: alg = \"%s\"", alg);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_base64url_decode_rsa_verify: signature = \"%s\"", signature);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_base64url_decode_rsa_verify: message = \"%s\"", message);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_base64url_decode_rsa_verify: modulus = \"%s\"", modulus);
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_base64url_decode_rsa_verify: exponent = \"%s\"", exponent);
+
+	unsigned char *mod = NULL;
+	int mod_len = oidc_base64url_decode(r, (char **)&mod, modulus, 1);
+
+	unsigned char *exp = NULL;
+	int exp_len = oidc_base64url_decode(r, (char **)&exp, exponent, 1);
+
+	unsigned char *sig = NULL;
+	int sig_len = oidc_base64url_decode(r, (char **)&sig, signature, 1);
+
+	return oidc_crypto_rsa_verify(r, alg, sig, sig_len, (unsigned char *)message, strlen(message), mod, mod_len, exp, exp_len);
+}
+
+/*
+ * read all bytes from the HTTP request
+ */
+static apr_byte_t oidc_util_read(request_rec *r, const char **rbuf) {
+
+	if (ap_setup_client_block(r, REQUEST_CHUNKED_ERROR) != OK)
+		return FALSE;
+
+	if (ap_should_client_block(r)) {
+
+		char argsbuffer[HUGE_STRING_LEN];
+		int rsize, len_read, rpos = 0;
+		long length = r->remaining;
+		*rbuf = apr_pcalloc(r->pool, length + 1);
+
+		while ((len_read = ap_get_client_block(r, argsbuffer,
+				sizeof(argsbuffer))) > 0) {
+			if ((rpos + len_read) > length) {
+				rsize = length - rpos;
+			} else {
+				rsize = len_read;
+			}
+			memcpy((char*)*rbuf + rpos, argsbuffer, rsize);
+			rpos += rsize;
+		}
+	}
+
+	return TRUE;
+}
+
+/*
+ * read the POST parameters in to a table
+ */
+ apr_byte_t oidc_util_read_post(request_rec *r, apr_table_t *table) {
+	const char *data;
+	const char *key, *val;
+
+	if (r->method_number != M_POST)
+		return FALSE;
+
+	if (oidc_util_read(r, &data) != TRUE)
+		return FALSE;
+
+	while (*data && (val = ap_getword(r->pool, &data, '&'))) {
+		key = ap_getword(r->pool, &val, '=');
+		key = oidc_util_unescape_string(r, key);
+		val = oidc_util_unescape_string(r, val);
+		//ap_unescape_url((char*) key);
+		//ap_unescape_url((char*) val);
+		apr_table_set(table, key, val);
+	}
+
+	return TRUE;
+}
+
+ // TODO: check return values
+ apr_byte_t oidc_util_generate_random_base64url_encoded_value(request_rec *r, int randomLen, char **randomB64) {
+	unsigned char *brnd = apr_pcalloc(r->pool, randomLen);
+	apr_generate_random_bytes((unsigned char *) brnd, randomLen);
+	*randomB64 = apr_palloc(r->pool, apr_base64_encode_len(randomLen) + 1);
+	char *enc = *randomB64;
+	apr_base64_encode(enc, (const char *) brnd, randomLen);
+	int i = 0;
+	while (enc[i] != '\0') {
+		if (enc[i] == '+')
+			enc[i] = '-';
+		if (enc[i] == '/')
+			enc[i] = '_';
+		if (enc[i] == '=')
+			enc[i] = ',';
+		i++;
+	}
+	return TRUE;
+ }
