@@ -77,6 +77,13 @@
 
 #include "mod_oidc.h"
 
+// TODO: do we always want to refresh keys when signature does not validate? (risking DOS attacks, or does the nonce help against that?)
+//       do we now still want to refresh jkws once per hour (it helps to reduce the number of failed verifications, at the cost of too-many-downloads overhead)
+//       refresh metadata once-per too? (for non-signing key changes)
+// TODO: use 'iat' (and check for mandatory claim in validate_idtoken) instead of 'exp' for nonce caching?
+// TODO: test PS??? algorithms
+// TODO: add wiki docs for OIDCStateTimeout, OIDCResponseType and OIDCProviderJwksUri
+
 // TODO: check the Apache 2.4 compilation/#defines
 // TODO: user documentation (at least of configuration primitives)
 
@@ -182,8 +189,8 @@ static char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
 /*
  * see if the state that came back from the OP matches what we've stored in the cookie
  */
-static int oidc_check_state(request_rec *r, oidc_cfg *c, char *state,
-		char **original_url, char **issuer) {
+static int oidc_check_state(request_rec *r, oidc_cfg *c, const char *state,
+		char **original_url, char **issuer, char **nonce) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: entering");
 
@@ -207,16 +214,16 @@ static int oidc_check_state(request_rec *r, oidc_cfg *c, char *state,
 	char *ctx = NULL;
 
 	/* first get the base64-encoded random value */
-	char *b64 = apr_strtok(svalue, OIDCStateCookieSep, &ctx);
-	if (b64 == NULL) {
+	*nonce = apr_strtok(svalue, OIDCStateCookieSep, &ctx);
+	if (*nonce == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: no first element found in \"%s\" cookie (%s)",
+				"oidc_check_state: no nonce element found in \"%s\" cookie (%s)",
 				OIDCStateCookieName, cookieValue);
 		return FALSE;
 	}
 
-	/* calculate the hash of the browser fingerprint concatenated with the random value */
-	char *calc = oidc_get_browser_state_hash(r, b64);
+	/* calculate the hash of the browser fingerprint concatenated with the nonce */
+	char *calc = oidc_get_browser_state_hash(r, *nonce);
 
 	/* compare the calculated hash with the value provided in the authorization response */
 	if (apr_strnatcmp(calc, state) != 0) {
@@ -285,27 +292,19 @@ static int oidc_check_state(request_rec *r, oidc_cfg *c, char *state,
  * and set a cookie in the browser that is cryptograpically bound to that
  */
 static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url,
-		const char *issuer) {
+		const char *issuer, const char *nonce) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_create_state_and_set_cookie: entering");
 
-	/* length of the random input included in the state */
-	const int randomLen = 32;
 	char *cookieValue = NULL;
-
-	/* generate a 32-byte random base64-encoded value */
-	unsigned char *brnd = apr_pcalloc(r->pool, randomLen);
-	apr_generate_random_bytes((unsigned char *) brnd, randomLen);
-	char *b64 = apr_palloc(r->pool, apr_base64_encode_len(randomLen) + 1);
-	apr_base64_encode(b64, (const char *) brnd, randomLen);
 
 	/*
 	 * create a cookie consisting of 4 elements:
 	 * random value, original URL, issuer and timestamp separated by a defined separator
 	 */
 	apr_time_t now = apr_time_sec(apr_time_now());
-	char *rvalue = apr_psprintf(r->pool, "%s%s%s%s%s%s%" APR_TIME_T_FMT, b64,
+	char *rvalue = apr_psprintf(r->pool, "%s%s%s%s%s%s%" APR_TIME_T_FMT "", nonce,
 			OIDCStateCookieSep, url, OIDCStateCookieSep, issuer,
 			OIDCStateCookieSep, now);
 
@@ -314,7 +313,7 @@ static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url,
 	oidc_set_cookie(r, OIDCStateCookieName, cookieValue);
 
 	/* return a hash value that fingerprints the browser concatenated with the random input */
-	return oidc_get_browser_state_hash(r, b64);
+	return oidc_get_browser_state_hash(r, nonce);
 }
 
 /*
@@ -430,7 +429,19 @@ static void oidc_set_app_headers(request_rec *r,
 			oidc_set_app_header(r, s_key, j_value->value.boolean ? "1" : "0",
 					claim_prefix);
 
-			/* check if it is a multi-value string */
+		} else if (j_value->type == APR_JSON_LONG) {
+
+			/* set long value in the application header whose name is based on the key and the prefix */
+			oidc_set_app_header(r, s_key, apr_psprintf(r->pool, "%ld", j_value->value.lnumber),
+					claim_prefix);
+
+		} else if (j_value->type == APR_JSON_DOUBLE) {
+
+				/* set float value in the application header whose name is based on the key and the prefix */
+				oidc_set_app_header(r, s_key, apr_psprintf(r->pool, "%lf", j_value->value.dnumber),
+						claim_prefix);
+
+		/* check if it is a multi-value string */
 		} else if (j_value->type == APR_JSON_ARRAY) {
 
 			/* some logging about what we're going to do */
@@ -547,75 +558,69 @@ static int oidc_handle_existing_session(request_rec *r,
 }
 
 /*
- * handle an OpenID Connect Authorization Response from the OP
+ * helper function for basic/implicit client flows upon receiving an authorization response:
+ * check that it matches the state stored in the browser and return the variables associated
+ * with the state, such as original_url and OP oidc_provider_t pointer.
  */
-static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c,
-		session_rec *session) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_handle_authorization_response: entering");
-
-	/* inialize local variables */
-	char *code = NULL, *state = NULL;
-	char *issuer = NULL, *original_url = NULL;
-
-	/* by now we're pretty sure the code & state parameters exist */
-	oidc_util_get_request_parameter(r, "code", &code);
-	oidc_util_get_request_parameter(r, "state", &state);
+static apr_byte_t oidc_authorization_response_match_state(request_rec *r,
+		oidc_cfg *c, const char *state, char **original_url,
+		struct oidc_provider_t **provider, char **nonce) {
+	char *issuer = NULL;
 
 	/* check the state parameter against what we stored in a cookie */
-	if (oidc_check_state(r, c, state, &original_url, &issuer) == FALSE) {
+	if (oidc_check_state(r, c, state, original_url, &issuer, nonce) == FALSE) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_handle_authorization_response: unable to restore state, returning internal server error");
-		return HTTP_INTERNAL_SERVER_ERROR;
+				"oidc_authorization_response_match_state: unable to restore state");
+		return FALSE;
 	}
 
 	/* by default we'll assume that we're dealing with a single statically configured OP */
-	struct oidc_provider_t *provider = &c->provider;
+	*provider = &c->provider;
 
 	/* unless a metadata directory was configured, so we'll try and get the provider settings from there */
 	if (c->metadata_dir != NULL) {
 
 		/* try and get metadata from the metadata directory for the OP that sent this response */
-		if ((oidc_metadata_get(r, c, issuer, &provider) == FALSE)
+		if ((oidc_metadata_get(r, c, issuer, provider) == FALSE)
 				|| (provider == NULL)) {
 
 			// something went wrong here between sending the request and receiving the response
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_handle_authorization_response: no provider metadata found for provider \"%s\", returning internal server error", issuer);
-			return HTTP_INTERNAL_SERVER_ERROR;
+					"oidc_authorization_response_match_state: no provider metadata found for provider \"%s\"",
+					issuer);
+			return FALSE;
 		}
 	}
 
-	/* now we've got the metadata for the provider that sent the response to us */
-	char *id_token = NULL, *access_token = NULL;
-	const char*response = NULL;
-	char *remoteUser = NULL;
-	apr_time_t expires;
-	apr_json_value_t *j_idtoken_payload = NULL;
+	return TRUE;
+}
 
-	/* resolve the code against the token endpoint of the OP */
-	if (oidc_proto_resolve_code(r, c, provider, code, &remoteUser,
-			&j_idtoken_payload, &id_token, &access_token, &expires) == FALSE) {
-		/* errors have already been reported */
-		return HTTP_UNAUTHORIZED;
-	}
+/*
+ * helper function for basic/implicit client flows:
+ * complete the handling of an authorization response by storing the
+ * authenticated user state in the session
+ */
+static int oidc_authorization_response_finalize(request_rec *r, oidc_cfg *c,
+		session_rec *session, const char *id_token, const char *claims,
+		char *remoteUser, apr_time_t expires, const char *original_url) {
 
 	/* set the resolved stuff in the session */
 	session->remote_user = remoteUser;
+
+	/* expires is the value from the id_token */
 	session->expiry = expires;
+
+	/* store the whole contents of the id_token for later reference too */
 	oidc_session_set(r, session, OIDC_IDTOKEN_SESSION_KEY, id_token);
 
-	/* optionally resolve additional claims against the userinfo endpoint */
-	apr_json_value_t *claims = NULL;
-	if (oidc_proto_resolve_userinfo(r, c, provider, access_token, &response,
-			&claims) == TRUE) {
+	/* see if we've resolved any claims */
+	if (claims != NULL) {
 		/*
 		 * succesfully decoded a set claims from the response so we can store them
 		 * (well actually the stringified representation in the response)
 		 * in the session context safely now
 		 */
-		oidc_session_set(r, session, OIDC_CLAIMS_SESSION_KEY, response);
+		oidc_session_set(r, session, OIDC_CLAIMS_SESSION_KEY, claims);
 	}
 
 	/* store the session */
@@ -626,10 +631,163 @@ static int oidc_handle_authorization_response(request_rec *r, oidc_cfg *c,
 
 	/* now we've authenticated the user so go back to the URL that he originally tried to access */
 	apr_table_add(r->headers_out, "Location", original_url);
+
+	/* log the succesful response */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_handle_authorization_response: session created and stored, redirecting to original url: %s",
+			"oidc_authorization_response_finalize: session created and stored, redirecting to original url: %s",
 			original_url);
+
+	/* do the actual redirect to the original URL */
 	return HTTP_MOVED_TEMPORARILY;
+}
+
+/*
+ * handle an OpenID Connect Authorization Response using the Basic Client profile from the OP
+ */
+static int oidc_handle_basic_authorization_response(request_rec *r, oidc_cfg *c,
+		session_rec *session) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_handle_basic_authorization_response: entering");
+
+	/* inialize local variables */
+	char *code = NULL, *state = NULL;
+
+	/* by now we're pretty sure the code & state parameters exist */
+	oidc_util_get_request_parameter(r, "code", &code);
+	oidc_util_get_request_parameter(r, "state", &state);
+
+	/* match the returned state parameter against the state stored in the browser */
+	struct oidc_provider_t *provider = NULL;
+	char *original_url = NULL;
+	char *nonce = NULL;
+	if (oidc_authorization_response_match_state(r, c, state, &original_url,
+			&provider, &nonce) == FALSE)
+		return HTTP_INTERNAL_SERVER_ERROR;
+
+	/* now we've got the metadata for the provider that sent the response to us */
+	char *id_token = NULL, *access_token = NULL;
+	const char *response = NULL;
+	char *remoteUser = NULL;
+	apr_time_t expires;
+	apr_json_value_t *j_idtoken_payload = NULL;
+
+	/*
+	 * resolve the code against the token endpoint of the OP
+	 * TODO: now I'm setting the nonce to NULL since google does not allow using a nonce in the "code" flow...
+	 */
+	nonce = NULL;
+	if (oidc_proto_resolve_code(r, c, provider, code, nonce, &remoteUser,
+			&j_idtoken_payload, &id_token, &access_token, &expires) == FALSE) {
+		/* errors have already been reported */
+		return HTTP_UNAUTHORIZED;
+	}
+
+	/*
+	 * optionally resolve additional claims against the userinfo endpoint
+	 * parsed claims are not actually used here but need to be parsed anyway for error checking purposes
+	 */
+	apr_json_value_t *claims = NULL;
+	if (oidc_proto_resolve_userinfo(r, c, provider, access_token, &response, &claims) == FALSE) {
+		response = NULL;
+	}
+
+	/* complete handling of the response by storing stuff in the session and redirecting to the original URL */
+	return oidc_authorization_response_finalize(r, c, session, id_token,
+			response, remoteUser, expires, original_url);
+}
+
+/*
+ * handle an OpenID Connect Authorization Response using the Implicit Client profile from the OP
+ */
+static int oidc_handle_implicit_authorization_response(request_rec *r, oidc_cfg *c,
+		session_rec *session, const char *state, const char *id_token) {
+
+	/* log what we've received */
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_handle_implicit_authorization_response: state = \"%s\", id_token= \"%s\"", state, id_token);
+
+	/* match the returned state parameter against the state stored in the browser */
+	struct oidc_provider_t *provider = NULL;
+	char *original_url = NULL;
+	char *nonce = NULL;
+	if (oidc_authorization_response_match_state(r, c, state, &original_url,
+			&provider, &nonce) == FALSE)
+		return HTTP_INTERNAL_SERVER_ERROR;
+
+	/* initialize local variables for the id_token contents */
+	char *remoteUser = NULL;
+	apr_json_value_t *j_idtoken_payload = NULL;
+	apr_time_t expires;
+	char *s_idtoken_payload = NULL;
+
+	/* parse and validate the id_token */
+	if (oidc_proto_parse_idtoken(r, c, provider, id_token, nonce, &remoteUser,
+			&j_idtoken_payload, &s_idtoken_payload, &expires) != TRUE) {
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+				"oidc_handle_implicit_authorization_response: could not verify the id_token contents, return HTTP_UNAUTHORIZED");
+		return HTTP_UNAUTHORIZED;
+	}
+
+	// TODO: all id_token stuff in/as claims, should probably filter...?
+	// TODO: optional userinfo stuff?
+
+	/* complete handling of the response by storing stuff in the session and redirecting to the original URL */
+	return oidc_authorization_response_finalize(r, c, session, id_token,
+			s_idtoken_payload, remoteUser, expires, original_url);
+}
+
+/*
+ * handle an OpenID Connect Authorization Response using the fragment(+POST) response_type with the Implicit Client profile from the OP
+ */
+static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
+		session_rec *session) {
+	/* read the parameters that are POST-ed to us */
+	apr_table_t *params = apr_table_make(r->pool, 8);
+	if (oidc_util_read_post(r, params) == FALSE) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_handle_implicit_post: something went wrong when reading the POST parameters");
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	/* get the state */
+	char *state = (char *) apr_table_get(params, "state");
+	if (state == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_handle_implicit_post: no state parameter found in the POST, returning internal server error");
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	/* get the id_token */
+	char *id_token = (char *) apr_table_get(params, "id_token");
+	if (id_token == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_handle_implicit_post: no id_token parameter found in the POST, returning internal server error");
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	/* do the actual implicit work */
+	return oidc_handle_implicit_authorization_response(r, c, session, state, id_token);
+}
+
+/*
+ * handle an OpenID Connect Authorization Response using the redirect response_type with the Implicit Client profile from the OP
+ */
+static int oidc_handle_implicit_redirect(request_rec *r, oidc_cfg *c,
+		session_rec *session) {
+
+	ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+			"oidc_handle_implicit_redirect: handling non-spec-compliant authorization response since the default response_type when using the Implicit Client flow must be \"fragment\"");
+
+	/* inialize local variables */
+	char *state = NULL, *id_token = NULL;
+
+	/* by now we're pretty sure the state & id_token parameters exist */
+	oidc_util_get_request_parameter(r, "state", &state);
+	oidc_util_get_request_parameter(r, "id_token", &id_token);
+
+	/* do the actual implicit work */
+	return oidc_handle_implicit_authorization_response(r, c, session, state, id_token);
 }
 
 /*
@@ -741,15 +899,18 @@ static int oidc_authenticate_user(request_rec *r, oidc_cfg *c,
 		provider = &c->provider;
 	}
 
+	char *nonce = NULL;
+	oidc_util_generate_random_base64url_encoded_value(r, 32, &nonce);
+
 	/* create state that restores the context when the authorization response comes in; cryptographically bind it to the browser */
 	const char *state = oidc_create_state_and_set_cookie(r, original_url,
-			provider->issuer);
+			provider->issuer, nonce);
 
 	// TODO: maybe show intermediate/progress screen "redirecting to"
 
 	/* send off to the OpenID Connect Provider */
 	return oidc_proto_authorization_request(r, provider, c->redirect_uri, state,
-			original_url);
+			original_url, nonce);
 }
 
 /*
@@ -841,16 +1002,30 @@ static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 			/* this is initial request and we already have a session */
 			return oidc_handle_existing_session(r, c, session);
 
-		} else if (oidc_proto_is_authorization_response(r, c)) {
-
-			/* this is an authorization rsopnse from the OP */
-			return oidc_handle_authorization_response(r, c, session);
-
 		} else if (oidc_is_discovery_response(r, c)) {
 
 			/* this is response from the OP discovery page */
 			return oidc_handle_discovery_response(r, c);
 
+		} else if (oidc_proto_is_basic_authorization_response(r, c)) {
+
+			/* this is an authorization response from the OP using the Basic Client profile */
+			return oidc_handle_basic_authorization_response(r, c, session);
+
+		} else if (oidc_proto_is_implicit_post(r, c)) {
+
+			/* this is an authorization response using the fragment(+POST) response_type with the Implicit Client profile */
+			return oidc_handle_implicit_post(r, c, session);
+
+		} else if (oidc_proto_is_implicit_redirect(r, c)) {
+
+			/* this is an authorization response using the redirect response_type with the Implicit Client profile */
+			return oidc_handle_implicit_redirect(r, c, session);
+
+		} else if (oidc_util_request_matches_url(r, c->redirect_uri) == TRUE) {
+
+			/* this is a "bare" request to the redirect URI, indicating implicit flow using the fragement response_type */
+			return oidc_proto_javascript_implicit(r, c);
 		}
 		/*
 		 * else: initial request, we have no session and it is not an authorization or
@@ -961,7 +1136,9 @@ const command_rec oidc_config_cmds[] =
 		AP_INIT_TAKE1("OIDCProviderTokenEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_url), RSRC_CONF, "Define the OpenID OP Token Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
 		AP_INIT_TAKE1("OIDCProviderTokenEndpointAuth", oidc_set_endpoint_auth_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_auth), RSRC_CONF, "Specify an authentication method for the OpenID OP Token Endpoint (e.g.: client_auth_basic)"),
 		AP_INIT_TAKE1("OIDCProviderUserInfoEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.userinfo_endpoint_url), RSRC_CONF, "Define the OpenID OP UserInfo Endpoint URL (e.g.: https://localhost:9031/idp/userinfo.openid)"),
+		AP_INIT_TAKE1("OIDCProviderJwksUri", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.jwks_uri), RSRC_CONF, "Define the OpenID OP JWKS URL (e.g.: https://macbook:9031/pf/JWKS)"),
 
+		AP_INIT_TAKE1("OIDCResponseType", oidc_set_response_type, (void *)APR_OFFSETOF(oidc_cfg, provider.response_type), RSRC_CONF, "The response type (or OpenID Connect Flow) used; must be one of \"code\", \"id_token\", or \"id_token token\" (serves as default value for discovered OPs too)"),
 		AP_INIT_FLAG("OIDCSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.ssl_validate_server), RSRC_CONF, "Require validation of the OpenID Connect OP SSL server certificate for successful authentication (On or Off)"),
 		AP_INIT_TAKE1("OIDCClientName", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.client_name), RSRC_CONF, "Define the (client_name) name that the client uses for dynamic registration to the OP."),
 		AP_INIT_TAKE1("OIDCClientContact", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.client_contact), RSRC_CONF, "Define the contact that the client registers in dynamic registration with the OP."),

@@ -106,6 +106,7 @@ typedef struct oidc_provider_t {
 	char *token_endpoint_url;
 	char *token_endpoint_auth;
 	char *userinfo_endpoint_url;
+	char *jwks_uri;
 	char *client_id;
 	char *client_secret;
 
@@ -114,6 +115,7 @@ typedef struct oidc_provider_t {
 	char *client_name;
 	char *client_contact;
 	char *scope;
+	char *response_type;
 } oidc_provider_t ;
 
 typedef struct oidc_oauth_t {
@@ -182,15 +184,20 @@ const char*oidc_request_state_get(request_rec *r, const char *key);
 int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c);
 
 // oidc_proto.c
-int oidc_proto_authorization_request(request_rec *r, struct oidc_provider_t *provider, const char *redirect_uri, const char *state, const char *original_url);
-apr_byte_t oidc_proto_is_authorization_response(request_rec *r, oidc_cfg *cfg);
-apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char *code, char **user, apr_json_value_t **j_idtoken_payload, char **s_id_token, char **s_access_token, apr_time_t *expires);
+int oidc_proto_authorization_request(request_rec *r, struct oidc_provider_t *provider, const char *redirect_uri, const char *state, const char *original_url, const char *nonce);
+apr_byte_t oidc_proto_is_basic_authorization_response(request_rec *r, oidc_cfg *cfg);
+apr_byte_t oidc_proto_is_implicit_post(request_rec *r, oidc_cfg *cfg);
+apr_byte_t oidc_proto_is_implicit_redirect(request_rec *r, oidc_cfg *cfg);
+apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, char *code, const char *nonce, char **user, apr_json_value_t **j_idtoken_payload, char **s_id_token, char **s_access_token, apr_time_t *expires);
 apr_byte_t oidc_proto_resolve_userinfo(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, const char *access_token, const char **response, apr_json_value_t **claims);
 apr_byte_t oidc_proto_account_based_discovery(request_rec *r, oidc_cfg *cfg, const char *acct, char **issuer);
+apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, const char *id_token, const char *nonce, char **user, apr_json_value_t **j_payload, char **s_payload, apr_time_t *expires);
+int oidc_proto_javascript_implicit(request_rec *r, oidc_cfg *c);
 
 // oidc_cache.c
 apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value);
 apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, apr_time_t expiry);
+const char *oidc_cache_file_path(request_rec *r, const char *key);
 
 // oidc_authz.c
 int oidc_authz_worker(request_rec *r, const apr_json_value_t *const claims, const require_line *const reqs, int nelts);
@@ -214,11 +221,13 @@ const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const 
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
 const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg);
 const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg);
+const char *oidc_set_response_type(cmd_parms *cmd, void *struct_ptr, const char *arg);
 
 char *oidc_get_cookie_path(request_rec *r);
 
 // oidc_util.c
 int oidc_strnenvcmp(const char *a, const char *b, int len);
+int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_len);
 int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding);
 void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue);
 char *oidc_get_cookie(request_rec *r, char *cookieName);
@@ -236,14 +245,21 @@ apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r, const char *str
 int oidc_util_http_sendstring(request_rec *r, const char *html, int success_rvalue);
 char *oidc_util_escape_string(const request_rec *r, const char *str);
 char *oidc_util_unescape_string(const request_rec *r, const char *str);
+apr_byte_t oidc_util_read_post(request_rec *r, apr_table_t *table);
+apr_byte_t oidc_util_generate_random_base64url_encoded_value(request_rec *r, int randomLen, char **randomB64);
+
+int oidc_base64url_decode_rsa_verify(request_rec *r, const char *alg, const char *signature, const char *message, const char *modulus, const char *exponent);
 
 // oidc_crypto.c
 unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg, unsigned char *plaintext, int *len);
 unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg, unsigned char *ciphertext, int *len);
+char *oidc_crypto_jwt_alg2digest(const char *alg);
+apr_byte_t oidc_crypto_rsa_verify(request_rec *r, const char *alg, unsigned char* sig, int sig_len, unsigned char* msg, int msg_len, unsigned char *mod, int mod_len, unsigned char *exp, int exp_len);
 
 // oidc_metadata.c
 apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg, apr_array_header_t **arr);
 apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *selected, oidc_provider_t **provider);
+apr_byte_t oidc_metadata_jwks_get(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, apr_json_value_t **j_jwks, apr_byte_t *refresh);
 
 // oidc_session.c
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20081201
