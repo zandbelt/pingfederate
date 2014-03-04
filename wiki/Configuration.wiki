@@ -17,6 +17,9 @@
 *OIDCProviderUserInfoEndpoint*
  Define the OpenID OP UserInfo Endpoint URL (e.g.: https://localhost:9031/idp/userinfo.openid)
 
+*OIDCProviderJwksUri*
+ Define the OpenID OP JWKS URL (e.g.: https://macbook:9031/pf/JWKS)
+
 ==_Client Related_==
 
 *OIDCSSLValidateServer*
@@ -36,6 +39,9 @@
 
 *OIDCClientSecret*
  Client secret used in calls to OpenID Connect OP.
+
+*OIDCResponseType*
+ The response type (or OpenID Connect Flow) used; must be one of \"code\", \"id_token\", or \"id_token token\" (serves as default value for discovered OPs too)
 
 ==_OAuth 2.0 Related_==
 
@@ -79,6 +85,9 @@
 
 *OIDCHTTPTimeoutShort*
  Timeout for short duration HTTP calls (registry/discovery).
+
+*OIDCStateTimeout*
+ Time to live in seconds for state parameter (cq. interval in which the authorization request and the corresponding response need to be completed).
 
 *OIDCCacheDir*
  Directory used for file-based caching.
