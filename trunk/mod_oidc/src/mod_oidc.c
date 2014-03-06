@@ -77,14 +77,14 @@
 
 #include "mod_oidc.h"
 
-// TODO: solve SSLvalidate bug
+// TODO: implicit client profile testing using JMeter
 // TODO: remove the hack for not-checking-signatures-when-nonce-is-not-set because Salesforce supports signed tokens now?
 
 // TODO: do we always want to refresh keys when signature does not validate? (risking DOS attacks, or does the nonce help against that?)
 //       do we now still want to refresh jkws once per hour (it helps to reduce the number of failed verifications, at the cost of too-many-downloads overhead)
 //       refresh metadata once-per too? (for non-signing key changes)
 // TODO: use 'iat' (and check for mandatory claim in validate_idtoken) instead of 'exp' for nonce caching?
-// TODO: test PS??? algorithms
+// TODO: test PS??? algorithms (Roland?)
 
 // TODO: check the Apache 2.4 compilation/#defines
 // TODO: user documentation (at least of configuration primitives)

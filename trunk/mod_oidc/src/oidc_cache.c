@@ -161,7 +161,7 @@ static apr_status_t oidc_cache_file_write(request_rec *r, const char *path,
  * get a value for the specified key from the cache
  */
 apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value) {
-	apr_file_t *fd;
+	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
 	char s_err[128];
 
@@ -204,8 +204,8 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 		/* and kill it */
 		if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_cache_get: could not delete cache file \"%s\" (%s)", path,
-					apr_strerror(rc, s_err, sizeof(s_err)));
+					"oidc_cache_get: could not delete cache file \"%s\" (%s)",
+					path, apr_strerror(rc, s_err, sizeof(s_err)));
 		}
 
 		/* nothing strange happened really */
@@ -236,7 +236,8 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 
 	return APR_SUCCESS;
 
-error_close:
+	error_close:
+
 	apr_file_unlock(fd);
 	apr_file_close(fd);
 
@@ -256,8 +257,8 @@ error_close:
  */
 apr_status_t oidc_cache_clean(request_rec *r) {
 	apr_status_t rc = APR_SUCCESS;
-	apr_dir_t *dir;
-	apr_file_t *fd;
+	apr_dir_t *dir = NULL;
+	apr_file_t *fd = NULL;
 	apr_status_t i;
 	apr_finfo_t fi;
 	oidc_cache_info_t info;
@@ -274,29 +275,28 @@ apr_status_t oidc_cache_clean(request_rec *r) {
 			== APR_SUCCESS) {
 
 		/* really only clean once per so much time, check that we haven not recently run */
-		if (apr_time_now() < fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS)) {
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in %" APR_TIME_T_FMT " secs)", apr_time_sec(fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS) - apr_time_now()));
-			return APR_SUCCESS;
-		}
-
-		/* time to clean, reset the modification time of the metadata file to reflect the timestamp of this cleaning cycle */
-		apr_file_mtime_set(metadata_path, apr_time_now(), r->pool);
-
-	} else {
-
-		/* no metadata file exists yet, create one (and open it) */
-		if ((rc = apr_file_open(&fd, metadata_path, (APR_FOPEN_WRITE|APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error creating cache timestamp file '%s' (%s)", metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
-			return rc;
-		}
-
-		/* and cleanup... */
-		if ((rc = apr_file_close(fd)) != APR_SUCCESS) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error closing cache timestamp file '%s' (%s)", metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
-		}
+		if (apr_time_now() < fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS)) {ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in %" APR_TIME_T_FMT " secs)", apr_time_sec(fi.mtime + apr_time_from_sec(OIDC_CACHE_CLEAN_ONLY_ONCE_PER_N_SECS) - apr_time_now()));
+		return APR_SUCCESS;
 	}
 
-	/* time to clean, open the cache directory */
+	/* time to clean, reset the modification time of the metadata file to reflect the timestamp of this cleaning cycle */
+	apr_file_mtime_set(metadata_path, apr_time_now(), r->pool);
+
+} else {
+
+	/* no metadata file exists yet, create one (and open it) */
+	if ((rc = apr_file_open(&fd, metadata_path, (APR_FOPEN_WRITE|APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error creating cache timestamp file '%s' (%s)", metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
+		return rc;
+	}
+
+	/* and cleanup... */
+	if ((rc = apr_file_close(fd)) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_clean: error closing cache timestamp file '%s' (%s)", metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
+	}
+}
+
+		/* time to clean, open the cache directory */
 	if ((rc = apr_dir_open(&dir, cfg->cache_dir, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_cache_clean: error opening cache directory '%s' for cleaning (%s)",
@@ -379,7 +379,7 @@ apr_status_t oidc_cache_clean(request_rec *r) {
  */
 apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value,
 		apr_time_t expiry) {
-	apr_file_t *fd;
+	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
 	char s_err[128];
 
