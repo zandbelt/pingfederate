@@ -137,62 +137,11 @@ static const char *oidc_metadata_jwks_file_path(request_rec *r,
  */
 static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path,
 		apr_json_value_t **result) {
-	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
-	char s_err[128];
-	apr_finfo_t finfo;
+	char *buf = NULL;
 
-	/* open the JSON file if it exists */
-	if ((rc = apr_file_open(&fd, path, APR_FOPEN_READ | APR_FOPEN_BUFFERED,
-			APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_metadata_file_read_json: no JSON file found at: \"%s\"",
-				path);
-		return FALSE;
-	}
-
-	/* the file exists, now lock it */
-	apr_file_lock(fd, APR_FLOCK_EXCLUSIVE);
-
-	/* move the read pointer to the very start of the cache file */
-	apr_off_t begin = 0;
-	apr_file_seek(fd, APR_SET, &begin);
-
-	/* get the file info so we know its size */
-	if ((rc = apr_file_info_get(&finfo, APR_FINFO_SIZE, fd)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_file_read_json: error calling apr_file_info_get on JSON file: \"%s\" (%s)",
-				path, apr_strerror(rc, s_err, sizeof(s_err)));
-		goto error_close;
-	}
-
-	/* now that we have the size of the file, allocate a buffer that can contain its contents */
-	char *buf = apr_palloc(r->pool, finfo.size + 1);
-
-	/* read the file in to the buffer */
-	apr_size_t bytes_read = 0;
-	if ((rc = apr_file_read_full(fd, buf, finfo.size, &bytes_read))
-			!= APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_file_read_json: apr_file_read_full on (%s) returned an error: %s",
-				path, apr_strerror(rc, s_err, sizeof(s_err)));
-		goto error_close;
-	}
-
-	/* check that we've got all of it */
-	if (bytes_read != finfo.size) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_file_read_json: apr_file_read_full on (%s) returned less bytes (%" APR_SIZE_T_FMT ") than expected: (%" APR_OFF_T_FMT ")",
-				path, bytes_read, finfo.size);
-		goto error_close;
-	}
-
-	/* we're done, unlock and close the file */
-	apr_file_unlock(fd);
-	apr_file_close(fd);
-
-	/* just to be sure, we set a \0 (we allocated space for it anyway) */
-	buf[bytes_read] = '\0';
+	/* read the file contents */
+	if (oidc_util_file_read(r, path, &buf) == FALSE) return FALSE;
 
 	/* decode the JSON contents of the buffer */
 	if ((rc = apr_json_decode(result, buf, strlen(buf), r->pool)) != APR_SUCCESS) {
@@ -211,19 +160,11 @@ static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path,
 		return FALSE;
 	}
 
-	/* log succesful metadata retrieval */
+	/* log successful metadata retrieval */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_metadata_file_read_json: JSON parsed from file \"%s\"", path);
 
 	return TRUE;
-
-	error_close: apr_file_unlock(fd);
-	apr_file_close(fd);
-
-	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-			"oidc_metadata_file_read_json: returning error");
-
-	return FALSE;
 }
 
 /*
@@ -866,6 +807,8 @@ static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
 	/* go and use Dynamic Client registration to fetch ourselves new client metadata */
 	apr_table_t *params = apr_table_make(r->pool, 3);
 	apr_table_addn(params, "client_name", cfg->provider.client_name);
+
+	//apr_table_addn(params, "id_token_signed_response_alg", "PS256");
 
 	int action = OIDC_HTTP_POST_JSON;
 

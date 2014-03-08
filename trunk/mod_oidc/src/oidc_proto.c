@@ -600,12 +600,15 @@ apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_cfg *cfg,
 
 	// verify signature unless we did 'code' flow and the algorithm is NONE
 	// TODO: should improve "detection": in principle nonce can be used in "code" flow too
-	apr_json_value_t *algorithm = apr_hash_get(j_header->value.object, "alg", APR_HASH_KEY_STRING);
-	if ((strcmp(algorithm->value.string.p, "NONE") != 0) || (nonce != NULL)) {
-		/* verify the signature on the id_token */
-		apr_byte_t refresh = FALSE;
-		if (oidc_proto_idtoken_verify_signature(r, cfg, provider, j_header, signature, apr_pstrcat(r->pool, header, ".", payload, NULL), &refresh) == FALSE) return FALSE;
-	}
+//	apr_json_value_t *algorithm = apr_hash_get(j_header->value.object, "alg", APR_HASH_KEY_STRING);
+//	if ((strcmp(algorithm->value.string.p, "NONE") != 0) || (nonce != NULL)) {
+//		/* verify the signature on the id_token */
+//		apr_byte_t refresh = FALSE;
+//		if (oidc_proto_idtoken_verify_signature(r, cfg, provider, j_header, signature, apr_pstrcat(r->pool, header, ".", payload, NULL), &refresh) == FALSE) return FALSE;
+//	}
+	/* verify the signature on the id_token */
+	apr_byte_t refresh = FALSE;
+	if (oidc_proto_idtoken_verify_signature(r, cfg, provider, j_header, signature, apr_pstrcat(r->pool, header, ".", payload, NULL), &refresh) == FALSE) return FALSE;
 
 	/* parse the payload */
 	oidc_base64url_decode(r, s_payload, payload, 1);
@@ -861,29 +864,39 @@ int oidc_proto_javascript_implicit(request_rec *r, oidc_cfg *c) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_proto_javascript_implicit: entering");
 
+//	char *java_script = NULL;
+//	if (oidc_util_file_read(r, "/Users/hzandbelt/eclipse-workspace/mod_oidc/src/implicit_post.html", &java_script) == FALSE) return HTTP_INTERNAL_SERVER_ERROR;
+
 	const char *java_script =
-			"<script type=\"text/javascript\">\n"
-			"function postOnLoad() {\n"
-			"	var params = {}\n"
-			"	encoded = location.hash.substring(1).split('&');\n"
-			"	for (i = 0; i < encoded.length; i++) {\n"
-			"		encoded[i].replace(/\\+/g, ' ');\n"
-			"		var n = encoded[i].indexOf(\"=\");\n"
-			"		var input = document.createElement(\"input\");\n"
-			"		input.type = 'hidden';\n"
-			"		input.name = decodeURIComponent(encoded[i].substring(0,n));\n"
-			"		input.value = decodeURIComponent(encoded[i].substring(n+1));\n"
-			"		document.forms[0].appendChild(input);\n"
-			"	}\n"
-			"	document.forms[0].submit();\n"
-			"}\n"
-			"</script>\n"
-			"\n"
-			"<html><body onload=\"postOnLoad()\">\n"
-			"	Redirecting...\n"
-			"	<form method=\"post\" action=\"%s\"/>\n"
-			"</body></html>\n"
-			"";
+		"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n"
+		"<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n"
+		"  <head>\n"
+		"    <meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/>\n"
+		"    <script type=\"text/javascript\">\n"
+		"      function postOnLoad() {\n"
+		"        var params = {}\n"
+		"        encoded = location.hash.substring(1).split(\"&\");\n"
+		"        for (i = 0; i < encoded.length; i++) {\n"
+		"          encoded[i].replace(/\\+/g, \" \");\n"
+		"          var n = encoded[i].indexOf(\"=\");\n"
+		"          var input = document.createElement(\"input\");\n"
+		"          input.type = \"hidden\";\n"
+		"          input.name = decodeURIComponent(encoded[i].substring(0, n));\n"
+		"          input.value = decodeURIComponent(encoded[i].substring(n+1));\n"
+		"          document.forms[0].appendChild(input);\n"
+		"        }\n"
+		"        document.forms[0].action = window.location.href.substr(0, window.location.href.indexOf('#'));\n"
+		"        document.forms[0].submit();\n"
+		"      }\n"
+		"    </script>\n"
+		"    <title>Submitting...</title>\n"
+		"  </head>\n"
+		"  <body onload=\"postOnLoad()\">\n"
+		"    <p>Submitting...</p>\n"
+		"    <form method=\"post\"/>\n"
+		"  </body>\n"
+		"</html>\n";
+
 	/*
 	 * need to put in an error code to terminate sub-request processing... (which OK would allow)
 	 * TODO: is this really unavoidable?
@@ -891,6 +904,7 @@ int oidc_proto_javascript_implicit(request_rec *r, oidc_cfg *c) {
 	 * content in the way that we want here...
 	 */
 	//return oidc_util_http_sendstring(r, apr_psprintf(r->pool, java_script, c->redirect_uri), OK);
-	return oidc_util_http_sendstring(r, apr_psprintf(r->pool, java_script, c->redirect_uri), HTTP_MOVED_TEMPORARILY);
+	//return oidc_util_http_sendstring(r, apr_psprintf(r->pool, java_script, c->redirect_uri), HTTP_MOVED_TEMPORARILY);
+	return oidc_util_http_sendstring(r, java_script, HTTP_MOVED_TEMPORARILY);
 }
 
