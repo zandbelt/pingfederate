@@ -247,6 +247,7 @@ char *oidc_util_escape_string(const request_rec *r, const char *str);
 char *oidc_util_unescape_string(const request_rec *r, const char *str);
 apr_byte_t oidc_util_read_post(request_rec *r, apr_table_t *table);
 apr_byte_t oidc_util_generate_random_base64url_encoded_value(request_rec *r, int randomLen, char **randomB64);
+apr_byte_t oidc_util_file_read(request_rec *r, const char *path, char **result);
 
 int oidc_base64url_decode_rsa_verify(request_rec *r, const char *alg, const char *signature, const char *message, const char *modulus, const char *exponent);
 

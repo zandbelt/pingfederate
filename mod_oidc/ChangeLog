@@ -1,3 +1,8 @@
+3/9/2014
+- improve javascript for implicit post
+- always check the signature on the id_token now, Basic or Implicit
+- factor out reading files in oidc_util 
+
 3/6/2014
 - add/fix termination of subrequest processing after sending javascript for implicit client profile
 - support configuring/overriding the token_endpoint authentication method in client metadata

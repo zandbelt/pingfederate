@@ -876,3 +876,78 @@ static apr_byte_t oidc_util_read(request_rec *r, const char **rbuf) {
 	}
 	return TRUE;
  }
+
+/*
+ * read a file from a path on disk
+ */
+apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
+ 		char **result) {
+ 	apr_file_t *fd = NULL;
+ 	apr_status_t rc = APR_SUCCESS;
+ 	char s_err[128];
+ 	apr_finfo_t finfo;
+
+ 	/* open the file if it exists */
+ 	if ((rc = apr_file_open(&fd, path, APR_FOPEN_READ | APR_FOPEN_BUFFERED,
+ 			APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
+ 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+ 				"oidc_util_file_read: no file found at: \"%s\"",
+ 				path);
+ 		return FALSE;
+ 	}
+
+ 	/* the file exists, now lock it */
+ 	apr_file_lock(fd, APR_FLOCK_EXCLUSIVE);
+
+ 	/* move the read pointer to the very start of the cache file */
+ 	apr_off_t begin = 0;
+ 	apr_file_seek(fd, APR_SET, &begin);
+
+ 	/* get the file info so we know its size */
+ 	if ((rc = apr_file_info_get(&finfo, APR_FINFO_SIZE, fd)) != APR_SUCCESS) {
+ 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+ 				"oidc_util_file_read: error calling apr_file_info_get on file: \"%s\" (%s)",
+ 				path, apr_strerror(rc, s_err, sizeof(s_err)));
+ 		goto error_close;
+ 	}
+
+ 	/* now that we have the size of the file, allocate a buffer that can contain its contents */
+ 	*result = apr_palloc(r->pool, finfo.size);
+
+ 	/* read the file in to the buffer */
+ 	apr_size_t bytes_read = 0;
+ 	if ((rc = apr_file_read_full(fd, *result, finfo.size, &bytes_read))
+ 			!= APR_SUCCESS) {
+ 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+ 				"oidc_util_file_read: apr_file_read_full on (%s) returned an error: %s",
+ 				path, apr_strerror(rc, s_err, sizeof(s_err)));
+ 		goto error_close;
+ 	}
+
+ 	/* check that we've got all of it */
+ 	if (bytes_read != finfo.size) {
+ 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+ 				"oidc_util_file_read: apr_file_read_full on (%s) returned less bytes (%" APR_SIZE_T_FMT ") than expected: (%" APR_OFF_T_FMT ")",
+ 				path, bytes_read, finfo.size);
+ 		goto error_close;
+ 	}
+
+ 	/* we're done, unlock and close the file */
+ 	apr_file_unlock(fd);
+ 	apr_file_close(fd);
+
+ 	/* log successful content retrieval */
+ 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+ 			"oidc_util_file_read: file read successfully \"%s\"", path);
+
+ 	return TRUE;
+
+error_close:
+	apr_file_unlock(fd);
+ 	apr_file_close(fd);
+
+ 	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+ 			"oidc_util_file_read: returning error");
+
+ 	return FALSE;
+ }

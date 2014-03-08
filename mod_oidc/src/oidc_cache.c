@@ -229,7 +229,7 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 	apr_file_unlock(fd);
 	apr_file_close(fd);
 
-	/* log a succesful cache hit */
+	/* log a successful cache hit */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_cache_get: cache hit for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expiring in: %" APR_TIME_T_FMT ")",
 			key, info.len, apr_time_sec(info.expire - apr_time_now()));
