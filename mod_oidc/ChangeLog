@@ -4,6 +4,7 @@
 - factor out reading files in oidc_util 
 - revert adding /0 at end of file
 - add option to specify id_token_signed_response_alg during dynamic client registration
+- check return value on oidc_base64url_decode_decrypt_string for state and session cookie
 
 3/6/2014
 - add/fix termination of subrequest processing after sending javascript for implicit client profile

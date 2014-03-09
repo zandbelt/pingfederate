@@ -77,6 +77,7 @@
 
 #include "mod_oidc.h"
 
+// TODO: use oidc_get_current_url + configured RedirectURIPath to determine the RedirectURI more dynamically
 // TODO: do we always want to refresh keys when signature does not validate? (risking DOS attacks, or does the nonce help against that?)
 //       do we now still want to refresh jkws once per hour (it helps to reduce the number of failed verifications, at the cost of too-many-downloads overhead)
 //       refresh metadata once-per too? (for non-signing key changes)
@@ -207,7 +208,7 @@ static int oidc_check_state(request_rec *r, oidc_cfg *c, const char *state,
 
 	/* decrypt the state obtained from the cookie */
 	char *svalue;
-	oidc_base64url_decode_decrypt_string(r, &svalue, cookieValue);
+	if (oidc_base64url_decode_decrypt_string(r, &svalue, cookieValue) <= 0) return FALSE;
 
 	/* context to iterate over the entries in the decrypted state cookie value */
 	char *ctx = NULL;
