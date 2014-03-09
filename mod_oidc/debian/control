@@ -9,9 +9,8 @@ Homepage: https://code.google.com/p/pingfederate/source/browse/trunk/mod_oidc/RE
 #Vcs-Browser: http://git.debian.org/?p=collab-maint/libapache2-mod-oidc.git;a=summary
 
 Package: libapache2-mod-oidc
-Section: web
 Architecture: any
-Depends: apache2-api-20120211, ${shlibs:Depends}, ${misc:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: OpenID Connect authentication module for Apache
  mod-oidc is an Apache module which enables you to authenticate
  users of a web site against an OpenID Connect enabled OP. It can grant
