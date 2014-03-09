@@ -134,6 +134,8 @@ typedef struct oidc_cfg {
 	char *redirect_uri;
 	/* (optional) external OP discovery page */
 	char *discover_url;
+	/* (optional) the signing algorithm the OP should use (used in dynamic client registration only) */
+	char *id_token_alg;
 
 	/* a pointer to the (single) provider that we connect to */
 	/* NB: if metadata_dir is set, these settings will function as defaults for the metadata read from there) */
@@ -222,6 +224,7 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
 const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg);
 const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg);
 const char *oidc_set_response_type(cmd_parms *cmd, void *struct_ptr, const char *arg);
+const char *oidc_set_id_token_alg(cmd_parms *cmd, void *struct_ptr, const char *arg);
 
 char *oidc_get_cookie_path(request_rec *r);
 

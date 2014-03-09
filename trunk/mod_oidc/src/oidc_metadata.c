@@ -808,7 +808,9 @@ static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
 	apr_table_t *params = apr_table_make(r->pool, 3);
 	apr_table_addn(params, "client_name", cfg->provider.client_name);
 
-	//apr_table_addn(params, "id_token_signed_response_alg", "PS256");
+	if (cfg->id_token_alg != NULL) {
+		apr_table_addn(params, "id_token_signed_response_alg", cfg->id_token_alg);
+	}
 
 	int action = OIDC_HTTP_POST_JSON;
 

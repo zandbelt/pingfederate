@@ -2,6 +2,8 @@
 - improve javascript for implicit post
 - always check the signature on the id_token now, Basic or Implicit
 - factor out reading files in oidc_util 
+- revert adding /0 at end of file
+- add option to specify id_token_signed_response_alg during dynamic client registration
 
 3/6/2014
 - add/fix termination of subrequest processing after sending javascript for implicit client profile
