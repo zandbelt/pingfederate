@@ -1,3 +1,0 @@
-src/.libs/mod_oidc.so usr/lib/apache2/modules
-debian/oidc.load /etc/apache2/mods-available
-debian/oidc.conf /etc/apache2/mods-available
