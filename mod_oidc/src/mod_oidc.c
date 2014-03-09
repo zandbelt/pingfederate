@@ -1138,6 +1138,7 @@ const command_rec oidc_config_cmds[] =
 		AP_INIT_TAKE1("OIDCProviderJwksUri", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.jwks_uri), RSRC_CONF, "Define the OpenID OP JWKS URL (e.g.: https://macbook:9031/pf/JWKS)"),
 
 		AP_INIT_TAKE1("OIDCResponseType", oidc_set_response_type, (void *)APR_OFFSETOF(oidc_cfg, provider.response_type), RSRC_CONF, "The response type (or OpenID Connect Flow) used; must be one of \"code\", \"id_token\", or \"id_token token\" (serves as default value for discovered OPs too)"),
+		AP_INIT_TAKE1("OIDCIDTokenAlg", oidc_set_id_token_alg, (void *)APR_OFFSETOF(oidc_cfg, id_token_alg), RSRC_CONF, "The algorithm that the OP should use to sign the id_token (used only in dynamic client registration); must be one of [RS256|RS384|RS512|PS256|PS384|PS512]"),
 		AP_INIT_FLAG("OIDCSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.ssl_validate_server), RSRC_CONF, "Require validation of the OpenID Connect OP SSL server certificate for successful authentication (On or Off)"),
 		AP_INIT_TAKE1("OIDCClientName", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.client_name), RSRC_CONF, "Define the (client_name) name that the client uses for dynamic registration to the OP."),
 		AP_INIT_TAKE1("OIDCClientContact", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.client_contact), RSRC_CONF, "Define the contact that the client registers in dynamic registration with the OP."),

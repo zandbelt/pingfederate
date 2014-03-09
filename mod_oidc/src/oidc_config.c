@@ -277,7 +277,25 @@ const char *oidc_set_response_type(cmd_parms *cmd, void *struct_ptr,
 
 		return ap_set_string_slot(cmd, cfg, arg);
 	}
-	return "parameter must be 'code', 'id_token', 'id_token token' or 'token id_token'";
+	return "parameter must be one of 'code', 'id_token', 'id_token token' or 'token id_token'";
+}
+
+/*
+ * set the id_token signing algorithm to be used by the OP
+ * TODO: align supported functions with oidc_crypto_jwt_alg2padding and metadata_is_valid function
+ */
+const char *oidc_set_id_token_alg(cmd_parms *cmd, void *struct_ptr,
+		const char *arg) {
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+
+	if ((apr_strnatcmp(arg, "RS256") == 0)
+			|| (apr_strnatcmp(arg, "RS384") == 0) || (apr_strnatcmp(arg, "RS512") == 0) || (apr_strnatcmp(arg, "PS256") == 0)
+			|| (apr_strnatcmp(arg, "PS384") == 0) || (apr_strnatcmp(arg, "PS512") == 0)) {
+
+		return ap_set_string_slot(cmd, cfg, arg);
+	}
+	return "parameter must be one of 'RS256', 'RS384', 'RS512', 'PS256', 'PS384' or 'PS512'";
 }
 
 /*
@@ -326,6 +344,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 
 	c->redirect_uri = NULL;
 	c->discover_url = NULL;
+	c->id_token_alg = NULL;
 
 	c->provider.issuer = NULL;
 	c->provider.authorization_endpoint_url = NULL;
@@ -380,6 +399,8 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->redirect_uri != NULL ? add->redirect_uri : base->redirect_uri;
 	c->discover_url =
 			add->discover_url != NULL ? add->discover_url : base->discover_url;
+	c->id_token_alg =
+			add->id_token_alg != NULL ? add->id_token_alg : base->id_token_alg;
 
 	c->provider.issuer =
 			add->provider.issuer != NULL ?

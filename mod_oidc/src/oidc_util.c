@@ -912,7 +912,7 @@ apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
  	}
 
  	/* now that we have the size of the file, allocate a buffer that can contain its contents */
- 	*result = apr_palloc(r->pool, finfo.size);
+ 	*result = apr_palloc(r->pool, finfo.size + 1);
 
  	/* read the file in to the buffer */
  	apr_size_t bytes_read = 0;
@@ -923,6 +923,9 @@ apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
  				path, apr_strerror(rc, s_err, sizeof(s_err)));
  		goto error_close;
  	}
+
+	/* just to be sure, we set a \0 (we allocated space for it anyway) */
+ 	(*result)[bytes_read] = '\0';
 
  	/* check that we've got all of it */
  	if (bytes_read != finfo.size) {
