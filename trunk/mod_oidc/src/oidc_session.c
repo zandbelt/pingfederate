@@ -358,7 +358,9 @@ static apr_status_t oidc_session_load_cookie(request_rec *r, session_rec *z) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
 	char *cookieValue = oidc_get_cookie(r, d->cookie);
-	oidc_base64url_decode_decrypt_string(r, (char **)&z->encoded, cookieValue);
+	if (oidc_base64url_decode_decrypt_string(r, (char **)&z->encoded, cookieValue) <= 0) {
+		return APR_EGENERAL;
+	}
 
 	return APR_SUCCESS;
 }
