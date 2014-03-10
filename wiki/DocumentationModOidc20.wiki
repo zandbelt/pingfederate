@@ -2,12 +2,12 @@
 
 === Download ===
 
-http://www.pingidentity.nl/downloads/
+https://www.pingidentity.nl/downloads/
 
 === README ===
 
-http://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/README
+https://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/README
 
 === Configuration ===
 
-http://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/debian/oidc.conf
+https://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/debian/oidc.conf
