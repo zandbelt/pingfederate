@@ -7,7 +7,7 @@ using the OpenID Connect Basic Client or Implict Client profile.
 It sets the REMOTE_USER variable to the id_token sub claim, other id_token claims
 are passed in HTTP headers, together with those (optionally) obtained from the user info endpoint
 
-It allows for authorization rules (based on Requires primitive) that can do matching against the
+It allows for authorization rules (based on Requires primitive) that be matched against the
 set of claims provided in the id_token/userinfo.
 
 It supports multiple OpenID Connect Providers by reading provider metadata files from a
@@ -20,7 +20,7 @@ specified issuer, it contains a registration_endpoint setting, but no matching v
 metadata (cq."<urlencoded-issuer>.client") file can be found in the metadata directory.
 
 It supports OpenID Provider Discovery through account names (cq. <name>@<domain>) by setting
-OIDCMetadataDir (which needs to be writeable for the Apache process in this case), and
+OIDCMetadataDir (which needs to be writable for the Apache process in this case), and
 calling (HTTP GET) the Redirect URI with an oidc_acct parameter that contains the user account
 name (see sample config for multiple OPs and an external Discovery page below).
 
@@ -36,7 +36,7 @@ Example config for using Google Apps as your OpenID Connect Provider:
 (running on localhost and https://localhost/example/ registered as redirect_uri for the client)
 ==========================================================
 OIDCProviderIssuer accounts.google.com
-OIDCProviderAuthorizationEndpoint https://accounts.google.com/o/oauth2/auth?hd=<your-domain>&approval_prompt=force
+OIDCProviderAuthorizationEndpoint https://accounts.google.com/o/oauth2/auth?approval_prompt=force&[hd=<your-domain>]
 OIDCProviderTokenEndpoint https://accounts.google.com/o/oauth2/token
 OIDCProviderTokenEndpointAuth client_secret_post
 OIDCProviderUserInfoEndpoint https://www.googleapis.com/oauth2/v3/userinfo
@@ -47,7 +47,7 @@ OIDCClientSecret <your-client-secret-administered-through-the-google-api-console
 
 OIDCScope "openid email profile"
 OIDCRedirectURI https://localhost/example/
-OIDCCryptoPassphrase <some-generated-password>
+OIDCCryptoPassphrase <password>
 
 <Location /example/>
    Authtype openid-connect
@@ -84,7 +84,7 @@ And the related mod_oidc Apache config section:
 OIDCMetadataDir <somewhere>/metadata
 
 OIDCRedirectURI https://localhost/example/
-OIDCCryptoPassphrase <somestring>
+OIDCCryptoPassphrase <password>
 
 <Location /example/>
    Authtype openid-connect
@@ -120,7 +120,7 @@ OIDCClientID ac_oic_client
 OIDCClientSecret abc123DEFghijklmnop4567rstuvwxyzZYXWUT8910SRQPOnmlijhoauthplaygroundapplication
 
 OIDCRedirectURI https://localhost/example/
-OIDCCryptoPassphrase <somestring>
+OIDCCryptoPassphrase <password>
 OIDCScope "openid email profile"
 
 OIDCOAuthEndpoint https://macbook:9031/as/token.oauth2

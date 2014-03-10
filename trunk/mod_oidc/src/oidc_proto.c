@@ -204,7 +204,7 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 			APR_HASH_KEY_STRING);
 	if ((exp == NULL) || (exp->type != APR_JSON_LONG)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_proto_is_valid_idtoken: response JSON object did not contain an \"exp\" number");
+				"oidc_proto_is_valid_idtoken: response JSON object did not contain an \"exp\" number value");
 		return FALSE;
 	}
 
@@ -218,9 +218,30 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 	/* return the "exp" value in the "expires" return parameter */
 	*expires = apr_time_from_sec(exp->value.lnumber);
 
+	/* get the "iat" value from the JSON payload */
+	apr_json_value_t *iat = apr_hash_get(j_payload->value.object, "iat",
+			APR_HASH_KEY_STRING);
+	if ((iat == NULL) || (iat->type != APR_JSON_LONG)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_proto_is_valid_idtoken: response JSON object did not contain an \"iat\" number value");
+		return FALSE;
+	}
+
+	/* check if this id_token has been issued just now +- 60 secondss */
+	if ((apr_time_sec(apr_time_now()) - OIDC_IDTOKEN_IAT_SLACK) > iat->value.lnumber) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_proto_is_valid_idtoken: token was issued more than 1 minute ago");
+		return FALSE;
+	}
+	if ((apr_time_sec(apr_time_now()) + OIDC_IDTOKEN_IAT_SLACK) < iat->value.lnumber) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_proto_is_valid_idtoken: token was issued more than 1 minute in the future");
+		return FALSE;
+	}
+
 	if (nonce != NULL) {
-		/* cache the nonce for the expiry time of the token for replay prevention */
-		oidc_cache_set(r, nonce, nonce, *expires);
+		/* cache the nonce for the window time of the token for replay prevention plus 10 seconds for safety */
+		oidc_cache_set(r, nonce, nonce, apr_time_from_sec(OIDC_IDTOKEN_IAT_SLACK * 2 + 10));
 	}
 
 	/* get the "azp" value from the JSON payload, which may be NULL */
@@ -495,6 +516,20 @@ static apr_json_value_t * oidc_proto_get_key_from_jwk_uri(request_rec *r, oidc_c
 	return key;
 }
 
+static apr_byte_t oidc_proto_idtoken_verify_hmac(request_rec *r, oidc_cfg *cfg, oidc_provider_t *provider, apr_json_value_t *j_header, const char *signature, const char *message) {
+
+	unsigned char *key = (unsigned char *)provider->client_secret;
+	int key_len = strlen(provider->client_secret);
+
+	unsigned char *sig = NULL;
+	int sig_len = oidc_base64url_decode(r, (char **)&sig, signature, 1);
+
+	apr_json_value_t *alg = apr_hash_get(j_header->value.object, "alg",
+			APR_HASH_KEY_STRING);
+
+	return oidc_crypto_hmac_verify(r, alg->value.string.p, sig, sig_len, (unsigned char *)message, strlen(message), key, key_len);
+}
+
 /*
  * verify the signature on an id_token
  */
@@ -606,9 +641,16 @@ apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_cfg *cfg,
 //		apr_byte_t refresh = FALSE;
 //		if (oidc_proto_idtoken_verify_signature(r, cfg, provider, j_header, signature, apr_pstrcat(r->pool, header, ".", payload, NULL), &refresh) == FALSE) return FALSE;
 //	}
-	/* verify the signature on the id_token */
-	apr_byte_t refresh = FALSE;
-	if (oidc_proto_idtoken_verify_signature(r, cfg, provider, j_header, signature, apr_pstrcat(r->pool, header, ".", payload, NULL), &refresh) == FALSE) return FALSE;
+
+	apr_json_value_t *algorithm = apr_hash_get(j_header->value.object, "alg", APR_HASH_KEY_STRING);
+	if (strncmp(algorithm->value.string.p, "HS", 2) == 0) {
+		/* verify the HMAC signature on the id_token */
+		if (oidc_proto_idtoken_verify_hmac(r, cfg, provider, j_header, signature, apr_pstrcat(r->pool, header, ".", payload, NULL)) == FALSE) return FALSE;
+	} else {
+		/* verify the RSA signature on the id_token */
+		apr_byte_t refresh = FALSE;
+		if (oidc_proto_idtoken_verify_signature(r, cfg, provider, j_header, signature, apr_pstrcat(r->pool, header, ".", payload, NULL), &refresh) == FALSE) return FALSE;
+	}
 
 	/* parse the payload */
 	oidc_base64url_decode(r, s_payload, payload, 1);
@@ -695,7 +737,7 @@ apr_byte_t oidc_proto_resolve_code(request_rec *r, oidc_cfg *cfg,
 			provider->ssl_validate_server, &response,
 			cfg->http_timeout_long) == FALSE) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_proto_resolve_code: could not succesfully resolve the \"code\" (%s) against the tokent endpont (%s)",
+				"oidc_proto_resolve_code: could not successfully resolve the \"code\" (%s) against the token endpoint (%s)",
 				code, provider->token_endpoint_url);
 		return FALSE;
 	}

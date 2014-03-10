@@ -1,3 +1,10 @@
+3/10/2014
+- version 2.0
+- Debian packaging
+- more complete documentation of configuration primitives
+- iat checking with 60 seconds slack and iat-based nonce caching
+- support for HMAC verification (HS256, HS384, HS512)
+
 3/9/2014
 - improve javascript for implicit post
 - always check the signature on the id_token now, Basic or Implicit
@@ -5,6 +12,7 @@
 - revert adding /0 at end of file
 - add option to specify id_token_signed_response_alg during dynamic client registration
 - check return value on oidc_base64url_decode_decrypt_string for state and session cookie
+- allow token_endpoint and jwks_uri not to be set in OP metadata (for self-issued support)
 
 3/6/2014
 - add/fix termination of subrequest processing after sending javascript for implicit client profile

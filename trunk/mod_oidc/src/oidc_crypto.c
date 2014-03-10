@@ -59,11 +59,14 @@
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 #include <openssl/rsa.h>
+#include <openssl/hmac.h>
 #include <openssl/err.h>
 
 #include "mod_oidc.h"
 
-/* initialize the crypt context in the server configuration record; the passphrase is set already */
+/*
+ * initialize the crypt context in the server configuration record; the passphrase is set already
+ */
 static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 
 	if (cfg->encrypt_ctx != NULL)
@@ -115,7 +118,9 @@ static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 	return TRUE;
 }
 
-/* encrypt plaintext */
+/*
+ * AES encrypt plaintext
+ */
 unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg,
 		unsigned char *plaintext, int *len) {
 
@@ -152,7 +157,9 @@ unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg,
 	return ciphertext;
 }
 
-/* decrypt ciphertext */
+/*
+ * AES decrypt ciphertext
+ */
 unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
 		unsigned char *ciphertext, int *len) {
 
@@ -189,14 +196,17 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
 	return plaintext;
 }
 
+/*
+ * return OpenSSL digest for JWK algorithm
+ */
 char *oidc_crypto_jwt_alg2digest(const char *alg) {
-	if ((strcmp(alg, "RS256") == 0) || (strcmp(alg, "PS256") == 0)) {
+	if ((strcmp(alg, "RS256") == 0) || (strcmp(alg, "PS256") == 0) || (strcmp(alg, "HS256") == 0)) {
 		return "sha256";
 	}
-	if ((strcmp(alg, "RS384") == 0) || (strcmp(alg, "PS384") == 0)) {
+	if ((strcmp(alg, "RS384") == 0) || (strcmp(alg, "PS384") == 0) || (strcmp(alg, "HS384") == 0)) {
 		return "sha384";
 	}
-	if ((strcmp(alg, "RS512") == 0) || (strcmp(alg, "PS512") == 0)) {
+	if ((strcmp(alg, "RS512") == 0) || (strcmp(alg, "PS512") == 0) || (strcmp(alg, "HS512") == 0)) {
 		return "sha512";
 	}
 	if (strcmp(alg, "NONE") == 0) {
@@ -205,7 +215,10 @@ char *oidc_crypto_jwt_alg2digest(const char *alg) {
 	return NULL;
 }
 
-static int oidc_crypto_jwt_alg2padding(const char *alg) {
+/*
+ * return OpenSSL padding type for JWK RSA algorithm
+ */
+static int oidc_crypto_jwt_alg2rsa_padding(const char *alg) {
 	if ((strcmp(alg, "RS256") == 0) || (strcmp(alg, "RS384") == 0) || (strcmp(alg, "RS512") == 0)) {
 		return RSA_PKCS1_PADDING;
 	}
@@ -215,13 +228,41 @@ static int oidc_crypto_jwt_alg2padding(const char *alg) {
 	return -1;
 }
 
+static const EVP_MD *oidc_crypto_alg2evp(request_rec *r, const char *alg) {
+	const EVP_MD *result = NULL;
+
+	char *digest = oidc_crypto_jwt_alg2digest(alg);
+
+	if (digest == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+			"oidc_crypto_alg2evp: unsupported algorithm: %s", alg);
+		return NULL;
+	}
+
+	result = EVP_get_digestbyname(digest);
+
+	if (result == NULL) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_alg2evp: EVP_get_digestbyname failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		return NULL;
+	}
+
+	return result;
+}
+
+/*
+ * verify RSA signature
+ */
 apr_byte_t oidc_crypto_rsa_verify(request_rec *r, const char *alg, unsigned char* sig, int sig_len, unsigned char* msg,
 		int msg_len, unsigned char *mod, int mod_len, unsigned char *exp, int exp_len) {
 
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_crypto_rsa_verify: entering (%s)", alg);
+
+	const EVP_MD *digest = NULL;
+	if ((digest = oidc_crypto_alg2evp(r, alg)) == NULL) return FALSE;
 
 	apr_byte_t rc = FALSE;
-
-	char *digest = oidc_crypto_jwt_alg2digest(alg);
 
 	EVP_MD_CTX ctx;
 	EVP_MD_CTX_init(&ctx);
@@ -251,21 +292,13 @@ apr_byte_t oidc_crypto_rsa_verify(request_rec *r, const char *alg, unsigned char
 				"oidc_crypto_rsa_verify: EVP_PKEY_verify_init failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		goto end;
     }
-	if (!EVP_PKEY_CTX_set_rsa_padding(ctx.pctx, oidc_crypto_jwt_alg2padding(alg))) {
+	if (!EVP_PKEY_CTX_set_rsa_padding(ctx.pctx, oidc_crypto_jwt_alg2rsa_padding(alg))) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_crypto_rsa_verify: EVP_PKEY_CTX_set_rsa_padding failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		goto end;
 	}
 
-    //OpenSSL_add_all_digests();
-	const EVP_MD *dgst = EVP_get_digestbyname(digest);
-	if (dgst == NULL) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_rsa_verify: EVP_get_digestbyname failed: %s", ERR_error_string(ERR_get_error(), NULL));
-		goto end;
-	}
-
-	if (!EVP_VerifyInit_ex(&ctx, dgst, NULL)) {
+	if (!EVP_VerifyInit_ex(&ctx, digest, NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_crypto_rsa_verify: EVP_VerifyInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		goto end;
@@ -294,4 +327,40 @@ end:
 	EVP_MD_CTX_cleanup(&ctx);
 
 	return rc;
+}
+
+/*
+ * verify HMAC signature
+ */
+apr_byte_t oidc_crypto_hmac_verify(request_rec *r, const char *alg, unsigned char* sig, int sig_len, unsigned char* msg,
+		int msg_len, unsigned char *key, int key_len) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_crypto_hmac_verify: entering (%s)", alg);
+
+	const EVP_MD *digest = NULL;
+	if ((digest = oidc_crypto_alg2evp(r, alg)) == NULL) return FALSE;
+
+	unsigned int  md_len = 0;
+	unsigned char md[EVP_MAX_MD_SIZE];
+
+	if (!HMAC(digest, key, key_len, msg, msg_len, md, &md_len)) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+			"oidc_crypto_hmac_verify: HMAC failed: %s", ERR_error_string(ERR_get_error(), NULL));
+		return FALSE;
+	}
+
+	if (md_len != sig_len) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_hmac_verify: hash length does not match signature length");
+		return FALSE;
+	}
+
+	if (memcmp(md, sig, md_len) != 0) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_crypto_hmac_verify: HMAC verification failed");
+		return FALSE;
+	}
+
+	return TRUE;
 }
