@@ -1,0 +1,9 @@
+#summary Documentation for mod_oidc 2.0.
+
+=== README ===
+
+http://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/README
+
+=== Configuration ===
+
+http://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/debian/oidc.conf
