@@ -512,10 +512,11 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 		goto out;
 	}
 
+	*response = apr_pstrndup(r->pool, curlBuffer.buf, curlBuffer.written);
+
 	/* set and log the response */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_util_http_call: response=%s", curlBuffer.buf);
-	*response = apr_pstrndup(r->pool, curlBuffer.buf, strlen(curlBuffer.buf));
+			"oidc_util_http_call: response=%s", *response);
 
 	out:
 

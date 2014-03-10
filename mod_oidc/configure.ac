@@ -1,4 +1,4 @@
-AC_INIT([mod_oidc],[2.0],[hans.zandbelt@gmail.com])
+AC_INIT([mod_oidc],[2.0.1],[hans.zandbelt@gmail.com])
 
 AC_SUBST(NAMEVER, AC_PACKAGE_TARNAME()-AC_PACKAGE_VERSION())
 

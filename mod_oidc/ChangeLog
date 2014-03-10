@@ -1,4 +1,9 @@
 3/10/2014
+- version 2.0.1
+- extend iat window to 10 minutes (due to interop test results Google/Mitre...)
+- don't write more than strlen for metadata files
+
+3/10/2014
 - version 2.0
 - Debian packaging
 - more complete documentation of configuration primitives

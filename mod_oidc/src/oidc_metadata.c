@@ -444,7 +444,7 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
 	apr_file_seek(fd, APR_SET, &begin);
 
 	/* calculate the length of the data, which is a string length */
-	apr_size_t len = strlen(data) + 1;
+	apr_size_t len = strlen(data);
 
 	/* (blocking) write the number of bytes in the buffer */
 	rc = apr_file_write_full(fd, data, len, &bytes_written);
