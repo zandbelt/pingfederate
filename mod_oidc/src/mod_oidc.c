@@ -77,15 +77,12 @@
 
 #include "mod_oidc.h"
 
+// TODO: support PS??? algorithms
 // TODO: use oidc_get_current_url + configured RedirectURIPath to determine the RedirectURI more dynamically
 // TODO: do we always want to refresh keys when signature does not validate? (risking DOS attacks, or does the nonce help against that?)
 //       do we now still want to refresh jkws once per hour (it helps to reduce the number of failed verifications, at the cost of too-many-downloads overhead)
 //       refresh metadata once-per too? (for non-signing key changes)
-// TODO: use 'iat' (and check for mandatory claim in validate_idtoken) instead of 'exp' for nonce caching?
-
 // TODO: check the Apache 2.4 compilation/#defines
-// TODO: user documentation (at least of configuration primitives)
-// TODO: support PS??? algorithms?
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -1134,7 +1131,7 @@ const command_rec oidc_config_cmds[] =
 		AP_INIT_TAKE1("OIDCProviderIssuer", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.issuer), RSRC_CONF, "OpenID Connect OP issuer identifier."),
 		AP_INIT_TAKE1("OIDCProviderAuthorizationEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.authorization_endpoint_url), RSRC_CONF, "Define the OpenID OP Authorization Endpoint URL (e.g.: https://localhost:9031/as/authorization.oauth2)"),
 		AP_INIT_TAKE1("OIDCProviderTokenEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_url), RSRC_CONF, "Define the OpenID OP Token Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
-		AP_INIT_TAKE1("OIDCProviderTokenEndpointAuth", oidc_set_endpoint_auth_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_auth), RSRC_CONF, "Specify an authentication method for the OpenID OP Token Endpoint (e.g.: client_auth_basic)"),
+		AP_INIT_TAKE1("OIDCProviderTokenEndpointAuth", oidc_set_endpoint_auth_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_auth), RSRC_CONF, "Specify an authentication method for the OpenID OP Token Endpoint (e.g.: client_secret_basic)"),
 		AP_INIT_TAKE1("OIDCProviderUserInfoEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.userinfo_endpoint_url), RSRC_CONF, "Define the OpenID OP UserInfo Endpoint URL (e.g.: https://localhost:9031/idp/userinfo.openid)"),
 		AP_INIT_TAKE1("OIDCProviderJwksUri", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.jwks_uri), RSRC_CONF, "Define the OpenID OP JWKS URL (e.g.: https://macbook:9031/pf/JWKS)"),
 

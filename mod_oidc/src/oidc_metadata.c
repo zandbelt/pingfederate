@@ -272,9 +272,9 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 			"token_endpoint", APR_HASH_KEY_STRING);
 	if ((j_token_endpoint == NULL)
 			|| (j_token_endpoint->type != APR_JSON_STRING)) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
 				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"token_endpoint\" string");
-		return FALSE;
+		//return FALSE;
 	}
 
 	/* get a handle to the user_info endpoint */
@@ -291,9 +291,9 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 	apr_json_value_t *j_jwks_uri = apr_hash_get(j_provider->value.object,
 			"jwks_uri", APR_HASH_KEY_STRING);
 	if ((j_jwks_uri == NULL) || (j_jwks_uri->type != APR_JSON_STRING)) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
 				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"jwks_uri\" string");
-		return FALSE;
+		//return FALSE;
 	}
 
 	/* find out what type of authentication the token endpoint supports (we only support post or basic) */
@@ -1083,14 +1083,16 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 	provider->issuer = apr_pstrdup(r->pool, j_issuer->value.string.p);
 	provider->authorization_endpoint_url = apr_pstrdup(r->pool,
 			j_authorization_endpoint->value.string.p);
-	provider->token_endpoint_url = apr_pstrdup(r->pool,
-			j_token_endpoint->value.string.p);
+	if (j_token_endpoint != NULL)
+		provider->token_endpoint_url = apr_pstrdup(r->pool,
+				j_token_endpoint->value.string.p);
 	provider->token_endpoint_auth = apr_pstrdup(r->pool,
 			oidc_metadata_token_endpoint_auth(r, j_client, j_provider));
 	if (j_userinfo_endpoint != NULL)
 		provider->userinfo_endpoint_url = apr_pstrdup(r->pool,
 				j_userinfo_endpoint->value.string.p);
-	provider->jwks_uri = apr_pstrdup(r->pool, j_jwks_uri->value.string.p);
+	if (j_jwks_uri != NULL)
+		provider->jwks_uri = apr_pstrdup(r->pool, j_jwks_uri->value.string.p);
 	provider->response_type = apr_pstrdup(r->pool, response_type);
 
 	// CLIENT

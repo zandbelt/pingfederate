@@ -49,8 +49,6 @@
  * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
  */
 
-#include <curl/curl.h>
-
 #include <apr_strings.h>
 #include <apr_base64.h>
 #include <apr_lib.h>
@@ -60,6 +58,8 @@
 #include <http_log.h>
 #include <http_request.h>
 #include "http_protocol.h"
+
+#include <curl/curl.h>
 
 #include "mod_oidc.h"
 
@@ -747,7 +747,7 @@ apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r,
 	}
 
 	// see if it is not an error response somehow
-	if (oidc_util_check_json_error(r, *json))
+	if (oidc_util_check_json_error(r, *json) == TRUE)
 		return FALSE;
 
 	return TRUE;

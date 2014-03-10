@@ -291,11 +291,12 @@ const char *oidc_set_id_token_alg(cmd_parms *cmd, void *struct_ptr,
 
 	if ((apr_strnatcmp(arg, "RS256") == 0)
 			|| (apr_strnatcmp(arg, "RS384") == 0) || (apr_strnatcmp(arg, "RS512") == 0) || (apr_strnatcmp(arg, "PS256") == 0)
-			|| (apr_strnatcmp(arg, "PS384") == 0) || (apr_strnatcmp(arg, "PS512") == 0)) {
+			|| (apr_strnatcmp(arg, "PS384") == 0) || (apr_strnatcmp(arg, "PS512") == 0) || (apr_strnatcmp(arg, "HS256") == 0)
+			|| (apr_strnatcmp(arg, "HS384") == 0) || (apr_strnatcmp(arg, "HS512") == 0)) {
 
 		return ap_set_string_slot(cmd, cfg, arg);
 	}
-	return "parameter must be one of 'RS256', 'RS384', 'RS512', 'PS256', 'PS384' or 'PS512'";
+	return "parameter must be one of 'RS256', 'RS384', 'RS512', 'HS256', 'HS384', 'HS512', 'PS256', 'PS384' or 'PS512'";
 }
 
 /*
@@ -565,10 +566,12 @@ static int oidc_check_config_oidc(server_rec *s, oidc_cfg *c) {
 		if (c->provider.authorization_endpoint_url == NULL)
 			return oidc_check_config_error(s,
 					"OIDCProviderAuthorizationEndpoint");
+		// TODO: this depends on the configured OIDCResponseType now
 		if (c->provider.token_endpoint_url == NULL)
 			return oidc_check_config_error(s, "OIDCProviderTokenEndpoint");
 		if (c->provider.client_id == NULL)
 			return oidc_check_config_error(s, "OIDCClientID");
+		// TODO: this depends on the configured OIDCResponseType now
 		if (c->provider.client_secret == NULL)
 			return oidc_check_config_error(s, "OIDCClientSecret");
 	}
