@@ -1,0 +1,3 @@
+libapache2-mod-oidc: non-standard-dir-perm var/cache/apache2/mod_oidc/ 0700 != 0755
+libapache2-mod-oidc: non-standard-dir-perm var/cache/apache2/mod_oidc/metadata/ 0700 != 0755
+libapache2-mod-oidc: non-standard-dir-perm var/cache/apache2/mod_oidc/cache/ 0700 != 0755
