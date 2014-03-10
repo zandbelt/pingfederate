@@ -1,5 +1,9 @@
 #summary Documentation for mod_oidc 2.0.
 
+=== Download ===
+
+http://www.pingidentity.nl/downloads/
+
 === README ===
 
 http://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/README
