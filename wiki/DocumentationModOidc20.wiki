@@ -6,8 +6,8 @@ https://www.pingidentity.nl/downloads/
 
 === README ===
 
-https://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/README
+https://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0.1/README
 
 === Configuration ===
 
-https://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0/debian/oidc.conf
+https://pingfederate.googlecode.com/svn/tags/mod_oidc/2.0.1/debian/oidc.conf
