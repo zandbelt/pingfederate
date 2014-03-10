@@ -101,7 +101,7 @@
 #define OIDC_HTTP_POST_JSON 2
 
 /* for issued-at timestamp (iat) checking */
-#define OIDC_IDTOKEN_IAT_SLACK 60
+#define OIDC_IDTOKEN_IAT_SLACK 600
 
 typedef struct oidc_provider_t {
 	char *issuer;

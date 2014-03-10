@@ -1,3 +1,9 @@
+libapache2-mod-oidc (2.0.1) unstable; urgency=low
+
+  * increase iat window; correct metadata file writes
+
+ -- Hans Zandbelt <hans.zandbelt@gmail.com>  Mon, 10 Mar 2014 14:37:51 +0100
+
 libapache2-mod-oidc (2.0) unstable; urgency=low
 
   * Initial release, following source-only 1.0 release.
