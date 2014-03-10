@@ -1,0 +1,3 @@
+mod src/.libs/mod_oidc.so
+mod debian/oidc.load
+mod debian/oidc.conf

@@ -1,0 +1,5 @@
+libapache2-mod-oidc (2.0) unstable; urgency=low
+
+  * Initial release, following source-only 1.0 release.
+
+ -- Hans Zandbelt <hans.zandbelt@gmail.com>  Sun, 09 Mar 2014 18:52:24 +0100
