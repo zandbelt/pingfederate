@@ -236,7 +236,7 @@ apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value)
 
 	return APR_SUCCESS;
 
-	error_close:
+error_close:
 
 	apr_file_unlock(fd);
 	apr_file_close(fd);

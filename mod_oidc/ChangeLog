@@ -1,3 +1,7 @@
+3/11/2014
+- delete metadata files also when they do not parse as JSON
+- strip charset utf-8 addition from application/json Content-Type
+
 3/10/2014
 - version 2.0.1
 - extend iat window to 10 minutes (due to interop test results Google/Mitre...)
