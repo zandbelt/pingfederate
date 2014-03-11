@@ -1057,7 +1057,17 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 	apr_json_value_t *j_jwks_uri = apr_hash_get(j_provider->value.object,
 			"jwks_uri", APR_HASH_KEY_STRING);
 
+	/* get the flow to use, client defined takes priority over provider defined */
 	const char *response_type = cfg->provider.response_type;
+
+	apr_json_value_t *j_response_types =  apr_hash_get(j_client->value.object, "response_types", APR_HASH_KEY_STRING);
+	if ((j_response_types != NULL) && (j_response_types->type == APR_JSON_ARRAY)) {
+		apr_json_value_t *j_response_type = APR_ARRAY_IDX(j_response_types->value.array, 0, apr_json_value_t *);
+		if (j_response_type->type == APR_JSON_STRING) {
+			response_type = j_response_type->value.string.p;
+		}
+	}
+
 	apr_json_value_t *j_response_types_supported = apr_hash_get(
 			j_provider->value.object, "response_types_supported",
 			APR_HASH_KEY_STRING);
@@ -1065,7 +1075,7 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 			&& (j_response_types_supported->type == APR_JSON_ARRAY)) {
 		if (oidc_metadata_provider_response_type_is_supported(r,
 				j_response_types_supported,
-				cfg->provider.response_type) == FALSE) {
+				response_type) == FALSE) {
 			// if no default is set, prefer "code" over "id_token" over "id_token token"
 			if (oidc_metadata_provider_response_type_is_supported(r,
 					j_response_types_supported, "code")) {
