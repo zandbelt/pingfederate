@@ -461,8 +461,10 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 		curl_easy_setopt(curl, CURLOPT_POST, 1);
 
 		/* and overwrite the default url-form-encoded content-type */
+//		h_list = curl_slist_append(h_list,
+//				"Content-type: application/json; charset=UTF-8");
 		h_list = curl_slist_append(h_list,
-				"Content-type: application/json; charset=UTF-8");
+						"Content-type: application/json");
 
 	} else if (action == OIDC_HTTP_POST_FORM) {
 

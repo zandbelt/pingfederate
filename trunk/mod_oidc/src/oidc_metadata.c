@@ -469,7 +469,7 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
 	apr_file_unlock(fd);
 	apr_file_close(fd);
 
-	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_metadata_file_write: file \"%s\" written; number of bytes (%" APR_SIZE_T_FMT ")",
 			path, len);
 
@@ -487,34 +487,35 @@ static apr_byte_t oidc_metadata_get_and_check(request_rec *r, const char *path,
 		const char *issuer, oidc_is_valid_function_t metadata_is_valid,
 		apr_json_value_t **j_metadata) {
 
+	apr_status_t rc = APR_SUCCESS;
+	char s_err[128];
+
 	/* read the metadata from a file in to a variable */
-	if (oidc_metadata_file_read_json(r, path, j_metadata) == FALSE)
-		return FALSE;
+	if (oidc_metadata_file_read_json(r, path, j_metadata) == FALSE) goto error_delete;
 
 	/* we've got metadata that is JSON and no error-JSON, but now we check provider/client validity */
-	if (metadata_is_valid(r, *j_metadata, issuer) == FALSE) {
-		/*
-		 * this is expired or otherwise invalid metadata, we're probably going to get
-		 * new metadata, so delete the file first
-		 */
-		apr_status_t rc = APR_SUCCESS;
-		char s_err[128];
-		if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_metadata_get_and_check: could not delete invalid metadata file %s (%s)",
-					path, apr_strerror(rc, s_err, sizeof(s_err)));
-		} else {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_metadata_get_and_check: removed invalid metadata file %s",
-					path);
-		}
-
-		/* return an error status */
-		return FALSE;
-	}
+	if (metadata_is_valid(r, *j_metadata, issuer) == FALSE) goto error_delete;
 
 	/* all OK if we got here */
 	return TRUE;
+
+error_delete:
+
+	/*
+	 * this is expired or otherwise invalid metadata, we're probably going to get
+	 * new metadata, so delete the file first
+	 */
+	if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_metadata_get_and_check: could not delete invalid metadata file %s (%s)",
+				path, apr_strerror(rc, s_err, sizeof(s_err)));
+	} else {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_metadata_get_and_check: removed invalid metadata file %s",
+				path);
+	}
+
+	return FALSE;
 }
 
 /*
