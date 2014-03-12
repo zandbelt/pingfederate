@@ -78,7 +78,20 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
  */
 static const char *oidc_metadata_issuer_to_filename(request_rec *r,
 		const char *issuer) {
-	return oidc_util_escape_string(r, issuer);
+
+	/* strip leading https:// */
+	char *p = strstr(issuer, "https://");
+	if (p == issuer) {
+		p = apr_pstrdup(r->pool, issuer + strlen("https://"));
+	} else {
+		p = apr_pstrdup(r->pool, issuer);
+	}
+
+	/* strip trailing '/' */
+	int n = strlen(p);
+	if (p[n - 1] == '/') p[n - 1] = '\0';
+
+	return oidc_util_escape_string(r, p);
 }
 
 /*
@@ -89,7 +102,8 @@ static const char *oidc_metadata_filename_to_issuer(request_rec *r,
 	char *result = apr_pstrdup(r->pool, filename);
 	char *p = strrchr(result, '.');
 	*p = '\0';
-	return oidc_util_unescape_string(r, result);
+	p = oidc_util_unescape_string(r, result);
+	return (strcmp(p, "accounts.google.com") == 0) ? p : apr_psprintf(r->pool, "https://%s", p);
 }
 
 /*
@@ -106,9 +120,10 @@ static const char *oidc_metadata_file_path(request_rec *r, oidc_cfg *cfg,
  */
 static const char *oidc_metadata_provider_file_path(request_rec *r,
 		const char *issuer) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&oidc_module);
 	return oidc_metadata_file_path(r, cfg, issuer,
-			OIDC_METADATA_SUFFIX_PROVIDER);
+	OIDC_METADATA_SUFFIX_PROVIDER);
 }
 
 /*
@@ -116,7 +131,8 @@ static const char *oidc_metadata_provider_file_path(request_rec *r,
  */
 static const char *oidc_metadata_client_file_path(request_rec *r,
 		const char *issuer) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&oidc_module);
 	return oidc_metadata_file_path(r, cfg, issuer, OIDC_METADATA_SUFFIX_CLIENT);
 }
 
@@ -125,7 +141,8 @@ static const char *oidc_metadata_client_file_path(request_rec *r,
  */
 static const char *oidc_metadata_jwks_file_path(request_rec *r,
 		const char *issuer) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&oidc_module);
 	return cfg->metadata_dir == NULL ?
 			oidc_cache_file_path(r,
 					oidc_metadata_issuer_to_filename(r, issuer)) :
@@ -141,7 +158,8 @@ static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path,
 	char *buf = NULL;
 
 	/* read the file contents */
-	if (oidc_util_file_read(r, path, &buf) == FALSE) return FALSE;
+	if (oidc_util_file_read(r, path, &buf) == FALSE)
+		return FALSE;
 
 	/* decode the JSON contents of the buffer */
 	if ((rc = apr_json_decode(result, buf, strlen(buf), r->pool)) != APR_SUCCESS) {
@@ -179,8 +197,8 @@ static apr_byte_t oidc_metadata_provider_response_type_is_supported(
 
 	int i;
 	for (i = 0; i < supported->value.array->nelts; i++) {
-		apr_json_value_t *elem =
-				APR_ARRAY_IDX(supported->value.array, i, apr_json_value_t *);
+		apr_json_value_t *elem = APR_ARRAY_IDX(supported->value.array, i,
+				apr_json_value_t *);
 		if (elem->type != APR_JSON_STRING) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 					"oidc_metadata_provider_response_type_is_supported: unhandled in-array JSON object type [%d] in provider metadata for entry \"response_types_supported\"",
@@ -193,7 +211,7 @@ static apr_byte_t oidc_metadata_provider_response_type_is_supported(
 	}
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_provider_response_type_is_supported: returning");
+			"oidc_metadata_provider_response_type_is_supported: returning (%d=%d)", i, supported->value.array->nelts);
 
 	return (i == supported->value.array->nelts) ? FALSE : TRUE;
 }
@@ -215,7 +233,9 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 				"oidc_metadata_provider_is_valid: provider JSON object did not contain an \"issuer\" string");
 		return FALSE;
 	}
-	if (strcmp(issuer, j_issuer->value.string.p) != 0) {
+
+	/* check that the issuer matches */
+	if (oidc_util_issuer_match(issuer, j_issuer->value.string.p) == FALSE) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_metadata_provider_is_valid: requested issuer (%s) does not match the \"issuer\" value in the provider metadata file: %s",
 				issuer, j_issuer->value.string.p);
@@ -234,8 +254,9 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 	} else {
 		int i;
 		for (i = 0; i < j_response_types_supported->value.array->nelts; i++) {
-			apr_json_value_t *elem =
-					APR_ARRAY_IDX(j_response_types_supported->value.array, i, apr_json_value_t *);
+			apr_json_value_t *elem = APR_ARRAY_IDX(
+					j_response_types_supported->value.array, i,
+					apr_json_value_t *);
 			if (elem->type != APR_JSON_STRING) {
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 						"oidc_metadata_provider_is_valid: unhandled in-array JSON object type [%d] in provider metadata for entry \"response_types_supported\"",
@@ -303,17 +324,18 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 	if ((j_token_endpoint_auth_methods_supported == NULL)
 			|| (j_token_endpoint_auth_methods_supported->type != APR_JSON_ARRAY)) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_metadata_get: provider JSON object did not contain a \"token_endpoint_auth_methods_supported\" array, assuming \"client_secret_basic\" is supported");
+				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"token_endpoint_auth_methods_supported\" array, assuming \"client_secret_basic\" is supported");
 	} else {
 		int i;
 		for (i = 0;
 				i < j_token_endpoint_auth_methods_supported->value.array->nelts;
 				i++) {
-			apr_json_value_t *elem =
-					APR_ARRAY_IDX(j_token_endpoint_auth_methods_supported->value.array, i, apr_json_value_t *);
+			apr_json_value_t *elem = APR_ARRAY_IDX(
+					j_token_endpoint_auth_methods_supported->value.array, i,
+					apr_json_value_t *);
 			if (elem->type != APR_JSON_STRING) {
 				ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-						"oidc_metadata_get: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"",
+						"oidc_metadata_provider_is_valid: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"",
 						elem->type);
 				continue;
 			}
@@ -326,7 +348,7 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 		}
 		if (i == j_token_endpoint_auth_methods_supported->value.array->nelts) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_metadata_get: could not find a supported value [client_secret_post|client_secret_basic] in provider metadata for entry \"token_endpoint_auth_methods_supported\"");
+					"oidc_metadata_provider_is_valid: could not find a supported value [client_secret_post|client_secret_basic] in provider metadata for entry \"token_endpoint_auth_methods_supported\"");
 			return FALSE;
 		}
 	}
@@ -407,7 +429,7 @@ static apr_byte_t oidc_metadata_jwks_is_valid(request_rec *r,
 			"oidc_metadata_jwks_is_valid: entering");
 
 	apr_json_value_t *keys = apr_hash_get(j_jwks->value.object, "keys",
-			APR_HASH_KEY_STRING);
+	APR_HASH_KEY_STRING);
 	if ((keys == NULL) || (keys->type != APR_JSON_ARRAY)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_metadata_jwks_is_valid: JWKS JSON object did not contain a \"keys\" array");
@@ -431,7 +453,7 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
 
 	/* try to open the metadata file for writing, creating it if it does not exist */
 	if ((rc = apr_file_open(&fd, path, (APR_FOPEN_WRITE | APR_FOPEN_CREATE),
-			APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
+	APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_metadata_file_write: file \"%s\" could not be opened (%s)",
 				path, apr_strerror(rc, s_err, sizeof(s_err)));
@@ -487,14 +509,17 @@ static apr_byte_t oidc_metadata_get_and_check(request_rec *r, const char *path,
 		const char *issuer, oidc_is_valid_function_t metadata_is_valid,
 		apr_json_value_t **j_metadata) {
 
+	apr_finfo_t fi;
 	apr_status_t rc = APR_SUCCESS;
 	char s_err[128];
 
 	/* read the metadata from a file in to a variable */
-	if (oidc_metadata_file_read_json(r, path, j_metadata) == FALSE) goto error_delete;
+	if (oidc_metadata_file_read_json(r, path, j_metadata) == FALSE)
+		goto error_delete;
 
 	/* we've got metadata that is JSON and no error-JSON, but now we check provider/client validity */
-	if (metadata_is_valid(r, *j_metadata, issuer) == FALSE) goto error_delete;
+	if (metadata_is_valid(r, *j_metadata, issuer) == FALSE)
+		goto error_delete;
 
 	/* all OK if we got here */
 	return TRUE;
@@ -503,16 +528,19 @@ error_delete:
 
 	/*
 	 * this is expired or otherwise invalid metadata, we're probably going to get
-	 * new metadata, so delete the file first
+	 * new metadata, so delete the file first, if it (still) exists at all
 	 */
-	if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_get_and_check: could not delete invalid metadata file %s (%s)",
-				path, apr_strerror(rc, s_err, sizeof(s_err)));
-	} else {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_get_and_check: removed invalid metadata file %s",
-				path);
+	if (apr_stat(&fi, path, APR_FINFO_MTIME, r->pool) == APR_SUCCESS) {
+
+		if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+					"oidc_metadata_get_and_check: could not delete invalid metadata file %s (%s)",
+					path, apr_strerror(rc, s_err, sizeof(s_err)));
+		} else {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+					"oidc_metadata_get_and_check: removed invalid metadata file %s",
+					path);
+		}
 	}
 
 	return FALSE;
@@ -548,9 +576,6 @@ static apr_byte_t oidc_metadata_retrieve_and_store(request_rec *r,
 	/* all OK */
 	return TRUE;
 }
-
-// TODO: make this configurable
-#define OIDC_METADATA_JWKS_RETREIVE_ONCE_PER_SECS 3600
 
 /*
  * (temporary?) helper function to convert from the format (PEM-formatted X.509 certificates)
@@ -673,9 +698,8 @@ static apr_byte_t oidc_metadata_jwks_retrieve_and_store(request_rec *r,
 
 		/* this won't store the file because it is not valid */
 		oidc_metadata_retrieve_and_store(r, cfg, provider->jwks_uri,
-				OIDC_HTTP_GET, NULL, provider->ssl_validate_server,
-				provider->issuer, oidc_metadata_jwks_is_valid, jwks_path,
-				j_jwks);
+		OIDC_HTTP_GET, NULL, provider->ssl_validate_server, provider->issuer,
+				oidc_metadata_jwks_is_valid, jwks_path, j_jwks);
 
 		/*
 		 * the return value of the previous function will always be FALSE but we need to
@@ -697,8 +721,8 @@ static apr_byte_t oidc_metadata_jwks_retrieve_and_store(request_rec *r,
 
 	/* get the jwks metadata for this issuer */
 	return oidc_metadata_retrieve_and_store(r, cfg, provider->jwks_uri,
-			OIDC_HTTP_GET, NULL, provider->ssl_validate_server,
-			provider->issuer, oidc_metadata_jwks_is_valid, jwks_path, j_jwks);
+	OIDC_HTTP_GET, NULL, provider->ssl_validate_server, provider->issuer,
+			oidc_metadata_jwks_is_valid, jwks_path, j_jwks);
 
 }
 
@@ -728,18 +752,22 @@ apr_byte_t oidc_metadata_jwks_get(request_rec *r, oidc_cfg *cfg,
 	/* get the last-modified timestamp from the stored file */
 	apr_finfo_t fi;
 	if (apr_stat(&fi, jwks_path, APR_FINFO_MTIME, r->pool) == APR_SUCCESS) {
-		if (apr_time_now() >= fi.mtime + apr_time_from_sec(OIDC_METADATA_JWKS_RETREIVE_ONCE_PER_SECS)) {ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_jwks_get: JWKs for issuer \"%s\" expired, trying to refresh it", provider->issuer);
+		if (apr_time_now() >= fi.mtime + apr_time_from_sec(provider->jwks_refresh_interval)) {
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+					"oidc_metadata_jwks_get: JWKs for issuer \"%s\" expired, trying to refresh it (now=%" APR_TIME_T_FMT ", mtime=%" APR_TIME_T_FMT ", interval_from_sec=%" APR_TIME_T_FMT "",
+					provider->issuer, apr_time_now(), fi.mtime, apr_time_from_sec(provider->jwks_refresh_interval));
 
-		/* it is expired: do a forced refresh */
-		*refresh = TRUE;
-		if (oidc_metadata_jwks_retrieve_and_store(r, cfg, provider, jwks_path, j_jwks) == TRUE) {
-			return TRUE;
+			/* it is expired: do a forced refresh */
+			*refresh = TRUE;
+			if (oidc_metadata_jwks_retrieve_and_store(r, cfg, provider,
+					jwks_path, j_jwks) == TRUE) {
+				return TRUE;
+			}
+			// else: fallback to the already stored JWKS, I guess for expiry that is OK indeed
 		}
-		// else: fallback to the already stored JWKS, I guess for expiry that is OK indeed
 	}
-}
 
-		/* see if we have valid metadata already, if so, return it */
+	/* see if we have valid metadata already, if so, return it */
 	if (oidc_metadata_get_and_check(r, jwks_path, provider->issuer,
 			oidc_metadata_jwks_is_valid, j_jwks) == TRUE) {
 		return TRUE;
@@ -810,7 +838,8 @@ static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
 	apr_table_addn(params, "client_name", cfg->provider.client_name);
 
 	if (cfg->id_token_alg != NULL) {
-		apr_table_addn(params, "id_token_signed_response_alg", cfg->id_token_alg);
+		apr_table_addn(params, "id_token_signed_response_alg",
+				cfg->id_token_alg);
 	}
 
 	int action = OIDC_HTTP_POST_JSON;
@@ -988,11 +1017,12 @@ static const char * oidc_metadata_token_endpoint_auth(request_rec *r,
 		for (i = 0;
 				i < j_token_endpoint_auth_methods_supported->value.array->nelts;
 				i++) {
-			apr_json_value_t *elem =
-					APR_ARRAY_IDX(j_token_endpoint_auth_methods_supported->value.array, i, apr_json_value_t *);
+			apr_json_value_t *elem = APR_ARRAY_IDX(
+					j_token_endpoint_auth_methods_supported->value.array, i,
+					apr_json_value_t *);
 			if (elem->type != APR_JSON_STRING) {
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-						"oidc_metadata_get: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"",
+						"oidc_metadata_token_endpoint_auth: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"",
 						elem->type);
 				continue;
 			}
@@ -1060,9 +1090,12 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 	/* get the flow to use, client defined takes priority over provider defined */
 	const char *response_type = cfg->provider.response_type;
 
-	apr_json_value_t *j_response_types =  apr_hash_get(j_client->value.object, "response_types", APR_HASH_KEY_STRING);
-	if ((j_response_types != NULL) && (j_response_types->type == APR_JSON_ARRAY)) {
-		apr_json_value_t *j_response_type = APR_ARRAY_IDX(j_response_types->value.array, 0, apr_json_value_t *);
+	apr_json_value_t *j_response_types = apr_hash_get(j_client->value.object,
+			"response_types", APR_HASH_KEY_STRING);
+	if ((j_response_types != NULL)
+			&& (j_response_types->type == APR_JSON_ARRAY)) {
+		apr_json_value_t *j_response_type = APR_ARRAY_IDX(
+				j_response_types->value.array, 0, apr_json_value_t *);
 		if (j_response_type->type == APR_JSON_STRING) {
 			response_type = j_response_type->value.string.p;
 		}
@@ -1074,8 +1107,7 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 	if ((j_response_types_supported != NULL)
 			&& (j_response_types_supported->type == APR_JSON_ARRAY)) {
 		if (oidc_metadata_provider_response_type_is_supported(r,
-				j_response_types_supported,
-				response_type) == FALSE) {
+				j_response_types_supported, response_type) == FALSE) {
 			// if no default is set, prefer "code" over "id_token" over "id_token token"
 			if (oidc_metadata_provider_response_type_is_supported(r,
 					j_response_types_supported, "code")) {
@@ -1131,9 +1163,17 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 	// TODO: check that "openid" is always included in the configured scopes, right?
 	const char *scope = cfg->provider.scope;
 	apr_json_value_t *j_scope = apr_hash_get(j_client->value.object, "scope",
-			APR_HASH_KEY_STRING);
+	APR_HASH_KEY_STRING);
 	if ((j_scope != NULL) && (j_scope->type == APR_JSON_STRING)) {
 		scope = j_scope->value.string.p;
+	}
+
+	/* see if we've got a custom JWKs refresh interval */
+	int jwks_refresh_interval = cfg->provider.jwks_refresh_interval;
+	apr_json_value_t *j_jwks_refresh_interval = apr_hash_get(j_client->value.object, "jwks_refresh_interval",
+			APR_HASH_KEY_STRING);
+	if ((j_jwks_refresh_interval != NULL) && (j_jwks_refresh_interval->type == APR_JSON_LONG)) {
+		jwks_refresh_interval = j_jwks_refresh_interval->value.lnumber;
 	}
 
 	/* put whatever we've found out about the provider in (the client part of) the metadata struct */
@@ -1142,6 +1182,7 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 	provider->client_secret = apr_pstrdup(r->pool,
 			j_client_secret->value.string.p);
 	provider->scope = apr_pstrdup(r->pool, scope);
+	provider->jwks_refresh_interval = jwks_refresh_interval;
 
 	return TRUE;
 }

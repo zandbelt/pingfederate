@@ -77,8 +77,6 @@
 #define OIDC_DISC_OP_PARAM "oidc_provider"
 /* parameter name of the original URL in the discovery response */
 #define OIDC_DISC_RT_PARAM "oidc_return"
-/* parameter name of an account name in the discovery response */
-#define OIDC_DISC_ACCT_PARAM "oidc_acct"
 
 /* value that indicates to use cache-file based session tracking */
 #define OIDC_SESSION_TYPE_22_CACHE_FILE 0
@@ -87,7 +85,7 @@
 
 /* name of the cookie that binds the state in the authorization request/response to the browser */
 #define OIDCStateCookieName  "oidc-state"
-/* separator used to distinghuish different values in the state cookie */
+/* separator used to distinguish different values in the state cookie */
 #define OIDCStateCookieSep  " "
 
 /* the (global) key for the mod_oidc related state that is stored in the request userdata context */
@@ -119,6 +117,7 @@ typedef struct oidc_provider_t {
 	char *client_contact;
 	char *scope;
 	char *response_type;
+	int jwks_refresh_interval;
 } oidc_provider_t ;
 
 typedef struct oidc_oauth_t {
@@ -254,7 +253,8 @@ char *oidc_util_unescape_string(const request_rec *r, const char *str);
 apr_byte_t oidc_util_read_post(request_rec *r, apr_table_t *table);
 apr_byte_t oidc_util_generate_random_base64url_encoded_value(request_rec *r, int randomLen, char **randomB64);
 apr_byte_t oidc_util_file_read(request_rec *r, const char *path, char **result);
-
+apr_byte_t oidc_util_issuer_match(const char *a, const char *b);
+int oidc_util_html_send_error(request_rec *r, const char *error, const char *description, int status_code);
 int oidc_base64url_decode_rsa_verify(request_rec *r, const char *alg, const char *signature, const char *message, const char *modulus, const char *exponent);
 
 // oidc_crypto.c
