@@ -78,7 +78,7 @@
 #define OIDC_DEFAULT_COOKIE "mod-oidc"
 /* default for the HTTP header name in which the remote user name is passed */
 #define OIDC_DEFAULT_AUTHN_HEADER NULL
-/* scrub HTTP headers by default unless overriden (and insecure) */
+/* scrub HTTP headers by default unless overridden (and insecure) */
 #define OIDC_DEFAULT_SCRUB_REQUEST_HEADERS 1
 /* default client_name the client uses for dynamic client registration */
 #define OIDC_DEFAULT_CLIENT_NAME "OpenID Connect Apache Module (mod_oidc)"
@@ -92,6 +92,8 @@
 #define OIDC_DEFAULT_STATE_TIMEOUT 300
 /* default OpenID Connect authorization response type */
 #define OIDC_DEFAULT_RESPONSE_TYPE "code"
+/* default duration in seconds after which retrieved JWS should be refreshed */
+#define OIDC_DEFAULT_JWKS_REFRESH_INTERVAL 3600
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -360,6 +362,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.client_contact = NULL;
 	c->provider.scope = OIDC_DEFAULT_SCOPE;
 	c->provider.response_type = OIDC_DEFAULT_RESPONSE_TYPE;
+	c->provider.jwks_refresh_interval = OIDC_DEFAULT_JWKS_REFRESH_INTERVAL;
 
 	c->oauth.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
 	c->oauth.client_id = NULL;
@@ -448,6 +451,10 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			strcmp(add->provider.response_type, OIDC_DEFAULT_RESPONSE_TYPE) != 0 ?
 					add->provider.response_type :
 					base->provider.response_type;
+	c->provider.jwks_refresh_interval =
+			add->provider.jwks_refresh_interval != OIDC_DEFAULT_JWKS_REFRESH_INTERVAL ?
+					add->provider.jwks_refresh_interval :
+					base->provider.jwks_refresh_interval;
 
 	c->oauth.ssl_validate_server =
 			add->oauth.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ?

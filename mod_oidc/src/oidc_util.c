@@ -839,7 +839,7 @@ static apr_byte_t oidc_util_read(request_rec *r, const char **rbuf) {
  * read the POST parameters in to a table
  */
  apr_byte_t oidc_util_read_post(request_rec *r, apr_table_t *table) {
-	const char *data;
+	const char *data = NULL;
 	const char *key, *val;
 
 	if (r->method_number != M_POST)
@@ -848,7 +848,7 @@ static apr_byte_t oidc_util_read(request_rec *r, const char **rbuf) {
 	if (oidc_util_read(r, &data) != TRUE)
 		return FALSE;
 
-	while (*data && (val = ap_getword(r->pool, &data, '&'))) {
+	while (data && *data && (val = ap_getword(r->pool, &data, '&'))) {
 		key = ap_getword(r->pool, &val, '=');
 		key = oidc_util_unescape_string(r, key);
 		val = oidc_util_unescape_string(r, val);
@@ -949,11 +949,51 @@ apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
  	return TRUE;
 
 error_close:
+
 	apr_file_unlock(fd);
  	apr_file_close(fd);
 
  	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
  			"oidc_util_file_read: returning error");
 
- 	return FALSE;
- }
+	return FALSE;
+}
+
+/*
+ * see if two provided issuer identifiers match (cq. ignore trailing slash)
+ */
+apr_byte_t oidc_util_issuer_match(const char *a, const char *b) {
+
+	/* check the "issuer" value against the one configure for the provider we got this id_token from */
+	if (strcmp(a, b) != 0) {
+
+		/* no strict match, but we are going to accept if the difference is only a trailing slash */
+		int n1 = strlen(a);
+		int n2 = strlen(b);
+		int n = ((n1 == n2 + 1) && (a[n1 - 1] == '/')) ?
+				n2 : (((n2 == n1 + 1) && (b[n2 - 1] == '/')) ? n1 : 0);
+		if ((n == 0) || (strncmp(a, b, n) != 0))
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
+/*
+ * send a user-facing error to the browser
+ * TODO: more templating
+ */
+int oidc_util_html_send_error(request_rec *r, const char *error, const char *description, int status_code) {
+	char *msg = "<p>the OpenID Connect Provider returned an error:</p><p>";
+
+	if (error != NULL) {
+		msg = apr_psprintf(r->pool, "%s<p>Error: <pre>%s</pre></p>", msg,
+				error);
+	}
+	if (description != NULL) {
+		msg = apr_psprintf(r->pool, "%s<p>Description: <pre>%s</pre></p>",
+				msg, description);
+	}
+
+	return oidc_util_http_sendstring(r, msg, OK);
+}

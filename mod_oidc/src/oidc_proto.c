@@ -181,22 +181,12 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 		return FALSE;
 	}
 
-	/* check the "issuer" value against the one configure for the provider we got this id_token from */
-	if (strcmp(provider->issuer, iss->value.string.p) != 0) {
-		/* no strict match, but we are going to accept if the difference is only a trailing slash */
-		int n1 = strlen(provider->issuer);
-		int n2 = strlen(iss->value.string.p);
-		int n = ((n1 == n2 + 1) && (provider->issuer[n1 - 1] == '/')) ?
-				n2 :
-				(((n2 == n1 + 1) && (iss->value.string.p[n2 - 1] == '/')) ?
-						n1 : 0);
-		if ((n == 0)
-				|| (strncmp(provider->issuer, iss->value.string.p, n) != 0)) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_proto_is_valid_idtoken: configured issuer (%s) does not match received \"iss\" value in id_token (%s)",
-					provider->issuer, iss->value.string.p);
-			return FALSE;
-		}
+	/* check if the issuer matches the requested value */
+	if (oidc_util_issuer_match(provider->issuer, iss->value.string.p) == FALSE) {
+		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+				"oidc_proto_is_valid_idtoken: configured issuer (%s) does not match received \"iss\" value in id_token (%s)",
+				provider->issuer, iss->value.string.p);
+		return FALSE;
 	}
 
 	/* get the "exp" value from the JSON payload */

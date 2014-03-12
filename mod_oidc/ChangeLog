@@ -1,3 +1,10 @@
+3/12/2014
+- added support for calling the userinfo endpoint in implicit flows ("token id_token")
+- allow for returning account names, domain names or partial issuer identifiers in the discovered oidc_provider value
+- normalize issuer filenames cq. no trailing slashes included anymore, no leading "https%3A%2F%2F"
+- added configurable JWK key set retrieve interval
+- improved error response handling
+
 3/11/2014
 - delete metadata files also when they do not parse as JSON
 - strip charset utf-8 addition from application/json Content-Type
