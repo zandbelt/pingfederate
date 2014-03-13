@@ -33,7 +33,7 @@ It implements server-side caching across different Apache processes through file
 
 
 Example config for using Google Apps as your OpenID Connect Provider:
-(running on localhost and https://localhost/example/ registered as redirect_uri for the client)
+(running on localhost and https://localhost/example/redirect_uri/ registered as redirect_uri for the client)
 ==========================================================
 OIDCProviderIssuer accounts.google.com
 OIDCProviderAuthorizationEndpoint https://accounts.google.com/o/oauth2/auth?approval_prompt=force&[hd=<your-domain>]
@@ -46,7 +46,7 @@ OIDCClientID <your-client-id-administered-through-the-google-api-console>
 OIDCClientSecret <your-client-secret-administered-through-the-google-api-console>
 
 OIDCScope "openid email profile"
-OIDCRedirectURI https://localhost/example/
+OIDCRedirectURI https://localhost/example/redirect_uri/
 OIDCCryptoPassphrase <password>
 
 <Location /example/>
@@ -84,7 +84,7 @@ And the related mod_oidc Apache config section:
 ==========================================================
 OIDCMetadataDir <somewhere>/metadata
 
-OIDCRedirectURI https://localhost/example/
+OIDCRedirectURI https://localhost/example/redirect_uri/
 OIDCCryptoPassphrase <password>
 
 <Location /example/>
@@ -105,7 +105,7 @@ Sample callback:
 
 Another example config for using PingFederate as your OpenID OP and/or OAuth 2.0 Authorization
 server, based on the OAuth 2.0 PlayGround 3.x default configuration and doing claims-based authorization.
-(running on localhost and https://localhost/example/ registerd as redirect_uri for the client "ac_oic_client")
+(running on localhost and https://localhost/example/redirect_uri/ registerd as redirect_uri for the client "ac_oic_client")
 
 ==========================================================
 OIDCProviderIssuer https://macbook:9031
@@ -119,7 +119,7 @@ OIDCSSLValidateServer Off
 OIDCClientID ac_oic_client
 OIDCClientSecret abc123DEFghijklmnop4567rstuvwxyzZYXWUT8910SRQPOnmlijhoauthplaygroundapplication
 
-OIDCRedirectURI https://localhost/example/
+OIDCRedirectURI https://localhost/example/redirect_uri/
 OIDCCryptoPassphrase <password>
 OIDCScope "openid email profile"
 
