@@ -24,16 +24,17 @@ include_once dirname(dirname(__FILE__)) . '/wstrust.php';
 
 // username/password for authenticating the user to the IP-STS
 $username = 'joe';
-$password = 'test';
+$password = 'Changeit1';
 
 // partner SP Entity ID
-$appliesTo = 'http://rp';
-//$appliesTo = 'urn:rp';
+$appliesTo = 'urn:hansz-adfs';
+//$appliesTo = 'urn:hzandbelt-mbpr';
 
 // PingFederate 6.x IP-STS endpoint
-$targetIPSTS = 'https://localhost:9031/idp/sts.wst?TokenProcessorId=usernametokenldap';
+// $targetIPSTS = 'https://localhost:9031/idp/sts.wst?TokenProcessorId=usernameldap0';
+$targetIPSTS = 'https://localhost:9031/idp/sts.wst?TokenProcessorId=ad0';
 // ADFS 2.0 IP-STS endpoint
-//$targetIPSTS = 'https://fs.rp/adfs/services/trust/13/usernamemixed';
+//$targetIPSTS = 'https://hansz-adfs/adfs/services/trust/13/usernamemixed';
 
 // exercise1
 // $tokenTypeIPSTS = WSTRUST::$TOKENTYPE_SAML11;
