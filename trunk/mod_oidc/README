@@ -103,6 +103,8 @@ Connect Discovery purposes (aka. e-mail style identifier), or a domain name.
 Sample callback:
   ${oidc_callback}?oidc_return=${oidc_return}&oidc_provider=[${issuer}|${domain}|${e-mail-style-account-name}]
 
+
+
 Another example config for using PingFederate as your OpenID OP and/or OAuth 2.0 Authorization
 server, based on the OAuth 2.0 PlayGround 3.x default configuration and doing claims-based authorization.
 (running on localhost and https://localhost/example/redirect_uri/ registerd as redirect_uri for the client "ac_oic_client")
