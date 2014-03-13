@@ -1,3 +1,6 @@
+3/13/2014
+- change README an provide example RedirectURI's that don't collide with protected content
+
 3/12/2014
 - added support for calling the userinfo endpoint in implicit flows ("token id_token")
 - allow for returning account names, domain names or partial issuer identifiers in the discovered oidc_provider value
