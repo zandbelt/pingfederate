@@ -86,7 +86,7 @@ int oidc_proto_authorization_request(request_rec *r,
 	 * TODO: I'd like to include the nonce in the code flow as well but Google does not allow me to do that:
 	 * Error: invalid_request: Parameter not allowed for this message type: nonce
 	 */
-	if (strstr(provider->response_type, "id_token") != NULL) {
+	if ( (strstr(provider->response_type, "id_token") != NULL) || (strcmp(provider->response_type, "token") == 0) ) {
 		destination = apr_psprintf(r->pool, "%s&nonce=%s", destination, oidc_util_escape_string(r, nonce));
 		//destination = apr_psprintf(r->pool, "%s&response_mode=fragment", destination);
 	}
@@ -217,7 +217,7 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 		return FALSE;
 	}
 
-	/* check if this id_token has been issued just now +- 60 secondss */
+	/* check if this id_token has been issued just now +- 60 seconds */
 	if ((apr_time_sec(apr_time_now()) - OIDC_IDTOKEN_IAT_SLACK) > iat->value.lnumber) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_proto_is_valid_idtoken: token was issued more than 1 minute ago");

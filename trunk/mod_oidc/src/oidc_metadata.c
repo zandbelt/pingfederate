@@ -498,7 +498,7 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
 	return TRUE;
 }
 
-/* callback function type for checking metdata validity (provider or client) */
+/* callback function type for checking metadata validity (provider or client) */
 typedef apr_byte_t (*oidc_is_valid_function_t)(request_rec *,
 		apr_json_value_t *, const char *);
 
@@ -763,7 +763,7 @@ apr_byte_t oidc_metadata_jwks_get(request_rec *r, oidc_cfg *cfg,
 					jwks_path, j_jwks) == TRUE) {
 				return TRUE;
 			}
-			// else: fallback to the already stored JWKS, I guess for expiry that is OK indeed
+			// else: fall back to the already stored JWKS, I guess for expiry that is OK indeed
 		}
 	}
 
@@ -804,7 +804,7 @@ static apr_byte_t oidc_metadata_provider_get(request_rec *r, oidc_cfg *cfg,
 	url = apr_psprintf(r->pool, "%s%s.well-known/openid-configuration", url,
 			url[strlen(url) - 1] != '/' ? "/" : "");
 
-	/* try and get it from there, checking it and storing it if succesful */
+	/* try and get it from there, checking it and storing it if successful */
 	return oidc_metadata_retrieve_and_store(r, cfg, url, OIDC_HTTP_GET, NULL,
 			cfg->provider.ssl_validate_server, issuer,
 			oidc_metadata_provider_is_valid, provider_path, j_provider);
@@ -868,7 +868,7 @@ static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
 		}
 	}
 
-	/* try and get it from there, checking it and storing it if succesful */
+	/* try and get it from there, checking it and storing it if successful */
 	return oidc_metadata_retrieve_and_store(r, cfg, registration_url, action,
 			params, cfg->provider.ssl_validate_server, issuer,
 			oidc_metadata_client_is_valid, client_path, j_client);

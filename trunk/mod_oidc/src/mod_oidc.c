@@ -77,6 +77,8 @@
 
 #include "mod_oidc.h"
 
+// TODO: support permutations of multiple response types
+// TODO: check token_type and expires_in on incoming access_token using "token ..." flows?
 // TODO: support more hybrid flows ("code id_token" (for MS), "code token" etc.)
 
 // TODO: document optional custom extensions to client metadata
@@ -101,7 +103,7 @@ static void oidc_scrub_request_headers(request_rec *r, const char *claim_prefix,
 	/* get an array representation of the incoming HTTP headers */
 	const apr_array_header_t * const h = apr_table_elts(r->headers_in);
 
-	/* table to keep the non-suspicous headers */
+	/* table to keep the non-suspicious headers */
 	apr_table_t *clean_headers = apr_table_make(r->pool, h->nelts);
 
 	/* loop over the incoming HTTP headers */
@@ -151,7 +153,7 @@ static char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
 	/* the hash context */
 	apr_sha1_ctx_t sha1;
 
-	/* initialize the hash context */
+	/* Initialize the hash context */
 	apr_sha1_init(&sha1);
 
 	/* get the X_FORWARDED_FOR header value  */
@@ -234,7 +236,7 @@ static int oidc_check_state(request_rec *r, oidc_cfg *c, const char *state,
 		return FALSE;
 	}
 
-	/* since we're ok, get the orginal URL as the next value in the decrypted cookie */
+	/* since we're OK, get the original URL as the next value in the decrypted cookie */
 	*original_url = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
 	if (*original_url == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
@@ -290,7 +292,7 @@ static int oidc_check_state(request_rec *r, oidc_cfg *c, const char *state,
 
 /*
  * create a state parameter to be passed in an authorization request to an OP
- * and set a cookie in the browser that is cryptograpically bound to that
+ * and set a cookie in the browser that is cryptographically bound to that
  */
 static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url,
 		const char *issuer, const char *nonce) {
@@ -372,7 +374,7 @@ const char*oidc_request_state_get(request_rec *r, const char *key) {
 static void oidc_set_app_header(request_rec *r, const char *s_key,
 		const char *s_value, const char *claim_prefix) {
 
-	/* construct the header name, cq. put the prefix in front of a normlized key name */
+	/* construct the header name, cq. put the prefix in front of a normalized key name */
 	const char *s_name = apr_psprintf(r->pool, "%s%s", claim_prefix,
 			oidc_normalize_header_name(r, s_key));
 
@@ -617,7 +619,7 @@ static int oidc_authorization_response_finalize(request_rec *r, oidc_cfg *c,
 	/* see if we've resolved any claims */
 	if (claims != NULL) {
 		/*
-		 * succesfully decoded a set claims from the response so we can store them
+		 * Successfully decoded a set claims from the response so we can store them
 		 * (well actually the stringified representation in the response)
 		 * in the session context safely now
 		 */
@@ -633,7 +635,7 @@ static int oidc_authorization_response_finalize(request_rec *r, oidc_cfg *c,
 	/* now we've authenticated the user so go back to the URL that he originally tried to access */
 	apr_table_add(r->headers_out, "Location", original_url);
 
-	/* log the succesful response */
+	/* log the successful response */
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_authorization_response_finalize: session created and stored, redirecting to original url: %s",
 			original_url);
@@ -651,7 +653,7 @@ static int oidc_handle_basic_authorization_response(request_rec *r, oidc_cfg *c,
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_handle_basic_authorization_response: entering");
 
-	/* inialize local variables */
+	/* initialize local variables */
 	char *code = NULL, *state = NULL;
 
 	/* by now we're pretty sure the code & state parameters exist */
@@ -751,13 +753,13 @@ static int oidc_handle_implicit_authorization_response(request_rec *r, oidc_cfg 
 }
 
 /*
- * handle an OpenID Connect Authorization Response using the fragment(+POST) response_type with the Implicit Client profile from the OP
+ * handle an OpenID Connect Authorization Response using the fragment(+POST) response_mode with the Implicit Client profile from the OP
  */
 static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
 		session_rec *session) {
 
-	ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-			"oidc_handle_implicit_redirect: entering");
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_handle_implicit_post: entering");
 
 	/* read the parameters that are POST-ed to us */
 	apr_table_t *params = apr_table_make(r->pool, 8);
@@ -804,15 +806,15 @@ static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
 }
 
 /*
- * handle an OpenID Connect Authorization Response using the redirect response_type with the Implicit Client profile from the OP
+ * handle an OpenID Connect Authorization Response using the redirect response_mode with the Implicit Client profile from the OP
  */
 static int oidc_handle_implicit_redirect(request_rec *r, oidc_cfg *c,
 		session_rec *session) {
 
 	ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-			"oidc_handle_implicit_redirect: handling non-spec-compliant authorization response since the default response_type when using the Implicit Client flow must be \"fragment\"");
+			"oidc_handle_implicit_redirect: handling non-spec-compliant authorization response since the default response_mode when using the Implicit Client flow must be \"fragment\"");
 
-	/* inialize local variables */
+	/* initialize local variables */
 	char *state = NULL, *id_token = NULL, *access_token = NULL;
 
 	/* by now we're pretty sure the state & id_token parameters exist */
@@ -1040,7 +1042,7 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
  */
 int oidc_handle_redirect_uri_request(request_rec *r, oidc_cfg *c) {
 	if (r->args == NULL)
-		/* this is a "bare" request to the redirect URI, indicating implicit flow using the fragment response_type */
+		/* this is a "bare" request to the redirect URI, indicating implicit flow using the fragment response_mode */
 		return oidc_proto_javascript_implicit(r, c);
 
 	/* TODO: check for "error" response */
@@ -1093,12 +1095,12 @@ static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 
 		} else if (oidc_proto_is_implicit_post(r, c)) {
 
-			/* this is an authorization response using the fragment(+POST) response_type with the Implicit Client profile */
+			/* this is an authorization response using the fragment(+POST) response_mode with the Implicit Client profile */
 			return oidc_handle_implicit_post(r, c, session);
 
 		} else if (oidc_proto_is_implicit_redirect(r, c)) {
 
-			/* this is an authorization response using the redirect response_type with the Implicit Client profile */
+			/* this is an authorization response using the redirect response_mode with the Implicit Client profile */
 			return oidc_handle_implicit_redirect(r, c, session);
 
 		} else if (oidc_util_request_matches_url(r, c->redirect_uri) == TRUE) {
@@ -1153,12 +1155,12 @@ int oidc_check_user_id(request_rec *r) {
 	if (ap_auth_type(r) == NULL)
 		return DECLINED;
 
-	/* see if we've configed OpenID Connect user authentication for this request */
+	/* see if we've configured OpenID Connect user authentication for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect")
 			== 0)
 		return oidc_check_userid_openid_connect(r, c);
 
-	/* see if we've configed OAuth 2.0 access control for this request */
+	/* see if we've configured OAuth 2.0 access control for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "oauth20") == 0)
 		return oidc_oauth_check_userid(r, c);
 

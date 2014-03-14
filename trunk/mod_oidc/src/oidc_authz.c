@@ -237,7 +237,7 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t * const claims,
 	/* if there was a "Require claim", but no actual claims, that's cause to warn the admin of an iffy configuration */
 	if (count_oauth_claims == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_authz_worker: 'require claim' missing specification(s) in configuration, eclining");
+				"oidc_authz_worker: 'require claim' missing specification(s) in configuration, declining");
 		return DECLINED;
 	}
 

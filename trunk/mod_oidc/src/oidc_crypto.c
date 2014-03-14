@@ -65,7 +65,7 @@
 #include "mod_oidc.h"
 
 /*
- * initialize the crypt context in the server configuration record; the passphrase is set already
+ * initialize the crypto context in the server configuration record; the passphrase is set already
  */
 static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 
@@ -176,7 +176,7 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
 		return NULL;
 	}
 
-	/* update plaintext, p_len is filled with the length of plaintext generated, len is the size of cyphertext in bytes */
+	/* update plaintext, p_len is filled with the length of plaintext generated, len is the size of ciphertext in bytes */
 	if (!EVP_DecryptUpdate(cfg->decrypt_ctx, plaintext, &p_len, ciphertext,
 			*len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,

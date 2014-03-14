@@ -153,7 +153,7 @@ int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst,
 }
 
 /*
- * decrypt and base64url dencode a string
+ * decrypt and base64url decode a string
  */
 int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst,
 		const char *src) {
