@@ -1,3 +1,8 @@
+3/14/2014
+- fix warning/debug printout in handle_implicit_post (was logging as warning: handle_implicit_redirect)
+- include nonce in "token" flow as well (mitreid.org)
+- spelling fixes
+
 3/13/2014
 - version 2.1
 - change README an provide example RedirectURI's that don't collide with protected content

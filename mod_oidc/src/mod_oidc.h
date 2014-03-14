@@ -145,7 +145,7 @@ typedef struct oidc_cfg {
 	/* a pointer to the oauth server settings */
 	oidc_oauth_t oauth;
 
-	/* directory that holds the cache files (if unset, we'll try and use an OS defined one like "/tmp" */
+	/* directory that holds the cache files (if not set, we'll try and use an OS defined one like "/tmp" */
 	char *cache_dir;
 	/* directory that holds the provider & client metadata files */
 	char *metadata_dir;

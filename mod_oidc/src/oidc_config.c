@@ -251,7 +251,7 @@ const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg) {
 }
 
 /*
- * set an authenication method for an endpoint and check it is one that we support
+ * set an authentication method for an endpoint and check it is one that we support
  */
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr,
 		const char *arg) {
