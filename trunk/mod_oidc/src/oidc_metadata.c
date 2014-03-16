@@ -186,37 +186,6 @@ static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path,
 }
 
 /*
- * check to see if a certain response_type is part of the list of supported response types
- */
-static apr_byte_t oidc_metadata_provider_response_type_is_supported(
-		request_rec *r, apr_json_value_t *supported, const char *match) {
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_provider_response_type_is_supported: entering (%s)",
-			match);
-
-	int i;
-	for (i = 0; i < supported->value.array->nelts; i++) {
-		apr_json_value_t *elem = APR_ARRAY_IDX(supported->value.array, i,
-				apr_json_value_t *);
-		if (elem->type != APR_JSON_STRING) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_metadata_provider_response_type_is_supported: unhandled in-array JSON object type [%d] in provider metadata for entry \"response_types_supported\"",
-					elem->type);
-			continue;
-		}
-		if (strcmp(elem->value.string.p, match) == 0) {
-			break;
-		}
-	}
-
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_provider_response_type_is_supported: returning (%d=%d)", i, supported->value.array->nelts);
-
-	return (i == supported->value.array->nelts) ? FALSE : TRUE;
-}
-
-/*
  * check to see if JSON provider metadata is valid
  */
 static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
@@ -246,35 +215,24 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 	apr_json_value_t *j_response_types_supported = apr_hash_get(
 			j_provider->value.object, "response_types_supported",
 			APR_HASH_KEY_STRING);
-	if ((j_response_types_supported == NULL)
-			|| (j_response_types_supported->type != APR_JSON_ARRAY)) {
+	if ((j_response_types_supported != NULL)
+			&& (j_response_types_supported->type == APR_JSON_ARRAY)) {
+		if ((oidc_util_json_array_has_value(r, j_response_types_supported,
+				"code") == FALSE)
+				&& (oidc_util_json_array_has_value(r,
+						j_response_types_supported, "id_token") == FALSE)
+						&& (oidc_util_json_array_has_value(r,
+								j_response_types_supported, "token id_token") == FALSE)
+								&& (oidc_util_json_array_has_value(r,
+										j_response_types_supported, "id_token token") == FALSE)) {
+			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+					"oidc_metadata_provider_is_valid: could not find a supported value [\"code\" | \"id_token\" | \"token id_token\" | \"id_token token\"] in provider metadata for entry \"response_types_supported\"; assuming that \"code\" flow is supported...");
+			//return FALSE;
+		}
+	} else {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
 				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"response_types_supported\" array; assuming that \"code\" flow is supported...");
 		// TODO: hey, this is required-by-spec stuff right?
-	} else {
-		int i;
-		for (i = 0; i < j_response_types_supported->value.array->nelts; i++) {
-			apr_json_value_t *elem = APR_ARRAY_IDX(
-					j_response_types_supported->value.array, i,
-					apr_json_value_t *);
-			if (elem->type != APR_JSON_STRING) {
-				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-						"oidc_metadata_provider_is_valid: unhandled in-array JSON object type [%d] in provider metadata for entry \"response_types_supported\"",
-						elem->type);
-				continue;
-			}
-			if (strcmp(elem->value.string.p, "code") == 0)
-				break;
-			if (strcmp(elem->value.string.p, "id_token") == 0)
-				break;
-			if (strcmp(elem->value.string.p, "id_token token") == 0)
-				break;
-		}
-		if (i == j_response_types_supported->value.array->nelts) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_metadata_provider_is_valid: could not find a supported value [\"code\"|\"id_token\",\"id_token token\"] in provider metadata for entry \"response_types_supported\"");
-			return FALSE;
-		}
 	}
 
 	/* get a handle to the authorization endpoint */
@@ -1090,6 +1048,7 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 	/* get the flow to use, client defined takes priority over provider defined */
 	const char *response_type = cfg->provider.response_type;
 
+	/* this is an array as by spec but we'll default to the first element */
 	apr_json_value_t *j_response_types = apr_hash_get(j_client->value.object,
 			"response_types", APR_HASH_KEY_STRING);
 	if ((j_response_types != NULL)
@@ -1098,27 +1057,6 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 				j_response_types->value.array, 0, apr_json_value_t *);
 		if (j_response_type->type == APR_JSON_STRING) {
 			response_type = j_response_type->value.string.p;
-		}
-	}
-
-	apr_json_value_t *j_response_types_supported = apr_hash_get(
-			j_provider->value.object, "response_types_supported",
-			APR_HASH_KEY_STRING);
-	if ((j_response_types_supported != NULL)
-			&& (j_response_types_supported->type == APR_JSON_ARRAY)) {
-		if (oidc_metadata_provider_response_type_is_supported(r,
-				j_response_types_supported, response_type) == FALSE) {
-			// if no default is set, prefer "code" over "id_token" over "id_token token"
-			if (oidc_metadata_provider_response_type_is_supported(r,
-					j_response_types_supported, "code")) {
-				response_type = "code";
-			} else if (oidc_metadata_provider_response_type_is_supported(r,
-					j_response_types_supported, "id_token")) {
-				response_type = "id_token";
-			} else if (oidc_metadata_provider_response_type_is_supported(r,
-					j_response_types_supported, "id_token token")) {
-				response_type = "id_token token";
-			}
 		}
 	}
 

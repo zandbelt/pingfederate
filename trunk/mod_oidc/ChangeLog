@@ -1,3 +1,6 @@
+3/16/2014
+- loosen response_types_supported (provider) and response_types (client) handling; .provider only warns, .client overrides now
+
 3/14/2014
 - fix warning/debug printout in handle_implicit_post (was logging as warning: handle_implicit_redirect)
 - include nonce in "token" flow as well (mitreid.org)

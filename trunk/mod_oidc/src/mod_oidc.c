@@ -77,7 +77,6 @@
 
 #include "mod_oidc.h"
 
-// TODO: support permutations of multiple response types
 // TODO: check token_type and expires_in on incoming access_token using "token ..." flows?
 // TODO: support more hybrid flows ("code id_token" (for MS), "code token" etc.)
 

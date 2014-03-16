@@ -997,3 +997,36 @@ int oidc_util_html_send_error(request_rec *r, const char *error, const char *des
 
 	return oidc_util_http_sendstring(r, msg, OK);
 }
+
+/*
+ * see if a certain string value is part of a JSON array with string elements
+ */
+apr_byte_t oidc_util_json_array_has_value(request_rec *r,
+		apr_json_value_t *haystack, const char *needle) {
+
+	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+			"oidc_util_json_array_has_value: entering (%s)", needle);
+
+	if ( (haystack == NULL) || (haystack->type != APR_JSON_ARRAY) ) return FALSE;
+
+	int i;
+	for (i = 0; i < haystack->value.array->nelts; i++) {
+		apr_json_value_t *elem = APR_ARRAY_IDX(haystack->value.array, i,
+				apr_json_value_t *);
+		if (elem->type != APR_JSON_STRING) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+					"oidc_util_json_array_has_value: unhandled in-array JSON non-string object type [%d]",
+					elem->type);
+			continue;
+		}
+		if (strcmp(elem->value.string.p, needle) == 0) {
+			break;
+		}
+	}
+
+//	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+//			"oidc_util_json_array_has_value: returning (%d=%d)", i,
+//			haystack->value.array->nelts);
+
+	return (i == haystack->value.array->nelts) ? FALSE : TRUE;
+}
