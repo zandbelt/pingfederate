@@ -10,7 +10,10 @@ SRC=src/mod_oidc.c \
 	src/oidc_session.c \
 	src/oidc_cache.c \
 	src/oidc_metadata.c \
-	src/apr_json_decode.c
+	src/apr_json_decode.c \
+	src/cache/file.c \
+	src/cache/memcache.c \
+	src/cache/shm.c
 
 # Files to include when making a .tar.gz-file for distribution
 DISTFILES=$(SRC) \

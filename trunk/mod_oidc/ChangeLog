@@ -1,3 +1,8 @@
+3/17/2014
+- first batch of rewriting caching layer
+- add memcache and shared memory support
+- store jwks in cache
+
 3/16/2014
 - loosen response_types_supported (provider) and response_types (client) handling; .provider only warns, .client overrides now
 

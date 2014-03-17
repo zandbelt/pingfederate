@@ -330,7 +330,7 @@ static apr_status_t oidc_session_load_cache(request_rec *r, session_rec *z) {
 
 	/* get the string-encoded session from the cache based on the key */
 	if (uuid != NULL)
-		return oidc_cache_get(r, uuid, &z->encoded);
+		if (oidc_cache_get(r, uuid, &z->encoded) == TRUE) return APR_SUCCESS;
 
 	return APR_EGENERAL;
 }
@@ -358,8 +358,8 @@ static apr_status_t oidc_session_load_cookie(request_rec *r, session_rec *z) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
 	char *cookieValue = oidc_get_cookie(r, d->cookie);
-	if (oidc_base64url_decode_decrypt_string(r, (char **)&z->encoded, cookieValue) <= 0) {
-		return APR_EGENERAL;
+	if (cookieValue != NULL) {
+		if (oidc_base64url_decode_decrypt_string(r, (char **)&z->encoded, cookieValue) <= 0) return APR_EGENERAL;
 	}
 
 	return APR_SUCCESS;

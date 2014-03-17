@@ -102,7 +102,7 @@ int oidc_base64url_decode(request_rec *r, char **dst, const char *src,
 	// TODO: check base64url decoding/encoding code and look for alternatives?
 	if (src == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_base64url_decode: not encoding anything; src=NULL");
+				"oidc_base64url_decode: not decoding anything; src=NULL");
 		return -1;
 	}
 	char *dec = apr_pstrdup(r->pool, src);
