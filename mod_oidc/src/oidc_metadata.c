@@ -139,14 +139,9 @@ static const char *oidc_metadata_client_file_path(request_rec *r,
 /*
  * get the full path to the jwks metadata file for a specified issuer
  */
-static const char *oidc_metadata_jwks_file_path(request_rec *r,
+static const char *oidc_metadata_jwks_cache_key(request_rec *r,
 		const char *issuer) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
-			&oidc_module);
-	return cfg->metadata_dir == NULL ?
-			oidc_cache_file_path(r,
-					oidc_metadata_issuer_to_filename(r, issuer)) :
-			oidc_metadata_file_path(r, cfg, issuer, OIDC_METADATA_SUFFIX_JWKS);
+	return apr_psprintf(r->pool, "%s.jwks", issuer);
 }
 
 /*
@@ -536,152 +531,33 @@ static apr_byte_t oidc_metadata_retrieve_and_store(request_rec *r,
 }
 
 /*
- * (temporary?) helper function to convert from the format (PEM-formatted X.509 certificates)
- * in which Google currently provides signing key material to the standard JWK format
- */
-static apr_json_value_t *oidc_metadata_jwks_convert_from_google_format(
-		request_rec *r, apr_json_value_t *j_jwks, char **response) {
-	BIO *bufio = NULL;
-
-	apr_json_value_t *j_value = NULL;
-	apr_hash_index_t *hi = NULL;
-	const char *s_key = NULL;
-
-	/* yes, this is hardcore */
-	char *result = "{\"keys\":[";
-
-	/* loop over the claims in the JSON structure */
-	for (hi = apr_hash_first(r->pool, j_jwks->value.object); hi; hi =
-			apr_hash_next(hi)) {
-
-		/* get the next key/value entry */
-		apr_hash_this(hi, (const void**) &s_key, NULL, (void**) &j_value);
-
-		if (j_value->type != APR_JSON_STRING) {
-			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-					"oidc_proto_google_jwk: element is not a (PEM) string, skipping");
-			continue;
-		}
-
-		/* get a memory pointer to the PEM-encoded X.509 certificate */
-		bufio = BIO_new_mem_buf((void*) j_value->value.string.p,
-				strlen(j_value->value.string.p));
-		X509 *x = NULL;
-		if (!PEM_read_bio_X509(bufio, &x, 0, NULL)) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_proto_google_jwk: PEM_read_bio_X509 failed (%s), skipping",
-					ERR_error_string(ERR_get_error(), NULL));
-			continue;
-		}
-
-		/* extract the public key from the X.509 certificate */
-		EVP_PKEY *pkey = NULL;
-		if ((pkey = X509_get_pubkey(x)) == NULL) {
-			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_proto_google_jwk: X509_get_pubkey failed (%s), skipping",
-					ERR_error_string(ERR_get_error(), NULL));
-			continue;
-		}
-
-		/* check that it contains an RSA key */
-		if (pkey->type != EVP_PKEY_RSA) {
-			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-					"oidc_proto_google_jwk: element is not a (PEM) string, skipping");
-			continue;
-		}
-
-		/* extract the modules and exponent parameters and base64-url encode them */
-		unsigned char *e_n = apr_palloc(r->pool,
-				BN_num_bytes(pkey->pkey.rsa->n));
-		unsigned char *e_e = apr_palloc(r->pool,
-				BN_num_bytes(pkey->pkey.rsa->e));
-
-		int l_n = BN_bn2bin(pkey->pkey.rsa->n, e_n);
-		int l_e = BN_bn2bin(pkey->pkey.rsa->e, e_e);
-
-		char *s_n = NULL;
-		char *s_e = NULL;
-		oidc_base64url_encode(r, &s_n, (const char *) e_n, l_n);
-		oidc_base64url_encode(r, &s_e, (const char *) e_e, l_e);
-
-		// TODO: check algorithm
-
-		/* put the extracted modulus and exponent in the JWK format */
-		result =
-				apr_psprintf(r->pool,
-						"%s%s{\"alg\":\"RS256\",\"kty\":\"RSA\",\"kid\":\"%s\",\"n\":\"%s\",\"e\":\"%s\"}",
-						result,
-						((strcmp(result, "{\"keys\":[") == 0) ? "" : ","),
-						s_key, s_n, s_e);
-
-		EVP_PKEY_free(pkey);
-		X509_free(x);
-		BIO_free(bufio);
-		// other stuff is allocated on the request pool
-	}
-
-	/* finalize the JSON object */
-	result = apr_psprintf(r->pool, "%s]}", result);
-
-	/* log the result */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_proto_google_jwk: constructed %s", result);
-
-	/* assign the stringified return value */
-	*response = result;
-
-	/* parse the return value in to a return JSON object as well */
-	j_value = NULL;
-	if (apr_json_decode(&j_value, result, strlen(result),
-			r->pool) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_proto_google_jwk: could not decode re-formatted JWK set");
-		return NULL;
-	}
-
-	/* return the parsed JSON result */
-	return j_value;
-}
-
-/*
  * helper function to get the JWKs for the specified issuer
  */
 static apr_byte_t oidc_metadata_jwks_retrieve_and_store(request_rec *r,
-		oidc_cfg *cfg, oidc_provider_t *provider, const char *jwks_path,
-		apr_json_value_t **j_jwks) {
+		oidc_cfg *cfg, oidc_provider_t *provider, apr_json_value_t **j_jwks) {
 
-	/* hacky for google */
-	if (strcmp(provider->jwks_uri, "https://www.googleapis.com/oauth2/v1/certs")
-			== 0) {
+	const char *response = NULL;
 
-		/* this won't store the file because it is not valid */
-		oidc_metadata_retrieve_and_store(r, cfg, provider->jwks_uri,
-		OIDC_HTTP_GET, NULL, provider->ssl_validate_server, provider->issuer,
-				oidc_metadata_jwks_is_valid, jwks_path, j_jwks);
+	/* no valid provider metadata, get it at the specified URL with the specified parameters */
+	if (oidc_util_http_call(r, provider->jwks_uri, OIDC_HTTP_GET, NULL, NULL,
+			NULL, provider->ssl_validate_server, &response,
+			cfg->http_timeout_short) == FALSE)
+		return FALSE;
 
-		/*
-		 * the return value of the previous function will always be FALSE but we need to
-		 * make sure that it wasn't the HTTP call itself that failed
-		 */
-		if (*j_jwks == NULL)
-			return FALSE;
+	/* decode and see if it is not an error response somehow */
+	if (oidc_util_decode_json_and_check_error(r, response, j_jwks) == FALSE)
+		return FALSE;
 
-		char *response = NULL;
-		*j_jwks = oidc_metadata_jwks_convert_from_google_format(r, *j_jwks,
-				&response);
+	/* check to see if it is valid metadata */
+	if (oidc_metadata_jwks_is_valid(r, *j_jwks, provider->issuer) == FALSE)
+		return FALSE;
 
-		/* since it is valid, write the obtained provider metadata file */
-		if (oidc_metadata_file_write(r, jwks_path, response) == FALSE)
-			return FALSE;
+	/* store the JWKs in the cache */
+	oidc_cache_set(r, oidc_metadata_jwks_cache_key(r, provider->issuer),
+			response,
+			apr_time_now() + apr_time_from_sec(provider->jwks_refresh_interval));
 
-		return TRUE;
-	}
-
-	/* get the jwks metadata for this issuer */
-	return oidc_metadata_retrieve_and_store(r, cfg, provider->jwks_uri,
-	OIDC_HTTP_GET, NULL, provider->ssl_validate_server, provider->issuer,
-			oidc_metadata_jwks_is_valid, jwks_path, j_jwks);
-
+	return TRUE;
 }
 
 /*
@@ -695,46 +571,33 @@ apr_byte_t oidc_metadata_jwks_get(request_rec *r, oidc_cfg *cfg,
 			"oidc_metadata_jwks_get: entering (issuer=%s, refresh=%d)",
 			provider->issuer, *refresh);
 
-	/* get the full file path to the jwks metadata for this issuer */
-	const char *jwks_path = oidc_metadata_jwks_file_path(r, provider->issuer);
-
 	/* see if we need to do a forced refresh */
 	if (*refresh == TRUE) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 				"oidc_metadata_jwks_get: doing a forced refresh of the JWKs for issuer \"%s\"",
 				provider->issuer);
-		return oidc_metadata_jwks_retrieve_and_store(r, cfg, provider,
-				jwks_path, j_jwks);
+		if (oidc_metadata_jwks_retrieve_and_store(r, cfg, provider,
+				j_jwks) == TRUE)
+			return TRUE;
+		// else: fallback on any cached JWKs
 	}
 
-	/* get the last-modified timestamp from the stored file */
-	apr_finfo_t fi;
-	if (apr_stat(&fi, jwks_path, APR_FINFO_MTIME, r->pool) == APR_SUCCESS) {
-		if (apr_time_now() >= fi.mtime + apr_time_from_sec(provider->jwks_refresh_interval)) {
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_metadata_jwks_get: JWKs for issuer \"%s\" expired, trying to refresh it (now=%" APR_TIME_T_FMT ", mtime=%" APR_TIME_T_FMT ", interval_from_sec=%" APR_TIME_T_FMT "",
-					provider->issuer, apr_time_now(), fi.mtime, apr_time_from_sec(provider->jwks_refresh_interval));
+	/* see if the JWKs is cached */
+	const char *value = NULL;
+	oidc_cache_get(r, oidc_metadata_jwks_cache_key(r, provider->issuer),
+			&value);
 
-			/* it is expired: do a forced refresh */
-			*refresh = TRUE;
-			if (oidc_metadata_jwks_retrieve_and_store(r, cfg, provider,
-					jwks_path, j_jwks) == TRUE) {
-				return TRUE;
-			}
-			// else: fall back to the already stored JWKS, I guess for expiry that is OK indeed
-		}
+	if (value == NULL) {
+		/* it is non-existing or expired: do a forced refresh */
+		*refresh = TRUE;
+		return oidc_metadata_jwks_retrieve_and_store(r, cfg, provider, j_jwks);
 	}
 
-	/* see if we have valid metadata already, if so, return it */
-	if (oidc_metadata_get_and_check(r, jwks_path, provider->issuer,
-			oidc_metadata_jwks_is_valid, j_jwks) == TRUE) {
-		return TRUE;
-	}
+	/* decode and see if it is not an error response somehow */
+	if (oidc_util_decode_json_and_check_error(r, value, j_jwks) == FALSE)
+		return FALSE;
 
-	/* we did not have valid metadata yet, do a forced download now */
-	*refresh = TRUE;
-	return oidc_metadata_jwks_retrieve_and_store(r, cfg, provider, jwks_path,
-			j_jwks);
+	return TRUE;
 }
 
 /*

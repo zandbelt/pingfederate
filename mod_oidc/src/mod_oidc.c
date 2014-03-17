@@ -54,6 +54,7 @@
  * AES crypto: http://saju.net.in/code/misc/openssl_aes.c.txt
  * session handling: Apache 2.4 mod_session.c
  * session handling backport: http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
+ * shared memory caching: mod_auth_mellon
  *
  * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
  *
@@ -77,6 +78,7 @@
 
 #include "mod_oidc.h"
 
+// TODO: support cache_unset for cleanup purposes?
 // TODO: check token_type and expires_in on incoming access_token using "token ..." flows?
 // TODO: support more hybrid flows ("code id_token" (for MS), "code token" etc.)
 
@@ -1246,7 +1248,10 @@ const command_rec oidc_config_cmds[] =
 		AP_INIT_TAKE1("OIDCHTTPTimeoutShort", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, http_timeout_short), RSRC_CONF, "Timeout for short duration HTTP calls (registry/discovery)."),
 		AP_INIT_TAKE1("OIDCStateTimeout", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, state_timeout), RSRC_CONF, "Time to live in seconds for state parameter (cq. interval in which the authorization request and the corresponding response need to be completed)."),
 
-		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, cache_dir), RSRC_CONF, "Directory used for file-based caching."),
+		AP_INIT_TAKE1("OIDCCacheType", oidc_set_cache_type, (void*)APR_OFFSETOF(oidc_cfg, cache_type), RSRC_CONF, "Cache type; must be one of \"file\", \"memcache\" or \"shm\"."),
+		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, cache_file_dir), RSRC_CONF, "Directory used for file-based caching."),
+		AP_INIT_TAKE1("OIDCMemCacheServers", oidc_cache_memcache_init, (void*)APR_OFFSETOF(oidc_cfg, cache_memcache), RSRC_CONF, "Memcache servers used for caching (space separated list of <hostname>[:<port>] tuples)"),
+
 		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains provider and client metadata files."),
 		AP_INIT_TAKE1("OIDCSessionType", oidc_set_session_type, (void*)APR_OFFSETOF(oidc_cfg, session_type), RSRC_CONF, "OpenID Connect session storage type (Apache 2.0/2.2 only). Must be one of \"file\" or \"cookie\"."),
 		AP_INIT_FLAG("OIDCScrubRequestHeaders", oidc_set_flag_slot, (void *) APR_OFFSETOF(oidc_cfg, scrub_request_headers), RSRC_CONF, "Scrub user name and claim headers from the user's request."),

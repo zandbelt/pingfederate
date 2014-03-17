@@ -60,6 +60,10 @@
 #include <http_config.h>
 #include <mod_auth.h>
 
+#include "apr_memcache.h"
+#include "apr_shm.h"
+#include "apr_global_mutex.h"
+
 #include "apr_json.h"
 
 #ifndef OIDC_DEBUG
@@ -77,6 +81,13 @@
 #define OIDC_DISC_OP_PARAM "oidc_provider"
 /* parameter name of the original URL in the discovery response */
 #define OIDC_DISC_RT_PARAM "oidc_return"
+
+/* value that indicates to use file based caching */
+#define OIDC_CACHE_TYPE_FILE 0
+/* value that indicates to use memcache based caching */
+#define OIDC_CACHE_TYPE_MEMCACHE 1
+/* value that indicates to use shared memory based caching */
+#define OIDC_CACHE_TYPE_SHM 2
 
 /* value that indicates to use cache-file based session tracking */
 #define OIDC_SESSION_TYPE_22_CACHE_FILE 0
@@ -128,6 +139,12 @@ typedef struct oidc_oauth_t {
 	char *validate_endpoint_auth;
 } oidc_oauth_t;
 
+typedef struct oidc_cfg_shm_t {
+	char *mutex_filename;
+	apr_shm_t *shm;
+	apr_global_mutex_t *mutex;
+} oidc_cfg_shm_t;
+
 typedef struct oidc_cfg {
 	/* indicates whether this is a derived config, merged from a base one */
 	unsigned int merged;
@@ -145,12 +162,19 @@ typedef struct oidc_cfg {
 	/* a pointer to the oauth server settings */
 	oidc_oauth_t oauth;
 
-	/* directory that holds the cache files (if not set, we'll try and use an OS defined one like "/tmp" */
-	char *cache_dir;
 	/* directory that holds the provider & client metadata files */
 	char *metadata_dir;
 	/* type of session management/storage */
 	int session_type;
+
+	/* type of caching used */
+	int cache_type;
+	/* cache_type = file: directory that holds the cache files (if not set, we'll try and use an OS defined one like "/tmp" */
+	char *cache_file_dir;
+	/* cache_type = memcache: memcache ptr */
+	apr_memcache_t *cache_memcache;
+	/* cache_type = shm */
+	oidc_cfg_shm_t *cache_shm;
 
 	/* tell the module to strip any mod_oidc related headers that already have been set by the user-agent, normally required for secure operation */
 	int scrub_request_headers;
@@ -199,9 +223,21 @@ apr_byte_t oidc_proto_parse_idtoken(request_rec *r, oidc_cfg *cfg, oidc_provider
 int oidc_proto_javascript_implicit(request_rec *r, oidc_cfg *c);
 
 // oidc_cache.c
-apr_status_t oidc_cache_get(request_rec *r, const char *key, const char **value);
-apr_status_t oidc_cache_set(request_rec *r, const char *key, const char *value, apr_time_t expiry);
-const char *oidc_cache_file_path(request_rec *r, const char *key);
+apr_byte_t oidc_cache_get(request_rec *r, const char *key, const char **value);
+apr_byte_t oidc_cache_set(request_rec *r, const char *key, const char *value, apr_time_t expiry);
+
+apr_byte_t oidc_cache_file_get(request_rec *r, const char *key, const char **value);
+apr_byte_t oidc_cache_file_set(request_rec *r, const char *key, const char *value, apr_time_t expiry);
+//const char *oidc_cache_file_path(request_rec *r, const char *key);
+
+const char * oidc_cache_memcache_init(cmd_parms *cmd, void *ptr, const char *arg);
+apr_byte_t oidc_cache_memcache_get(request_rec *r, const char *key, const char **value);
+apr_byte_t oidc_cache_memcache_set(request_rec *r, const char *key, const char *value, apr_time_t expiry);
+
+apr_byte_t oidc_cache_shm_init(server_rec *s);
+void oic_cache_shm_child_init(apr_pool_t *p, server_rec *s);
+apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key, const char **value);
+apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key, const char *value, apr_time_t expiry);
 
 // oidc_authz.c
 int oidc_authz_worker(request_rec *r, const apr_json_value_t *const claims, const require_line *const reqs, int nelts);
@@ -225,6 +261,7 @@ const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr, const 
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value);
 const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg);
 const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg);
+const char *oidc_set_cache_type(cmd_parms *cmd, void *ptr, const char *arg);
 const char *oidc_set_response_type(cmd_parms *cmd, void *struct_ptr, const char *arg);
 const char *oidc_set_id_token_alg(cmd_parms *cmd, void *struct_ptr, const char *arg);
 

@@ -468,9 +468,6 @@ static apr_json_value_t * oidc_proto_get_key_from_jwk_uri(request_rec *r, oidc_c
 	apr_json_value_t *j_jwks = NULL;
 	apr_json_value_t *key = NULL;
 
-
-	// TODO: STORE IT IN THE CACHE IF METADATA_DIRECTORY HAS NOT BEEN DEFINED
-
 	/* get the set of JSON Web Keys for this provider (possibly by downloading them from the specified provider->jwk_uri) */
 	oidc_metadata_jwks_get(r, cfg, provider, &j_jwks, refresh);
 	if (j_jwks == NULL) {

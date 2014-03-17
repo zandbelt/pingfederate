@@ -94,6 +94,8 @@
 #define OIDC_DEFAULT_RESPONSE_TYPE "code"
 /* default duration in seconds after which retrieved JWS should be refreshed */
 #define OIDC_DEFAULT_JWKS_REFRESH_INTERVAL 3600
+/* default cache type */
+#define OIDC_DEFAULT_CACHE_TYPE OIDC_CACHE_TYPE_FILE
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -251,6 +253,28 @@ const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg) {
 }
 
 /*
+ * set the cache type
+ */
+const char *oidc_set_cache_type(cmd_parms *cmd, void *ptr, const char *arg) {
+	oidc_cfg *cfg =
+			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+
+	if (strcmp(arg, "file") == 0) {
+		cfg->cache_type = OIDC_CACHE_TYPE_FILE;
+	} else if (strcmp(arg, "memcache") == 0) {
+		cfg->cache_type = OIDC_CACHE_TYPE_MEMCACHE;
+	} else if (strcmp(arg, "shm") == 0) {
+		cfg->cache_type = OIDC_CACHE_TYPE_SHM;
+	} else {
+		return (apr_psprintf(cmd->pool,
+				"oidc_set_cache_type: invalid value for OIDCCacheType (%s); must be one of \"file\", \"memcache\" or \"shm\"",
+				arg));
+	}
+
+	return NULL;
+}
+
+/*
  * set an authentication method for an endpoint and check it is one that we support
  */
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr,
@@ -370,8 +394,15 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->oauth.validate_endpoint_url = NULL;
 	c->oauth.validate_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
 
+	c->cache_type = OIDC_DEFAULT_CACHE_TYPE;
+	c->cache_memcache = NULL;
 	/* by default we'll use the OS specified /tmp dir for cache files */
-	apr_temp_dir_get((const char **) &c->cache_dir, pool);
+	apr_temp_dir_get((const char **) &c->cache_file_dir, pool);
+	c->cache_shm = apr_pcalloc(pool, sizeof(oidc_cfg_shm_t));
+	c->cache_shm->mutex_filename = NULL;
+	c->cache_shm->shm = NULL;
+	c->cache_shm->mutex = NULL;
+
 	c->metadata_dir = NULL;
 	c->session_type = OIDC_DEFAULT_SESSION_TYPE;
 
@@ -485,7 +516,21 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->state_timeout != OIDC_DEFAULT_STATE_TIMEOUT ?
 					add->state_timeout : base->state_timeout;
 
-	c->cache_dir = add->cache_dir != NULL ? add->cache_dir : base->cache_dir;
+
+	c->cache_type =
+			add->cache_type != OIDC_DEFAULT_CACHE_TYPE ?
+					add->cache_type : base->cache_type;
+	c->cache_memcache =
+			add->cache_memcache != NULL ?
+					add->cache_memcache : base->cache_memcache;
+	c->cache_file_dir =
+			add->cache_file_dir != NULL ?
+					add->cache_file_dir : base->cache_file_dir;
+	// TODO: could point to the base?
+	c->cache_shm =
+			add->cache_shm != NULL ?
+					add->cache_shm : base->cache_shm;
+
 	c->metadata_dir =
 			add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
 	c->session_type =
@@ -615,6 +660,12 @@ static int oidc_config_check_vhost_config(apr_pool_t *pool, server_rec *s) {
 		if (oidc_check_config_oidc(s, cfg) != OK) return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
+	if ( (cfg->cache_type == OIDC_CACHE_TYPE_MEMCACHE) && (cfg->cache_memcache == NULL) ) {
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
+				"oidc_config_check_vhost_config: cache type is set to \"memcache\", but no valid OIDCMemCacheServers setting was found");
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
+
 	if ( (cfg->oauth.client_id != NULL) || (cfg->oauth.client_secret != NULL) || (cfg->oauth.validate_endpoint_url != NULL) ) {
 		if (oidc_check_config_oauth(s, cfg) != OK) return HTTP_INTERNAL_SERVER_ERROR;
 	}
@@ -704,7 +755,7 @@ apr_status_t oidc_cleanup(void *data) {
  */
 int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
 		server_rec *s) {
-	const char *userdata_key = "auth_oidc_init";
+	const char *userdata_key = "oidc_post_config";
 	void *data = NULL;
 	int i;
 
@@ -750,6 +801,7 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
 	apr_pool_cleanup_register(pool, s, oidc_cleanup, apr_pool_cleanup_null);
 
 	oidc_session_init();
+	oidc_cache_shm_init(s);
 
 	/*
 	 * Apache has a base vhost that true vhosts derive from.
@@ -783,6 +835,7 @@ static const authz_provider authz_oidc_provider = {
  */
 void oidc_register_hooks(apr_pool_t *pool) {
 	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);
+	ap_hook_child_init(oic_cache_shm_child_init, NULL, NULL, APR_HOOK_MIDDLE);
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 	ap_hook_check_authn(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_CONF);
 	ap_register_auth_provider(pool, AUTHZ_PROVIDER_GROUP, "attribute", "0", &authz_oidc_provider, AP_AUTH_INTERNAL_PER_CONF);
