@@ -51,46 +51,42 @@
  * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
  */
 
-#include "mod_oidc.h"
+#ifndef _OIDC_CACHE_H_
+#define _OIDC_CACHE_H_
 
-extern module AP_MODULE_DECLARE_DATA oidc_module;
+typedef apr_byte_t (*oidc_cache_get_function)(request_rec *r, const char *key, const char **value);
+typedef apr_byte_t (*oidc_cache_set_function)(request_rec *r, const char *key, const char *value, apr_time_t expiry);
 
-/*
- * get a value for the specified key from the cache
- */
-apr_byte_t oidc_cache_get(request_rec *r, const char *key, const char **value) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
-	switch (cfg->cache_type) {
-		case OIDC_CACHE_TYPE_FILE:
-			return oidc_cache_file_get(r, key, value);
-			break;
-		case OIDC_CACHE_TYPE_MEMCACHE:
-			return oidc_cache_memcache_get(r, key, value);
-			break;
-		case OIDC_CACHE_TYPE_SHM:
-			return oidc_cache_shm_get(r, key, value);
-			break;
-		default:
-			return FALSE;
-	}
-}
+typedef struct oidc_cache_t {
+	oidc_cache_get_function get;
+	oidc_cache_set_function set;
+} oidc_cache_t;
 
 /*
- * write a value for the specified key to the cache
+ * file
  */
-apr_byte_t oidc_cache_set(request_rec *r, const char *key, const char *value, apr_time_t expiry) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
-	switch (cfg->cache_type) {
-		case OIDC_CACHE_TYPE_FILE:
-			return oidc_cache_file_set(r, key, value, expiry);
-			break;
-		case OIDC_CACHE_TYPE_MEMCACHE:
-			return oidc_cache_memcache_set(r, key, value, expiry);
-			break;
-		case OIDC_CACHE_TYPE_SHM:
-			return oidc_cache_shm_set(r, key, value, expiry);
-			break;
-		default:
-			return FALSE;
-	}
-}
+extern oidc_cache_t oidc_cache_file;
+
+/*
+ * memcache
+ */
+extern oidc_cache_t oidc_cache_memcache;
+
+const char * oidc_cache_memcache_init(cmd_parms *cmd, void *ptr, const char *arg);
+
+/*
+ * shared memory
+ */
+extern oidc_cache_t oidc_cache_shm;
+
+typedef struct oidc_cache_cfg_shm_t {
+	int cache_size_max;
+	char *mutex_filename;
+	apr_shm_t *shm;
+	apr_global_mutex_t *mutex;
+} oidc_cache_cfg_shm_t;
+
+apr_byte_t oidc_cache_shm_init(server_rec *s);
+void oic_cache_shm_child_init(apr_pool_t *p, server_rec *s);
+
+#endif /* _OIDC_CACHE_H_ */

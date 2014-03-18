@@ -153,7 +153,7 @@ const char * oidc_cache_memcache_init(cmd_parms *cmd, void *ptr, const char *arg
 /*
  * get a name/value pair from memcache
  */
-apr_byte_t oidc_cache_memcache_get(request_rec *r, const char *key,
+static apr_byte_t oidc_cache_memcache_get(request_rec *r, const char *key,
 		const char **value) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
@@ -187,7 +187,7 @@ apr_byte_t oidc_cache_memcache_get(request_rec *r, const char *key,
 /*
  * store a name/value pair in memcache
  */
-apr_byte_t oidc_cache_memcache_set(request_rec *r, const char *key,
+static apr_byte_t oidc_cache_memcache_set(request_rec *r, const char *key,
 		const char *value, apr_time_t expiry) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
@@ -211,3 +211,5 @@ apr_byte_t oidc_cache_memcache_set(request_rec *r, const char *key,
 
 	return (rv == APR_SUCCESS);
 }
+
+oidc_cache_t oidc_cache_memcache = { oidc_cache_memcache_get, oidc_cache_memcache_set };

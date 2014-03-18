@@ -15,7 +15,7 @@ metadata directory (set by OIDCMetadataDir). The provider metadata files must fo
 naming convention "<urlencoded-issuer>.provider" (with the "https://" prefix stripped).
 
 It supports OpenID Connect Dynamic Client Registration by setting OIDCMetadataDir (which needs
-to be writeable for the Apache process in this case), a provider metadata file exists but for the
+to be writable for the Apache process in this case), a provider metadata file exists but for the
 specified issuer, it contains a registration_endpoint setting, but no matching valid client
 metadata (cq."<urlencoded-issuer>.client") file can be found in the metadata directory.
 
@@ -29,7 +29,11 @@ Authorization Server, cq. validate Bearer access_tokens against PingFederate.
 In that case it sets the REMOTE_USER variable to the "Username" claim and matches the claims
 in the intro-spected access_token against the Requires primitive.
 
-It implements server-side caching across different Apache processes through file storage in a temp directory.
+It implements server-side caching across different Apache processes through one of the following options:
+ a) file storage: in a temp directory - possibly a shared file system across multiple Apache servers
+ b) shared memory: shared across a single logical Apache server running in multiple Apache processes (mpm_prefork) on the same machine
+ c) memcache: shared across multiple Apache processes and servers, possibly across different memcache servers living on different machines
+
 
 
 Example config for using Google Apps as your OpenID Connect Provider:

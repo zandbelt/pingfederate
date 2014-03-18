@@ -56,6 +56,8 @@
 
 #include "mod_oidc.h"
 
+extern module AP_MODULE_DECLARE_DATA oidc_module;
+
 /*
  * send an OpenID Connect authorization request to the specified provider
  */
@@ -143,6 +145,9 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 		oidc_provider_t *provider, apr_json_value_t *j_payload, const char *nonce,
 		apr_time_t *expires) {
 
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&oidc_module);
+
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_proto_is_valid_idtoken: entering (looking for nonce=%s)", nonce);
 
@@ -151,7 +156,7 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 
 		/* see if we've this nonce cached already */
 		const char *replay = NULL;
-		oidc_cache_get(r, nonce, &replay);
+		cfg->cache->get(r, nonce, &replay);
 		if (replay != NULL) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 					"oidc_proto_is_valid_idtoken: nonce was found in cache already; replay attack!?");
@@ -231,7 +236,7 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 
 	if (nonce != NULL) {
 		/* cache the nonce for the window time of the token for replay prevention plus 10 seconds for safety */
-		oidc_cache_set(r, nonce, nonce, apr_time_from_sec(OIDC_IDTOKEN_IAT_SLACK * 2 + 10));
+		cfg->cache->set(r, nonce, nonce, apr_time_from_sec(OIDC_IDTOKEN_IAT_SLACK * 2 + 10));
 	}
 
 	/* get the "azp" value from the JSON payload, which may be NULL */
@@ -436,7 +441,7 @@ static apr_json_value_t *oidc_proto_get_key_from_jwks(request_rec *r, apr_json_v
 		}
 		apr_json_value_t *kty = apr_hash_get(elem->value.object, "kty", APR_HASH_KEY_STRING);
 		if (strcmp(kty->value.string.p, "RSA") != 0) {
-			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 					"oidc_proto_get_key_from_jwks: \"keys\" array element is not an RSA key type (%s), skipping", kty->value.string.p);
 			continue;
 		}

@@ -94,8 +94,8 @@
 #define OIDC_DEFAULT_RESPONSE_TYPE "code"
 /* default duration in seconds after which retrieved JWS should be refreshed */
 #define OIDC_DEFAULT_JWKS_REFRESH_INTERVAL 3600
-/* default cache type */
-#define OIDC_DEFAULT_CACHE_TYPE OIDC_CACHE_TYPE_FILE
+/* max cache size for shm */
+#define OIDC_DEFAULT_CACHE_SHM_SIZE_MAX 500
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -103,8 +103,8 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
  * set a boolean value in the server config
  */
 const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 	return ap_set_flag_slot(cmd, cfg, arg);
 }
 
@@ -113,8 +113,8 @@ const char *oidc_set_flag_slot(cmd_parms *cmd, void *struct_ptr, int arg) {
  */
 const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr,
 		const char *arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 	return ap_set_string_slot(cmd, cfg, arg);
 }
 
@@ -122,17 +122,18 @@ const char *oidc_set_string_slot(cmd_parms *cmd, void *struct_ptr,
  * set an integer value in the server config
  */
 const char *oidc_set_int_slot(cmd_parms *cmd, void *struct_ptr, const char *arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 	return ap_set_int_slot(cmd, cfg, arg);
 }
 
 /*
  * set a URL value in the server config
  */
-static const char *oidc_set_url_slot_type(cmd_parms *cmd, void *ptr, const char *arg, const char *type) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+static const char *oidc_set_url_slot_type(cmd_parms *cmd, void *ptr,
+		const char *arg, const char *type) {
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 	apr_uri_t url;
 	if (apr_uri_parse(cmd->pool, arg, &url) != APR_SUCCESS) {
 		return apr_psprintf(cmd->pool,
@@ -186,8 +187,8 @@ const char *oidc_set_url_slot(cmd_parms *cmd, void *ptr, const char *arg) {
  */
 // TODO: it's not really a syntax error... (could be fixed at runtime but then we'd have to restart the server)
 const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 
 	char s_err[128];
 	apr_dir_t *dir;
@@ -214,8 +215,8 @@ const char *oidc_set_dir_slot(cmd_parms *cmd, void *ptr, const char *arg) {
  * set the cookie domain in the server config and check it syntactically
  */
 const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 	size_t sz, limit;
 	char d;
 	limit = strlen(value);
@@ -236,8 +237,8 @@ const char *oidc_set_cookie_domain(cmd_parms *cmd, void *ptr, const char *value)
  * set the session storage type
  */
 const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 
 	if (strcmp(arg, "file") == 0) {
 		cfg->session_type = OIDC_SESSION_TYPE_22_CACHE_FILE;
@@ -256,15 +257,15 @@ const char *oidc_set_session_type(cmd_parms *cmd, void *ptr, const char *arg) {
  * set the cache type
  */
 const char *oidc_set_cache_type(cmd_parms *cmd, void *ptr, const char *arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 
 	if (strcmp(arg, "file") == 0) {
-		cfg->cache_type = OIDC_CACHE_TYPE_FILE;
+		cfg->cache = &oidc_cache_file;
 	} else if (strcmp(arg, "memcache") == 0) {
-		cfg->cache_type = OIDC_CACHE_TYPE_MEMCACHE;
+		cfg->cache = &oidc_cache_memcache;
 	} else if (strcmp(arg, "shm") == 0) {
-		cfg->cache_type = OIDC_CACHE_TYPE_SHM;
+		cfg->cache = &oidc_cache_shm;
 	} else {
 		return (apr_psprintf(cmd->pool,
 				"oidc_set_cache_type: invalid value for OIDCCacheType (%s); must be one of \"file\", \"memcache\" or \"shm\"",
@@ -275,12 +276,33 @@ const char *oidc_set_cache_type(cmd_parms *cmd, void *ptr, const char *arg) {
 }
 
 /*
+ * set the max number of cache entries for shared memory caching
+ */
+const char *oidc_set_cache_shm_max(cmd_parms *cmd, void *ptr, const char *arg) {
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
+	char *endptr;
+	char *error_str = NULL;
+
+	cfg->cache_shm->cache_size_max = cfg->cache_shm->cache_size_max = strtol(
+			arg, &endptr, 10);
+
+	if ((*arg == '\0') || (*endptr != '\0')) {
+		error_str = apr_psprintf(cmd->pool,
+				"Invalid value for directive %s, expected integer",
+				cmd->directive->directive);
+		return error_str;
+	}
+	return NULL;
+}
+
+/*
  * set an authentication method for an endpoint and check it is one that we support
  */
 const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr,
 		const char *arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 
 	if ((apr_strnatcmp(arg, "client_secret_post") == 0)
 			|| (apr_strnatcmp(arg, "client_secret_basic") == 0)) {
@@ -295,11 +317,13 @@ const char *oidc_set_endpoint_auth_slot(cmd_parms *cmd, void *struct_ptr,
  */
 const char *oidc_set_response_type(cmd_parms *cmd, void *struct_ptr,
 		const char *arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 
 	if ((apr_strnatcmp(arg, "code") == 0)
-			|| (apr_strnatcmp(arg, "id_token") == 0) || (apr_strnatcmp(arg, "id_token token") == 0) || (apr_strnatcmp(arg, "token id_token") == 0)) {
+			|| (apr_strnatcmp(arg, "id_token") == 0)
+			|| (apr_strnatcmp(arg, "id_token token") == 0)
+			|| (apr_strnatcmp(arg, "token id_token") == 0)) {
 
 		return ap_set_string_slot(cmd, cfg, arg);
 	}
@@ -312,13 +336,17 @@ const char *oidc_set_response_type(cmd_parms *cmd, void *struct_ptr,
  */
 const char *oidc_set_id_token_alg(cmd_parms *cmd, void *struct_ptr,
 		const char *arg) {
-	oidc_cfg *cfg =
-			(oidc_cfg *) ap_get_module_config(cmd->server->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			cmd->server->module_config, &oidc_module);
 
-	if ((apr_strnatcmp(arg, "RS256") == 0)
-			|| (apr_strnatcmp(arg, "RS384") == 0) || (apr_strnatcmp(arg, "RS512") == 0) || (apr_strnatcmp(arg, "PS256") == 0)
-			|| (apr_strnatcmp(arg, "PS384") == 0) || (apr_strnatcmp(arg, "PS512") == 0) || (apr_strnatcmp(arg, "HS256") == 0)
-			|| (apr_strnatcmp(arg, "HS384") == 0) || (apr_strnatcmp(arg, "HS512") == 0)) {
+	if ((apr_strnatcmp(arg, "RS256") == 0) || (apr_strnatcmp(arg, "RS384") == 0)
+			|| (apr_strnatcmp(arg, "RS512") == 0)
+			|| (apr_strnatcmp(arg, "PS256") == 0)
+			|| (apr_strnatcmp(arg, "PS384") == 0)
+			|| (apr_strnatcmp(arg, "PS512") == 0)
+			|| (apr_strnatcmp(arg, "HS256") == 0)
+			|| (apr_strnatcmp(arg, "HS384") == 0)
+			|| (apr_strnatcmp(arg, "HS512") == 0)) {
 
 		return ap_set_string_slot(cmd, cfg, arg);
 	}
@@ -394,11 +422,12 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->oauth.validate_endpoint_url = NULL;
 	c->oauth.validate_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
 
-	c->cache_type = OIDC_DEFAULT_CACHE_TYPE;
+	c->cache = &oidc_cache_file;
 	c->cache_memcache = NULL;
 	/* by default we'll use the OS specified /tmp dir for cache files */
 	apr_temp_dir_get((const char **) &c->cache_file_dir, pool);
-	c->cache_shm = apr_pcalloc(pool, sizeof(oidc_cfg_shm_t));
+	c->cache_shm = apr_pcalloc(pool, sizeof(oidc_cache_cfg_shm_t));
+	c->cache_shm->cache_size_max = OIDC_DEFAULT_CACHE_SHM_SIZE_MAX;
 	c->cache_shm->mutex_filename = NULL;
 	c->cache_shm->shm = NULL;
 	c->cache_shm->mutex = NULL;
@@ -449,7 +478,8 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 					add->provider.token_endpoint_url :
 					base->provider.token_endpoint_url;
 	c->provider.token_endpoint_auth =
-			strcmp(add->provider.token_endpoint_auth, OIDC_DEFAULT_ENDPOINT_AUTH) != 0 ?
+			strcmp(add->provider.token_endpoint_auth,
+			OIDC_DEFAULT_ENDPOINT_AUTH) != 0 ?
 					add->provider.token_endpoint_auth :
 					base->provider.token_endpoint_auth;
 	c->provider.userinfo_endpoint_url =
@@ -465,7 +495,7 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 
 	c->provider.ssl_validate_server =
 			add->provider.ssl_validate_server
-			!= OIDC_DEFAULT_SSL_VALIDATE_SERVER ?
+					!= OIDC_DEFAULT_SSL_VALIDATE_SERVER ?
 					add->provider.ssl_validate_server :
 					base->provider.ssl_validate_server;
 	c->provider.client_name =
@@ -479,11 +509,12 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			strcmp(add->provider.scope, OIDC_DEFAULT_SCOPE) != 0 ?
 					add->provider.scope : base->provider.scope;
 	c->provider.response_type =
-			strcmp(add->provider.response_type, OIDC_DEFAULT_RESPONSE_TYPE) != 0 ?
-					add->provider.response_type :
-					base->provider.response_type;
+			strcmp(add->provider.response_type, OIDC_DEFAULT_RESPONSE_TYPE)
+					!= 0 ?
+					add->provider.response_type : base->provider.response_type;
 	c->provider.jwks_refresh_interval =
-			add->provider.jwks_refresh_interval != OIDC_DEFAULT_JWKS_REFRESH_INTERVAL ?
+			add->provider.jwks_refresh_interval
+					!= OIDC_DEFAULT_JWKS_REFRESH_INTERVAL ?
 					add->provider.jwks_refresh_interval :
 					base->provider.jwks_refresh_interval;
 
@@ -502,7 +533,8 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 					add->oauth.validate_endpoint_url :
 					base->oauth.validate_endpoint_url;
 	c->oauth.validate_endpoint_auth =
-			strcmp(add->oauth.validate_endpoint_auth, OIDC_DEFAULT_ENDPOINT_AUTH) != 0 ?
+			strcmp(add->oauth.validate_endpoint_auth,
+			OIDC_DEFAULT_ENDPOINT_AUTH) != 0 ?
 					add->oauth.validate_endpoint_auth :
 					base->oauth.validate_endpoint_auth;
 
@@ -516,20 +548,15 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->state_timeout != OIDC_DEFAULT_STATE_TIMEOUT ?
 					add->state_timeout : base->state_timeout;
 
-
-	c->cache_type =
-			add->cache_type != OIDC_DEFAULT_CACHE_TYPE ?
-					add->cache_type : base->cache_type;
+	c->cache = add->cache != &oidc_cache_file ? add->cache : base->cache;
 	c->cache_memcache =
 			add->cache_memcache != NULL ?
 					add->cache_memcache : base->cache_memcache;
 	c->cache_file_dir =
 			add->cache_file_dir != NULL ?
 					add->cache_file_dir : base->cache_file_dir;
-	// TODO: could point to the base?
-	c->cache_shm =
-			add->cache_shm != NULL ?
-					add->cache_shm : base->cache_shm;
+	// NB: always point to the global base;
+	c->cache_shm = base->cache_shm;
 
 	c->metadata_dir =
 			add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
@@ -654,20 +681,26 @@ static int oidc_check_config_oauth(server_rec *s, oidc_cfg *c) {
 static int oidc_config_check_vhost_config(apr_pool_t *pool, server_rec *s) {
 	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
 
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s, "oidc_config_check_vhost_config: entering");
+	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s,
+			"oidc_config_check_vhost_config: entering");
 
-	if ( (cfg->metadata_dir != NULL) || (cfg->provider.issuer == NULL) || (cfg->redirect_uri != NULL) || (cfg->crypto_passphrase != NULL) ) {
-		if (oidc_check_config_oidc(s, cfg) != OK) return HTTP_INTERNAL_SERVER_ERROR;
+	if ((cfg->metadata_dir != NULL) || (cfg->provider.issuer == NULL)
+			|| (cfg->redirect_uri != NULL)
+			|| (cfg->crypto_passphrase != NULL)) {
+		if (oidc_check_config_oidc(s, cfg) != OK)
+			return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
-	if ( (cfg->cache_type == OIDC_CACHE_TYPE_MEMCACHE) && (cfg->cache_memcache == NULL) ) {
+	if ((cfg->cache == &oidc_cache_shm) && (cfg->cache_memcache == NULL)) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
 				"oidc_config_check_vhost_config: cache type is set to \"memcache\", but no valid OIDCMemCacheServers setting was found");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
-	if ( (cfg->oauth.client_id != NULL) || (cfg->oauth.client_secret != NULL) || (cfg->oauth.validate_endpoint_url != NULL) ) {
-		if (oidc_check_config_oauth(s, cfg) != OK) return HTTP_INTERNAL_SERVER_ERROR;
+	if ((cfg->oauth.client_id != NULL) || (cfg->oauth.client_secret != NULL)
+			|| (cfg->oauth.validate_endpoint_url != NULL)) {
+		if (oidc_check_config_oauth(s, cfg) != OK)
+			return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	return OK;
@@ -676,7 +709,8 @@ static int oidc_config_check_vhost_config(apr_pool_t *pool, server_rec *s) {
 /*
  * check the config of a merged vhost
  */
-static int oidc_config_check_merged_vhost_configs(apr_pool_t *pool, server_rec *s) {
+static int oidc_config_check_merged_vhost_configs(apr_pool_t *pool,
+		server_rec *s) {
 	int status = OK;
 	while (s != NULL && status == OK) {
 		oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
@@ -687,7 +721,6 @@ static int oidc_config_check_merged_vhost_configs(apr_pool_t *pool, server_rec *
 	}
 	return status;
 }
-
 
 /*
  * check if any merged vhost configs exist
@@ -739,7 +772,7 @@ apr_status_t oidc_cleanup(void *data) {
 		CRYPTO_set_locking_callback(NULL);
 #ifdef OPENSSL_NO_THREADID
 	if (CRYPTO_get_id_callback() == oidc_ssl_id_callback)
-		CRYPTO_set_id_callback(NULL);
+	CRYPTO_set_id_callback(NULL);
 #else
 	if (CRYPTO_THREADID_get_callback() == oidc_ssl_id_callback)
 		CRYPTO_THREADID_set_callback(NULL);
@@ -778,8 +811,8 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
 
 #if (defined(OPENSSL_THREADS) && APR_HAS_THREADS)
 	ssl_num_locks = CRYPTO_num_locks();
-	ssl_locks =
-			apr_pcalloc(s->process->pool, ssl_num_locks * sizeof(*ssl_locks));
+	ssl_locks = apr_pcalloc(s->process->pool,
+			ssl_num_locks * sizeof(*ssl_locks));
 
 	for (i = 0; i < ssl_num_locks; i++)
 		apr_thread_mutex_create(&(ssl_locks[i]), APR_THREAD_MUTEX_DEFAULT,
@@ -825,8 +858,8 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
 
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 static const authz_provider authz_oidc_provider = {
-		&oidc_authz_checker,
-		NULL,
+	&oidc_authz_checker,
+	NULL,
 };
 #endif
 
@@ -845,3 +878,186 @@ void oidc_register_hooks(apr_pool_t *pool) {
 	ap_hook_auth_checker(oidc_auth_checker, NULL, authzSucc, APR_HOOK_MIDDLE);
 #endif
 }
+
+/*
+ * set of configuration primitives
+ */
+const command_rec oidc_config_cmds[] = {
+
+		AP_INIT_TAKE1("OIDCProviderIssuer", oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, provider.issuer),
+				RSRC_CONF, "OpenID Connect OP issuer identifier."),
+		AP_INIT_TAKE1("OIDCProviderAuthorizationEndpoint",
+				oidc_set_https_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, provider.authorization_endpoint_url),
+				RSRC_CONF,
+				"Define the OpenID OP Authorization Endpoint URL (e.g.: https://localhost:9031/as/authorization.oauth2)"),
+		AP_INIT_TAKE1("OIDCProviderTokenEndpoint",
+				oidc_set_https_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_url),
+				RSRC_CONF,
+				"Define the OpenID OP Token Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
+		AP_INIT_TAKE1("OIDCProviderTokenEndpointAuth",
+				oidc_set_endpoint_auth_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_auth),
+				RSRC_CONF,
+				"Specify an authentication method for the OpenID OP Token Endpoint (e.g.: client_secret_basic)"),
+		AP_INIT_TAKE1("OIDCProviderUserInfoEndpoint",
+				oidc_set_https_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, provider.userinfo_endpoint_url),
+				RSRC_CONF,
+				"Define the OpenID OP UserInfo Endpoint URL (e.g.: https://localhost:9031/idp/userinfo.openid)"),
+		AP_INIT_TAKE1("OIDCProviderJwksUri",
+				oidc_set_https_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, provider.jwks_uri),
+				RSRC_CONF,
+				"Define the OpenID OP JWKS URL (e.g.: https://macbook:9031/pf/JWKS)"),
+		AP_INIT_TAKE1("OIDCResponseType",
+				oidc_set_response_type,
+				(void *)APR_OFFSETOF(oidc_cfg, provider.response_type),
+				RSRC_CONF,
+				"The response type (or OpenID Connect Flow) used; must be one of \"code\", \"id_token\", \"id_token token\" or \"token id_token\" (serves as default value for discovered OPs too)"),
+		AP_INIT_TAKE1("OIDCIDTokenAlg", oidc_set_id_token_alg,
+				(void *)APR_OFFSETOF(oidc_cfg, id_token_alg),
+				RSRC_CONF,
+				"The algorithm that the OP should use to sign the id_token (used only in dynamic client registration); must be one of [RS256|RS384|RS512|PS256|PS384|PS512]"),
+		AP_INIT_FLAG("OIDCSSLValidateServer",
+				oidc_set_flag_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, provider.ssl_validate_server),
+				RSRC_CONF,
+				"Require validation of the OpenID Connect OP SSL server certificate for successful authentication (On or Off)"),
+		AP_INIT_TAKE1("OIDCClientName", oidc_set_string_slot,
+				(void *) APR_OFFSETOF(oidc_cfg, provider.client_name),
+				RSRC_CONF,
+				"Define the (client_name) name that the client uses for dynamic registration to the OP."),
+		AP_INIT_TAKE1("OIDCClientContact", oidc_set_string_slot,
+				(void *) APR_OFFSETOF(oidc_cfg, provider.client_contact),
+				RSRC_CONF,
+				"Define the contact that the client registers in dynamic registration with the OP."),
+		AP_INIT_TAKE1("OIDCScope", oidc_set_string_slot,
+				(void *) APR_OFFSETOF(oidc_cfg, provider.scope),
+				RSRC_CONF,
+				"Define the OpenID Connect scope that is requested from the OP."),
+		AP_INIT_TAKE1("OIDCJWKSRefreshInterval",
+				oidc_set_int_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, provider.jwks_refresh_interval),
+				RSRC_CONF,
+				"Duration in seconds after which retrieved JWS should be refreshed."),
+
+		AP_INIT_TAKE1("OIDCClientID", oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, provider.client_id),
+				RSRC_CONF,
+				"Client identifier used in calls to OpenID Connect OP."),
+		AP_INIT_TAKE1("OIDCClientSecret", oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, provider.client_secret),
+				RSRC_CONF,
+				"Client secret used in calls to OpenID Connect OP."),
+
+		AP_INIT_TAKE1("OIDCRedirectURI", oidc_set_url_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, redirect_uri),
+				RSRC_CONF,
+				"Define the Redirect URI (e.g.: https://localhost:9031/protected/example/)"),
+		AP_INIT_TAKE1("OIDCDiscoverURL", oidc_set_url_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, discover_url),
+				RSRC_CONF,
+				"Defines an external IDP Discovery page"),
+		AP_INIT_TAKE1("OIDCCookieDomain",
+				oidc_set_cookie_domain, NULL, RSRC_CONF,
+				"Specify domain element for OIDC session cookie."),
+		AP_INIT_TAKE1("OIDCCryptoPassphrase",
+				oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase),
+				RSRC_CONF,
+				"Passphrase used for AES crypto on cookies and state."),
+		AP_INIT_TAKE1("OIDCClaimDelimiter",
+				oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, claim_delimiter),
+				RSRC_CONF,
+				"The delimiter to use when setting multi-valued claims in the HTTP headers."),
+		AP_INIT_TAKE1("OIDCClaimPrefix", oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, claim_prefix),
+				RSRC_CONF,
+				"The prefix to use when setting claims in the HTTP headers."),
+
+		AP_INIT_TAKE1("OIDCOAuthClientID", oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, oauth.client_id),
+				RSRC_CONF,
+				"Client identifier used in calls to OAuth 2.0 Authorization server validation calls."),
+		AP_INIT_TAKE1("OIDCOAuthClientSecret",
+				oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, oauth.client_secret),
+				RSRC_CONF,
+				"Client secret used in calls to OAuth 2.0 Authorization server validation calls."),
+		AP_INIT_TAKE1("OIDCOAuthEndpoint", oidc_set_https_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, oauth.validate_endpoint_url),
+				RSRC_CONF,
+				"Define the OAuth AS Validation Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
+		AP_INIT_TAKE1("OIDCOAuthEndpointAuth",
+				oidc_set_endpoint_auth_slot,
+				(void *)APR_OFFSETOF(oidc_cfg, oauth.validate_endpoint_auth),
+				RSRC_CONF,
+				"Specify an authentication method for the OAuth AS Validation Endpoint (e.g.: client_auth_basic)"),
+		AP_INIT_FLAG("OIDCOAuthSSLValidateServer",
+				oidc_set_flag_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, oauth.ssl_validate_server),
+				RSRC_CONF,
+				"Require validation of the OAuth 2.0 AS Validation Endpoint SSL server certificate for successful authentication (On or Off)"),
+
+		AP_INIT_TAKE1("OIDCHTTPTimeoutLong", oidc_set_int_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, http_timeout_long),
+				RSRC_CONF,
+				"Timeout for long duration HTTP calls (default)."),
+		AP_INIT_TAKE1("OIDCHTTPTimeoutShort", oidc_set_int_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, http_timeout_short),
+				RSRC_CONF,
+				"Timeout for short duration HTTP calls (registry/discovery)."),
+		AP_INIT_TAKE1("OIDCStateTimeout", oidc_set_int_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, state_timeout),
+				RSRC_CONF,
+				"Time to live in seconds for state parameter (cq. interval in which the authorization request and the corresponding response need to be completed)."),
+
+		AP_INIT_TAKE1("OIDCCacheType", oidc_set_cache_type,
+				(void*)APR_OFFSETOF(oidc_cfg, cache), RSRC_CONF,
+				"Cache type; must be one of \"file\", \"memcache\" or \"shm\"."),
+		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, cache_file_dir),
+				RSRC_CONF,
+				"Directory used for file-based caching."),
+		AP_INIT_TAKE1("OIDCCacheShmMax", oidc_set_cache_shm_max,
+				(void*)APR_OFFSETOF(oidc_cfg, cache_shm),
+				RSRC_CONF,
+				"Maximum number of cache entries to use for \"shm\" caching."),
+		AP_INIT_TAKE1("OIDCMemCacheServers",
+				oidc_cache_memcache_init,
+				(void*)APR_OFFSETOF(oidc_cfg, cache_memcache),
+				RSRC_CONF,
+				"Memcache servers used for caching (space separated list of <hostname>[:<port>] tuples)"),
+
+		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, metadata_dir),
+				RSRC_CONF,
+				"Directory that contains provider and client metadata files."),
+		AP_INIT_TAKE1("OIDCSessionType", oidc_set_session_type,
+				(void*)APR_OFFSETOF(oidc_cfg, session_type),
+				RSRC_CONF,
+				"OpenID Connect session storage type (Apache 2.0/2.2 only). Must be one of \"file\" or \"cookie\"."),
+		AP_INIT_FLAG("OIDCScrubRequestHeaders",
+				oidc_set_flag_slot,
+				(void *) APR_OFFSETOF(oidc_cfg, scrub_request_headers),
+				RSRC_CONF,
+				"Scrub user name and claim headers from the user's request."),
+
+		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot,
+				(void *) APR_OFFSETOF(oidc_dir_cfg, authn_header),
+				ACCESS_CONF|OR_AUTHCFG,
+				"Specify the HTTP header variable to set with the name of the authenticated user. By default no headers are added."),
+		AP_INIT_TAKE1("OIDCCookiePath", ap_set_string_slot,
+				(void *) APR_OFFSETOF(oidc_dir_cfg, cookie_path),
+				ACCESS_CONF|OR_AUTHCFG,
+				"Define the cookie path for the session cookie."),
+		AP_INIT_TAKE1("OIDCCookie", ap_set_string_slot,
+				(void *) APR_OFFSETOF(oidc_dir_cfg, cookie),
+				ACCESS_CONF|OR_AUTHCFG,
+				"Define the cookie name for the session cookie."),
+		{ NULL }
+};

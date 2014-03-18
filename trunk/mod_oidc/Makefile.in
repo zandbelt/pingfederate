@@ -8,7 +8,6 @@ SRC=src/mod_oidc.c \
 	src/oidc_util.c \
 	src/oidc_authz.c \
 	src/oidc_session.c \
-	src/oidc_cache.c \
 	src/oidc_metadata.c \
 	src/apr_json_decode.c \
 	src/cache/file.c \
@@ -19,6 +18,7 @@ SRC=src/mod_oidc.c \
 DISTFILES=$(SRC) \
 	src/mod_oidc.h \
 	src/apr_json.h \
+	src/cache/cache.h \
 	configure \
 	configure.ac \
 	Makefile.in \

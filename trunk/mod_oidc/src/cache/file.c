@@ -160,7 +160,7 @@ static apr_status_t oidc_cache_file_write(request_rec *r, const char *path,
 /*
  * get a value for the specified key from the cache
  */
-apr_byte_t oidc_cache_file_get(request_rec *r, const char *key, const char **value) {
+static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key, const char **value) {
 	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
 	char s_err[128];
@@ -377,7 +377,7 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 /*
  * write a value for the specified key to the cache
  */
-apr_byte_t oidc_cache_file_set(request_rec *r, const char *key, const char *value,
+static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key, const char *value,
 		apr_time_t expiry) {
 	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
@@ -429,3 +429,5 @@ apr_byte_t oidc_cache_file_set(request_rec *r, const char *key, const char *valu
 
 	return TRUE;
 }
+
+oidc_cache_t oidc_cache_file = { oidc_cache_file_get, oidc_cache_file_set };

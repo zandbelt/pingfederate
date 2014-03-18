@@ -66,22 +66,17 @@
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
-// TODO: make more of these configurable
-// TODO: more accurate naming
-
 /* size of key in cached key/value pairs */
-#define OIDC_CACHE_SHM_KEY_SIZE 128
-/* max number of cache entries */
-#define OIDC_CACHE_SHM_SLOT_MAX 500
+#define OIDC_CACHE_SHM_KEY_MAX 128
 /* max value size */
-#define OIDC_CACHE_SHM_VALUE_SIZE 16384
+#define OIDC_CACHE_SHM_VALUE_MAX 16384
 
 /* represents one (fixed size) cache entry, cq. name/value string pair */
 typedef struct oidc_cache_shm_entry_t {
 	/* name of the cache entry */
-	char key[OIDC_CACHE_SHM_KEY_SIZE];
+	char key[OIDC_CACHE_SHM_KEY_MAX];
 	/* value of the cache entry */
-	char value[OIDC_CACHE_SHM_VALUE_SIZE];
+	char value[OIDC_CACHE_SHM_VALUE_MAX];
 	/* last (read) access timestamp */
 	apr_time_t access;
 	/* expiry timestamp */
@@ -94,37 +89,28 @@ typedef struct oidc_cache_shm_entry_t {
 static apr_byte_t oidc_cache_shm_in_use(server_rec *s) {
 	while (s != NULL) {
 		oidc_cfg *c = ap_get_module_config(s->module_config, &oidc_module);
-		if (c->cache_type == OIDC_CACHE_TYPE_SHM) return TRUE;
+		if (c->cache == &oidc_cache_shm)
+			return TRUE;
 		s = s->next;
 	}
 	return FALSE;
-}
-
-static void oidc_cache_shm_set_all(server_rec *s, oidc_cfg_shm_t *shm) {
-	while (s != NULL) {
-		oidc_cfg *c = ap_get_module_config(s->module_config, &oidc_module);
-		if (c->cache_type == OIDC_CACHE_TYPE_SHM) c->cache_shm = shm;
-		s = s->next;
-	}
 }
 
 /*
  * initialized the shared memory block in the parent process
  */
 apr_byte_t oidc_cache_shm_init(server_rec *s) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
-			s->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config,
+			&oidc_module);
 
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s,
-			"oidc_cache_shm_init: entering");
-
-	if (oidc_cache_shm_in_use(s) == FALSE) return FALSE;
+	if (oidc_cache_shm_in_use(s) == FALSE)
+		return FALSE;
 
 	// NB: this is global, vhosts inherit a pointer
 
 	/* create the shared memory segment */
 	apr_status_t rv = apr_shm_create(&cfg->cache_shm->shm,
-			sizeof(oidc_cache_shm_entry_t) * OIDC_CACHE_SHM_SLOT_MAX,
+			sizeof(oidc_cache_shm_entry_t) * cfg->cache_shm->cache_size_max,
 			NULL, s->process->pool);
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
@@ -135,7 +121,7 @@ apr_byte_t oidc_cache_shm_init(server_rec *s) {
 	/* initialize the whole segment to '/0' */
 	int i;
 	oidc_cache_shm_entry_t *table = apr_shm_baseaddr_get(cfg->cache_shm->shm);
-	for (i = 0; i < OIDC_CACHE_SHM_SLOT_MAX; i++) {
+	for (i = 0; i < cfg->cache_shm->cache_size_max; i++) {
 		table[i].key[0] = '\0';
 		table[i].access = 0;
 	}
@@ -165,11 +151,6 @@ apr_byte_t oidc_cache_shm_init(server_rec *s) {
 	}
 #endif
 
-	oidc_cache_shm_set_all(s->next, cfg->cache_shm);
-
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s,
-			"oidc_cache_shm_init: returning");
-
 	return TRUE;
 }
 
@@ -177,24 +158,19 @@ apr_byte_t oidc_cache_shm_init(server_rec *s) {
  * initialize the shared memory segment in a child process
  */
 void oic_cache_shm_child_init(apr_pool_t *p, server_rec *s) {
-	apr_status_t rv;
-
 	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
 
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s,
-			"oic_cache_shm_child_init: entering (cache_type=%d)", cfg->cache_type);
-
 	/*
+	 * see if any of the defined servers uses shm
 	 * need to check this because this is registered as a generic child initialization
 	 * routing, meaning it will be called for each type of cache
 	 */
-
-	/* see if any of the defined servers uses shm */
-	if (oidc_cache_shm_in_use(s) == FALSE) return;
+	if (oidc_cache_shm_in_use(s) == FALSE)
+		return;
 
 	/* initialize the lock for the child process */
 	// TODO: should we use getppid to construct the mutex filename in the child and get rid of the cache_shm_mutex_filename in the config struct?
-	rv = apr_global_mutex_child_init(&cfg->cache_shm->mutex,
+	apr_status_t rv = apr_global_mutex_child_init(&cfg->cache_shm->mutex,
 			(const char *) cfg->cache_shm->mutex_filename, p);
 
 	if (rv != APR_SUCCESS) {
@@ -203,17 +179,12 @@ void oic_cache_shm_child_init(apr_pool_t *p, server_rec *s) {
 				cfg->cache_shm->mutex_filename);
 		exit(1);
 	}
-
-	oidc_cache_shm_set_all(s->next, cfg->cache_shm);
-
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s,
-			"oic_cache_shm_child_init: returning");
 }
 
 /*
  * get a value from the shared memory cache
  */
-apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
+static apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 		const char **value) {
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
@@ -236,7 +207,7 @@ apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 	oidc_cache_shm_entry_t *table = apr_shm_baseaddr_get(cfg->cache_shm->shm);
 
 	/* loop over the block, looking for the key */
-	for (i = 0; i < OIDC_CACHE_SHM_SLOT_MAX; i++) {
+	for (i = 0; i < cfg->cache_shm->cache_size_max; i++) {
 		const char *tablekey = table[i].key;
 
 		if (tablekey == NULL)
@@ -263,7 +234,7 @@ apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 /*
  * store a value in the shared memory cache
  */
-apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
+static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 		const char *value, apr_time_t expiry) {
 
 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
@@ -280,7 +251,7 @@ apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	apr_time_t age;
 
 	/* check that the passed in key is valid */
-	if (key == NULL || strlen(key) > OIDC_CACHE_SHM_KEY_SIZE) {
+	if (key == NULL || strlen(key) > OIDC_CACHE_SHM_KEY_MAX) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_cache_shm_set: could not set value since key is NULL or too long (%s)",
 				key);
@@ -288,10 +259,10 @@ apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	}
 
 	/* check that the passed in value is valid */
-	if (value == NULL || strlen(value) > OIDC_CACHE_SHM_VALUE_SIZE) {
+	if (value == NULL || strlen(value) > OIDC_CACHE_SHM_VALUE_MAX) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_cache_shm_set: could not set value since value is NULL or too long (%ld > %d)",
-				strlen(value), OIDC_CACHE_SHM_VALUE_SIZE);
+				strlen(value), OIDC_CACHE_SHM_VALUE_MAX);
 		return FALSE;
 	}
 
@@ -310,7 +281,7 @@ apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 
 	/* loop over the slots in the shared memory block */
 	t = &table[0];
-	for (i = 0; i < OIDC_CACHE_SHM_SLOT_MAX; i++) {
+	for (i = 0; i < cfg->cache_shm->cache_size_max; i++) {
 
 		/* see if this is a free slot */
 		if (table[i].key[0] == '\0') {
@@ -335,8 +306,8 @@ apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 		age = (current_time - t->access) / 1000000;
 		if (age < 3600) {
 			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r,
-					"oidc_cache_shm_set: dropping LRU entry with age = %" APR_TIME_T_FMT "s, which is less than one hour; consider increasing the shared memory caching space.",
-					age);
+					"oidc_cache_shm_set: dropping LRU entry with age = %" APR_TIME_T_FMT "s, which is less than one hour; consider increasing the shared memory caching space (which is %d now) with the (global) OIDCCacheShmMax setting.",
+					age, cfg->cache_shm->cache_size_max);
 		}
 	}
 
@@ -351,3 +322,5 @@ apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 
 	return TRUE;
 }
+
+oidc_cache_t oidc_cache_shm = { oidc_cache_shm_get, oidc_cache_shm_set };
