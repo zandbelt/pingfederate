@@ -323,6 +323,7 @@ static apr_status_t oidc_session_identity_encode(request_rec * r,
 
 /* load the session from the cache using the cookie as the index */
 static apr_status_t oidc_session_load_cache(request_rec *r, session_rec *z) {
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
 	/* get the cookie that should be our uuid/key */
@@ -330,7 +331,7 @@ static apr_status_t oidc_session_load_cache(request_rec *r, session_rec *z) {
 
 	/* get the string-encoded session from the cache based on the key */
 	if (uuid != NULL)
-		if (oidc_cache_get(r, uuid, &z->encoded) == TRUE) return APR_SUCCESS;
+		if (c->cache->get(r, uuid, &z->encoded) == TRUE) return APR_SUCCESS;
 
 	return APR_EGENERAL;
 }
@@ -339,6 +340,7 @@ static apr_status_t oidc_session_load_cache(request_rec *r, session_rec *z) {
  * save the session to the cache using a cookie for the index
  */
 static apr_status_t oidc_session_save_cache(request_rec *r, session_rec *z) {
+	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
 	/* convert the uuid to a string */
@@ -349,7 +351,7 @@ static apr_status_t oidc_session_save_cache(request_rec *r, session_rec *z) {
 	oidc_set_cookie(r, d->cookie, key);
 
 	/* store the string-encoded session in the cache */
-	oidc_cache_set(r, key, z->encoded, z->expiry);
+	c->cache->set(r, key, z->encoded, z->expiry);
 
 	return APR_SUCCESS;
 }

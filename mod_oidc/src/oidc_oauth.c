@@ -134,7 +134,7 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
 	const char *json = NULL;
 
 	/* see if we've got the claims for this access_token cached already */
-	oidc_cache_get(r, access_token, &json);
+	c->cache->get(r, access_token, &json);
 
 	if (json == NULL) {
 
@@ -165,7 +165,7 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
 		}
 
 		/* set it in the cache so subsequent request don't need to validate the access_token and get the claims anymore */
-		oidc_cache_set(r, access_token, json,
+		c->cache->set(r, access_token, json,
 				apr_time_now() + apr_time_from_sec(expires_in->value.lnumber));
 
 	} else {

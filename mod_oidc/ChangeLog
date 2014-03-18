@@ -1,3 +1,7 @@
+3/18/2014
+- complete re-factoring caching layer
+- documentation: caching primitives/update README
+
 3/17/2014
 - first batch of rewriting caching layer
 - add memcache and shared memory support

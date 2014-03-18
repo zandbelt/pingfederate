@@ -1211,55 +1211,7 @@ int oidc_auth_checker(request_rec *r) {
 }
 #endif
 
-const command_rec oidc_config_cmds[] =
-{
-		AP_INIT_TAKE1("OIDCProviderIssuer", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.issuer), RSRC_CONF, "OpenID Connect OP issuer identifier."),
-		AP_INIT_TAKE1("OIDCProviderAuthorizationEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.authorization_endpoint_url), RSRC_CONF, "Define the OpenID OP Authorization Endpoint URL (e.g.: https://localhost:9031/as/authorization.oauth2)"),
-		AP_INIT_TAKE1("OIDCProviderTokenEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_url), RSRC_CONF, "Define the OpenID OP Token Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
-		AP_INIT_TAKE1("OIDCProviderTokenEndpointAuth", oidc_set_endpoint_auth_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.token_endpoint_auth), RSRC_CONF, "Specify an authentication method for the OpenID OP Token Endpoint (e.g.: client_secret_basic)"),
-		AP_INIT_TAKE1("OIDCProviderUserInfoEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.userinfo_endpoint_url), RSRC_CONF, "Define the OpenID OP UserInfo Endpoint URL (e.g.: https://localhost:9031/idp/userinfo.openid)"),
-		AP_INIT_TAKE1("OIDCProviderJwksUri", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, provider.jwks_uri), RSRC_CONF, "Define the OpenID OP JWKS URL (e.g.: https://macbook:9031/pf/JWKS)"),
-
-		AP_INIT_TAKE1("OIDCResponseType", oidc_set_response_type, (void *)APR_OFFSETOF(oidc_cfg, provider.response_type), RSRC_CONF, "The response type (or OpenID Connect Flow) used; must be one of \"code\", \"id_token\", \"id_token token\" or \"token id_token\" (serves as default value for discovered OPs too)"),
-		AP_INIT_TAKE1("OIDCIDTokenAlg", oidc_set_id_token_alg, (void *)APR_OFFSETOF(oidc_cfg, id_token_alg), RSRC_CONF, "The algorithm that the OP should use to sign the id_token (used only in dynamic client registration); must be one of [RS256|RS384|RS512|PS256|PS384|PS512]"),
-		AP_INIT_FLAG("OIDCSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.ssl_validate_server), RSRC_CONF, "Require validation of the OpenID Connect OP SSL server certificate for successful authentication (On or Off)"),
-		AP_INIT_TAKE1("OIDCClientName", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.client_name), RSRC_CONF, "Define the (client_name) name that the client uses for dynamic registration to the OP."),
-		AP_INIT_TAKE1("OIDCClientContact", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.client_contact), RSRC_CONF, "Define the contact that the client registers in dynamic registration with the OP."),
-		AP_INIT_TAKE1("OIDCScope", oidc_set_string_slot, (void *) APR_OFFSETOF(oidc_cfg, provider.scope), RSRC_CONF, "Define the OpenID Connect scope that is requested from the OP."),
-		AP_INIT_TAKE1("OIDCJWKSRefreshInterval", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.jwks_refresh_interval), RSRC_CONF, "Duration in seconds after which retrieved JWS should be refreshed."),
-
-		AP_INIT_TAKE1("OIDCClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.client_id), RSRC_CONF, "Client identifier used in calls to OpenID Connect OP."),
-		AP_INIT_TAKE1("OIDCClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, provider.client_secret), RSRC_CONF, "Client secret used in calls to OpenID Connect OP."),
-
-		AP_INIT_TAKE1("OIDCRedirectURI", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, redirect_uri), RSRC_CONF, "Define the Redirect URI (e.g.: https://localhost:9031/protected/example/)"),
-		AP_INIT_TAKE1("OIDCDiscoverURL", oidc_set_url_slot, (void *)APR_OFFSETOF(oidc_cfg, discover_url), RSRC_CONF, "Defines an external IDP Discovery page"),
-		AP_INIT_TAKE1("OIDCCookieDomain", oidc_set_cookie_domain, NULL, RSRC_CONF, "Specify domain element for OIDC session cookie."),
-		AP_INIT_TAKE1("OIDCCryptoPassphrase", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, crypto_passphrase), RSRC_CONF, "Passphrase used for AES crypto on cookies and state."),
-		AP_INIT_TAKE1("OIDCClaimDelimiter", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_delimiter), RSRC_CONF, "The delimiter to use when setting multi-valued claims in the HTTP headers."),
-		AP_INIT_TAKE1("OIDCClaimPrefix", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, claim_prefix), RSRC_CONF, "The prefix to use when setting claims in the HTTP headers."),
-
-		AP_INIT_TAKE1("OIDCOAuthClientID", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.client_id), RSRC_CONF, "Client identifier used in calls to OAuth 2.0 Authorization server validation calls."),
-		AP_INIT_TAKE1("OIDCOAuthClientSecret", oidc_set_string_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.client_secret), RSRC_CONF, "Client secret used in calls to OAuth 2.0 Authorization server validation calls."),
-		AP_INIT_TAKE1("OIDCOAuthEndpoint", oidc_set_https_slot, (void *)APR_OFFSETOF(oidc_cfg, oauth.validate_endpoint_url), RSRC_CONF, "Define the OAuth AS Validation Endpoint URL (e.g.: https://localhost:9031/as/token.oauth2)"),
-		AP_INIT_TAKE1("OIDCOAuthEndpointAuth", oidc_set_endpoint_auth_slot, (void *)APR_OFFSETOF(oidc_cfg, oauth.validate_endpoint_auth), RSRC_CONF, "Specify an authentication method for the OAuth AS Validation Endpoint (e.g.: client_auth_basic)"),
-		AP_INIT_FLAG("OIDCOAuthSSLValidateServer", oidc_set_flag_slot, (void*)APR_OFFSETOF(oidc_cfg, oauth.ssl_validate_server), RSRC_CONF, "Require validation of the OAuth 2.0 AS Validation Endpoint SSL server certificate for successful authentication (On or Off)"),
-
-		AP_INIT_TAKE1("OIDCHTTPTimeoutLong", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, http_timeout_long), RSRC_CONF, "Timeout for long duration HTTP calls (default)."),
-		AP_INIT_TAKE1("OIDCHTTPTimeoutShort", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, http_timeout_short), RSRC_CONF, "Timeout for short duration HTTP calls (registry/discovery)."),
-		AP_INIT_TAKE1("OIDCStateTimeout", oidc_set_int_slot, (void*)APR_OFFSETOF(oidc_cfg, state_timeout), RSRC_CONF, "Time to live in seconds for state parameter (cq. interval in which the authorization request and the corresponding response need to be completed)."),
-
-		AP_INIT_TAKE1("OIDCCacheType", oidc_set_cache_type, (void*)APR_OFFSETOF(oidc_cfg, cache_type), RSRC_CONF, "Cache type; must be one of \"file\", \"memcache\" or \"shm\"."),
-		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, cache_file_dir), RSRC_CONF, "Directory used for file-based caching."),
-		AP_INIT_TAKE1("OIDCMemCacheServers", oidc_cache_memcache_init, (void*)APR_OFFSETOF(oidc_cfg, cache_memcache), RSRC_CONF, "Memcache servers used for caching (space separated list of <hostname>[:<port>] tuples)"),
-
-		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot, (void*)APR_OFFSETOF(oidc_cfg, metadata_dir), RSRC_CONF, "Directory that contains provider and client metadata files."),
-		AP_INIT_TAKE1("OIDCSessionType", oidc_set_session_type, (void*)APR_OFFSETOF(oidc_cfg, session_type), RSRC_CONF, "OpenID Connect session storage type (Apache 2.0/2.2 only). Must be one of \"file\" or \"cookie\"."),
-		AP_INIT_FLAG("OIDCScrubRequestHeaders", oidc_set_flag_slot, (void *) APR_OFFSETOF(oidc_cfg, scrub_request_headers), RSRC_CONF, "Scrub user name and claim headers from the user's request."),
-
-		AP_INIT_TAKE1("OIDCAuthNHeader", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, authn_header), ACCESS_CONF|OR_AUTHCFG, "Specify the HTTP header variable to set with the name of the authenticated user. By default no headers are added."),
-		AP_INIT_TAKE1("OIDCCookiePath", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, cookie_path), ACCESS_CONF|OR_AUTHCFG, "Define the cookie path for the session cookie."),
-		AP_INIT_TAKE1("OIDCCookie", ap_set_string_slot, (void *) APR_OFFSETOF(oidc_dir_cfg, cookie), ACCESS_CONF|OR_AUTHCFG, "Define the cookie name for the session cookie."),
-		{ NULL } };
+extern const command_rec oidc_config_cmds[];
 
 module AP_MODULE_DECLARE_DATA oidc_module = {
 		STANDARD20_MODULE_STUFF,
