@@ -78,6 +78,17 @@ typedef struct {
  */
 #define OIDC_CACHE_FILE_PREFIX "mod-oidc-"
 
+/* post config routine */
+int oidc_cache_file_post_config(server_rec *s) {
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
+			s->module_config, &oidc_module);
+	if (cfg->cache_file_dir == NULL) {
+		/* by default we'll use the OS specified /tmp dir for cache files */
+		apr_temp_dir_get((const char **) &cfg->cache_file_dir, s->process->pool);
+	}
+	return OK;
+}
+
 /*
  * return the cache file name for a specified key
  */
@@ -430,4 +441,10 @@ static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key, const cha
 	return TRUE;
 }
 
-oidc_cache_t oidc_cache_file = { oidc_cache_file_get, oidc_cache_file_set };
+oidc_cache_t oidc_cache_file = {
+		NULL,
+		oidc_cache_file_post_config,
+		NULL,
+		oidc_cache_file_get,
+		oidc_cache_file_set
+};

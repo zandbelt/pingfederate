@@ -66,21 +66,40 @@
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
+typedef struct oidc_cache_cfg_memcache_t {
+	/* cache_type = memcache: memcache ptr */
+	apr_memcache_t *cache_memcache;
+} oidc_cache_cfg_memcache_t;
+
+/* create the cache context */
+static void *oidc_cache_memcache_cfg_create(apr_pool_t *pool) {
+	oidc_cache_cfg_memcache_t *context = apr_pcalloc(pool, sizeof(oidc_cache_cfg_memcache_t));
+	context->cache_memcache = NULL;
+	return context;
+}
+
 /*
  * initialize the memcache struct to a number of memcache servers
  */
-const char * oidc_cache_memcache_init(cmd_parms *cmd, void *ptr, const char *arg) {
+static int oidc_cache_memcache_post_config(server_rec *s) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
-			cmd->server->module_config, &oidc_module);
+			s->module_config, &oidc_module);
+	oidc_cache_cfg_memcache_t *context = (oidc_cache_cfg_memcache_t *)cfg->cache_cfg;
 
 	apr_status_t rv = APR_SUCCESS;
 	int nservers = 0;
 	char* split;
 	char* tok;
-	apr_pool_t *p = cmd->server->process->pool;
+	apr_pool_t *p = s->process->pool;
+
+	if (cfg->cache_memcache_servers == NULL) {
+		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
+				"oidc_cache_memcache_post_config: cache type is set to \"memcache\", but no valid OIDCMemCacheServers setting was found");
+		return HTTP_INTERNAL_SERVER_ERROR;
+	}
 
 	/* loop over the provided memcache servers to find out the number of servers configured */
-	char *cache_config = apr_pstrdup(p, arg);
+	char *cache_config = apr_pstrdup(p, cfg->cache_memcache_servers);
 	split = apr_strtok(cache_config, " ", &tok);
 	while (split) {
 		nservers++;
@@ -88,16 +107,16 @@ const char * oidc_cache_memcache_init(cmd_parms *cmd, void *ptr, const char *arg
 	}
 
 	/* allocated space for the number of servers */
-	rv = apr_memcache_create(p, nservers, 0, &cfg->cache_memcache);
+	rv = apr_memcache_create(p, nservers, 0, &context->cache_memcache);
 	if (rv != APR_SUCCESS) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, rv, cmd->server,
+		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
 				"oidc_cache_memcache_init: failed to create memcache object of '%d' size",
 				nservers);
-		return "error";
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	/* loop again over the provided servers */
-	cache_config = apr_pstrdup(p, arg);
+	cache_config = apr_pstrdup(p, cfg->cache_memcache_servers);
 	split = apr_strtok(cache_config, " ", &tok);
 	while (split) {
 		apr_memcache_server_t* st;
@@ -108,17 +127,17 @@ const char * oidc_cache_memcache_init(cmd_parms *cmd, void *ptr, const char *arg
 		/* parse out host and port */
 		rv = apr_parse_addr_port(&host_str, &scope_id, &port, split, p);
 		if (rv != APR_SUCCESS) {
-			ap_log_error(APLOG_MARK, APLOG_ERR, rv, cmd->server,
+			ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
 					"oidc_cache_memcache_init: failed to parse cache server: '%s'",
 					split);
-			return "error";
+			return HTTP_INTERNAL_SERVER_ERROR;
 		}
 
 		if (host_str == NULL) {
-			ap_log_error(APLOG_MARK, APLOG_ERR, rv, cmd->server,
+			ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
 					"oidc_cache_memcache_init: failed to parse cache server, "
 							"no hostname specified: '%s'", split);
-			return "error";
+			return HTTP_INTERNAL_SERVER_ERROR;
 		}
 
 		if (port == 0)
@@ -128,26 +147,26 @@ const char * oidc_cache_memcache_init(cmd_parms *cmd, void *ptr, const char *arg
 		// TODO: tune this
 		rv = apr_memcache_server_create(p, host_str, port, 0, 1, 1, 60, &st);
 		if (rv != APR_SUCCESS) {
-			ap_log_error(APLOG_MARK, APLOG_ERR, rv, cmd->server,
+			ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
 					"oidc_cache_memcache_init: failed to create cache server: %s:%d",
 					host_str, port);
-			return "error";
+			return HTTP_INTERNAL_SERVER_ERROR;
 		}
 
 		/* add the memcache server struct to the list */
-		rv = apr_memcache_add_server(cfg->cache_memcache, st);
+		rv = apr_memcache_add_server(context->cache_memcache, st);
 		if (rv != APR_SUCCESS) {
-			ap_log_error(APLOG_MARK, APLOG_ERR, rv, cmd->server,
+			ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
 					"oidc_cache_memcache_init: failed to add cache server: %s:%d",
 					host_str, port);
-			return "error";
+			return HTTP_INTERNAL_SERVER_ERROR;
 		}
 
 		/* go to the next entry */
 		split = apr_strtok(NULL, " ", &tok);
 	}
 
-	return NULL;
+	return OK;
 }
 
 /*
@@ -161,10 +180,12 @@ static apr_byte_t oidc_cache_memcache_get(request_rec *r, const char *key,
 
 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
 			&oidc_module);
+	oidc_cache_cfg_memcache_t *context = (oidc_cache_cfg_memcache_t *)cfg->cache_cfg;
+
 	apr_size_t len = 0;
 
 	/* get it */
-	apr_status_t rv = apr_memcache_getp(cfg->cache_memcache, r->pool, key,
+	apr_status_t rv = apr_memcache_getp(context->cache_memcache, r->pool, key,
 			(char **)value, &len, NULL);
 
 	// TODO: error strings ?
@@ -195,12 +216,13 @@ static apr_byte_t oidc_cache_memcache_set(request_rec *r, const char *key,
 
 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
 			&oidc_module);
+	oidc_cache_cfg_memcache_t *context = (oidc_cache_cfg_memcache_t *)cfg->cache_cfg;
 
 	/* calculate the timeout from now */
 	apr_uint32_t timeout = apr_time_sec(expiry - apr_time_now());
 
 	/* store it */
-	apr_status_t rv = apr_memcache_set(cfg->cache_memcache, key, (char *)value,
+	apr_status_t rv = apr_memcache_set(context->cache_memcache, key, (char *)value,
 			strlen(value), timeout, 0);
 
 	// TODO: error strings ?
@@ -212,4 +234,10 @@ static apr_byte_t oidc_cache_memcache_set(request_rec *r, const char *key,
 	return (rv == APR_SUCCESS);
 }
 
-oidc_cache_t oidc_cache_memcache = { oidc_cache_memcache_get, oidc_cache_memcache_set };
+oidc_cache_t oidc_cache_memcache = {
+		oidc_cache_memcache_cfg_create,
+		oidc_cache_memcache_post_config,
+		NULL,
+		oidc_cache_memcache_get,
+		oidc_cache_memcache_set
+};

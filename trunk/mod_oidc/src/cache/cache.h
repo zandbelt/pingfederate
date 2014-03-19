@@ -54,39 +54,22 @@
 #ifndef _OIDC_CACHE_H_
 #define _OIDC_CACHE_H_
 
+typedef void * (*oic_cache_memcache_cfg_create)(apr_pool_t *pool);
+typedef int (*oidc_cache_post_config_function)(server_rec *s);
+typedef int (*oidc_cache_child_init_function)(apr_pool_t *p, server_rec *s);
 typedef apr_byte_t (*oidc_cache_get_function)(request_rec *r, const char *key, const char **value);
 typedef apr_byte_t (*oidc_cache_set_function)(request_rec *r, const char *key, const char *value, apr_time_t expiry);
 
 typedef struct oidc_cache_t {
+	oic_cache_memcache_cfg_create create_config;
+	oidc_cache_post_config_function post_config;
+	oidc_cache_child_init_function child_init;
 	oidc_cache_get_function get;
 	oidc_cache_set_function set;
 } oidc_cache_t;
 
-/*
- * file
- */
 extern oidc_cache_t oidc_cache_file;
-
-/*
- * memcache
- */
 extern oidc_cache_t oidc_cache_memcache;
-
-const char * oidc_cache_memcache_init(cmd_parms *cmd, void *ptr, const char *arg);
-
-/*
- * shared memory
- */
 extern oidc_cache_t oidc_cache_shm;
-
-typedef struct oidc_cache_cfg_shm_t {
-	int cache_size_max;
-	char *mutex_filename;
-	apr_shm_t *shm;
-	apr_global_mutex_t *mutex;
-} oidc_cache_cfg_shm_t;
-
-apr_byte_t oidc_cache_shm_init(server_rec *s);
-void oic_cache_shm_child_init(apr_pool_t *p, server_rec *s);
 
 #endif /* _OIDC_CACHE_H_ */

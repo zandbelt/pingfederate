@@ -94,8 +94,8 @@
 #define OIDC_DEFAULT_RESPONSE_TYPE "code"
 /* default duration in seconds after which retrieved JWS should be refreshed */
 #define OIDC_DEFAULT_JWKS_REFRESH_INTERVAL 3600
-/* max cache size for shm */
-#define OIDC_DEFAULT_CACHE_SHM_SIZE_MAX 500
+/* default max cache size for shm */
+#define OIDC_DEFAULT_CACHE_SHM_SIZE 500
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -272,27 +272,8 @@ const char *oidc_set_cache_type(cmd_parms *cmd, void *ptr, const char *arg) {
 				arg));
 	}
 
-	return NULL;
-}
+	cfg->cache_cfg = cfg->cache->create_config ? cfg->cache->create_config(cmd->server->process->pool) : NULL;
 
-/*
- * set the max number of cache entries for shared memory caching
- */
-const char *oidc_set_cache_shm_max(cmd_parms *cmd, void *ptr, const char *arg) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
-			cmd->server->module_config, &oidc_module);
-	char *endptr;
-	char *error_str = NULL;
-
-	cfg->cache_shm->cache_size_max = cfg->cache_shm->cache_size_max = strtol(
-			arg, &endptr, 10);
-
-	if ((*arg == '\0') || (*endptr != '\0')) {
-		error_str = apr_psprintf(cmd->pool,
-				"Invalid value for directive %s, expected integer",
-				cmd->directive->directive);
-		return error_str;
-	}
 	return NULL;
 }
 
@@ -423,14 +404,10 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->oauth.validate_endpoint_auth = OIDC_DEFAULT_ENDPOINT_AUTH;
 
 	c->cache = &oidc_cache_file;
-	c->cache_memcache = NULL;
-	/* by default we'll use the OS specified /tmp dir for cache files */
-	apr_temp_dir_get((const char **) &c->cache_file_dir, pool);
-	c->cache_shm = apr_pcalloc(pool, sizeof(oidc_cache_cfg_shm_t));
-	c->cache_shm->cache_size_max = OIDC_DEFAULT_CACHE_SHM_SIZE_MAX;
-	c->cache_shm->mutex_filename = NULL;
-	c->cache_shm->shm = NULL;
-	c->cache_shm->mutex = NULL;
+	c->cache_cfg = c->cache->create_config? c->cache->create_config(pool) : NULL;
+	c->cache_file_dir = NULL;
+	c->cache_memcache_servers = NULL;
+	c->cache_shm_size_max = OIDC_DEFAULT_CACHE_SHM_SIZE;
 
 	c->metadata_dir = NULL;
 	c->session_type = OIDC_DEFAULT_SESSION_TYPE;
@@ -548,15 +525,23 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 			add->state_timeout != OIDC_DEFAULT_STATE_TIMEOUT ?
 					add->state_timeout : base->state_timeout;
 
-	c->cache = add->cache != &oidc_cache_file ? add->cache : base->cache;
-	c->cache_memcache =
-			add->cache_memcache != NULL ?
-					add->cache_memcache : base->cache_memcache;
+	if (add->cache != &oidc_cache_file) {
+		c->cache = add->cache;
+		c->cache_cfg = add->cache_cfg;
+	} else {
+		c->cache = base->cache;
+		c->cache_cfg = base->cache_cfg;
+	}
+
 	c->cache_file_dir =
 			add->cache_file_dir != NULL ?
 					add->cache_file_dir : base->cache_file_dir;
-	// NB: always point to the global base;
-	c->cache_shm = base->cache_shm;
+	c->cache_memcache_servers =
+			add->cache_memcache_servers != NULL ?
+					add->cache_memcache_servers : base->cache_memcache_servers;
+	c->cache_shm_size_max =
+			add->cache_shm_size_max != OIDC_DEFAULT_CACHE_SHM_SIZE ?
+					add->cache_shm_size_max : base->cache_shm_size_max;
 
 	c->metadata_dir =
 			add->metadata_dir != NULL ? add->metadata_dir : base->metadata_dir;
@@ -691,12 +676,6 @@ static int oidc_config_check_vhost_config(apr_pool_t *pool, server_rec *s) {
 			return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
-	if ((cfg->cache == &oidc_cache_shm) && (cfg->cache_memcache == NULL)) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
-				"oidc_config_check_vhost_config: cache type is set to \"memcache\", but no valid OIDCMemCacheServers setting was found");
-		return HTTP_INTERNAL_SERVER_ERROR;
-	}
-
 	if ((cfg->oauth.client_id != NULL) || (cfg->oauth.client_secret != NULL)
 			|| (cfg->oauth.validate_endpoint_url != NULL)) {
 		if (oidc_check_config_oauth(s, cfg) != OK)
@@ -792,9 +771,6 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
 	void *data = NULL;
 	int i;
 
-	ap_log_error(APLOG_MARK, OIDC_DEBUG, 0, s,
-			"oidc_post_config: called for (%pp)", s);
-
 	/* Since the post_config hook is invoked twice (once
 	 * for 'sanity checking' of the config and once for
 	 * the actual server launch, we have to use a hack
@@ -834,7 +810,16 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
 	apr_pool_cleanup_register(pool, s, oidc_cleanup, apr_pool_cleanup_null);
 
 	oidc_session_init();
-	oidc_cache_shm_init(s);
+
+	server_rec *sp = s;
+	while (sp != NULL) {
+		oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config,
+				&oidc_module);
+		if (cfg->cache->post_config != NULL) {
+			if (cfg->cache->post_config(sp) != OK) return HTTP_INTERNAL_SERVER_ERROR;
+		}
+		sp = sp->next;
+	}
 
 	/*
 	 * Apache has a base vhost that true vhosts derive from.
@@ -864,11 +849,28 @@ static const authz_provider authz_oidc_provider = {
 #endif
 
 /*
+ * initialize cache context in child process if required
+ */
+void oidc_child_init(apr_pool_t *p, server_rec *s) {
+	while (s != NULL) {
+		oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config,
+				&oidc_module);
+		if (cfg->cache->child_init != NULL) {
+			if (cfg->cache->child_init(p, s) != APR_SUCCESS) {
+				// TODO: ehrm...
+				exit(-1);
+			}
+		}
+		s = s->next;
+	}
+}
+
+/*
  * register our authentication and authorization functions
  */
 void oidc_register_hooks(apr_pool_t *pool) {
 	ap_hook_post_config(oidc_post_config, NULL, NULL, APR_HOOK_LAST);
-	ap_hook_child_init(oic_cache_shm_child_init, NULL, NULL, APR_HOOK_MIDDLE);
+	ap_hook_child_init(oidc_child_init, NULL, NULL, APR_HOOK_MIDDLE);
 #if MODULE_MAGIC_NUMBER_MAJOR >= 20100714
 	ap_hook_check_authn(oidc_check_user_id, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_CONF);
 	ap_register_auth_provider(pool, AUTHZ_PROVIDER_GROUP, "attribute", "0", &authz_oidc_provider, AP_AUTH_INTERNAL_PER_CONF);
@@ -1016,23 +1018,6 @@ const command_rec oidc_config_cmds[] = {
 				RSRC_CONF,
 				"Time to live in seconds for state parameter (cq. interval in which the authorization request and the corresponding response need to be completed)."),
 
-		AP_INIT_TAKE1("OIDCCacheType", oidc_set_cache_type,
-				(void*)APR_OFFSETOF(oidc_cfg, cache), RSRC_CONF,
-				"Cache type; must be one of \"file\", \"memcache\" or \"shm\"."),
-		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot,
-				(void*)APR_OFFSETOF(oidc_cfg, cache_file_dir),
-				RSRC_CONF,
-				"Directory used for file-based caching."),
-		AP_INIT_TAKE1("OIDCCacheShmMax", oidc_set_cache_shm_max,
-				(void*)APR_OFFSETOF(oidc_cfg, cache_shm),
-				RSRC_CONF,
-				"Maximum number of cache entries to use for \"shm\" caching."),
-		AP_INIT_TAKE1("OIDCMemCacheServers",
-				oidc_cache_memcache_init,
-				(void*)APR_OFFSETOF(oidc_cfg, cache_memcache),
-				RSRC_CONF,
-				"Memcache servers used for caching (space separated list of <hostname>[:<port>] tuples)"),
-
 		AP_INIT_TAKE1("OIDCMetadataDir", oidc_set_dir_slot,
 				(void*)APR_OFFSETOF(oidc_cfg, metadata_dir),
 				RSRC_CONF,
@@ -1059,5 +1044,24 @@ const command_rec oidc_config_cmds[] = {
 				(void *) APR_OFFSETOF(oidc_dir_cfg, cookie),
 				ACCESS_CONF|OR_AUTHCFG,
 				"Define the cookie name for the session cookie."),
+
+		AP_INIT_TAKE1("OIDCCacheType", oidc_set_cache_type,
+				(void*)APR_OFFSETOF(oidc_cfg, cache), RSRC_CONF,
+				"Cache type; must be one of \"file\", \"memcache\" or \"shm\"."),
+
+		AP_INIT_TAKE1("OIDCCacheDir", oidc_set_dir_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, cache_file_dir),
+				RSRC_CONF,
+				"Directory used for file-based caching."),
+		AP_INIT_TAKE1("OIDCMemCacheServers",
+				oidc_set_string_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, cache_memcache_servers),
+				RSRC_CONF,
+				"Memcache servers used for caching (space separated list of <hostname>[:<port>] tuples)"),
+		AP_INIT_TAKE1("OIDCCacheShmMax", oidc_set_int_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, cache_shm_size_max),
+				RSRC_CONF,
+				"Maximum number of cache entries to use for \"shm\" caching."),
+
 		{ NULL }
 };
