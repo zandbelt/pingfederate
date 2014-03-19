@@ -1,3 +1,6 @@
+3/19/2014
+- make all caching (incl. shm) vhost specific
+
 3/18/2014
 - complete re-factoring caching layer
 - documentation: caching primitives/update README

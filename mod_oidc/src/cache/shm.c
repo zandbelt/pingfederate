@@ -66,6 +66,12 @@
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
+typedef struct oidc_cache_cfg_shm_t {
+	char *mutex_filename;
+	apr_shm_t *shm;
+	apr_global_mutex_t *mutex;
+} oidc_cache_cfg_shm_t;
+
 /* size of key in cached key/value pairs */
 #define OIDC_CACHE_SHM_KEY_MAX 128
 /* max value size */
@@ -83,102 +89,89 @@ typedef struct oidc_cache_shm_entry_t {
 	apr_time_t expires;
 } oidc_cache_shm_entry_t;
 
-/*
- * see if shared memory caching is used in any of the vhosts
- */
-static apr_byte_t oidc_cache_shm_in_use(server_rec *s) {
-	while (s != NULL) {
-		oidc_cfg *c = ap_get_module_config(s->module_config, &oidc_module);
-		if (c->cache == &oidc_cache_shm)
-			return TRUE;
-		s = s->next;
-	}
-	return FALSE;
+/* create the cache context */
+static void *oidc_cache_shm_cfg_create(apr_pool_t *pool) {
+	oidc_cache_cfg_shm_t *context = apr_pcalloc(pool, sizeof(oidc_cache_cfg_shm_t));
+	context->mutex_filename = NULL;
+	context->shm = NULL;
+	context->mutex = NULL;
+	return context;
 }
 
 /*
  * initialized the shared memory block in the parent process
  */
-apr_byte_t oidc_cache_shm_init(server_rec *s) {
+int oidc_cache_shm_post_config(server_rec *s) {
 	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config,
 			&oidc_module);
-
-	if (oidc_cache_shm_in_use(s) == FALSE)
-		return FALSE;
-
-	// NB: this is global, vhosts inherit a pointer
+	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
 
 	/* create the shared memory segment */
-	apr_status_t rv = apr_shm_create(&cfg->cache_shm->shm,
-			sizeof(oidc_cache_shm_entry_t) * cfg->cache_shm->cache_size_max,
+	apr_status_t rv = apr_shm_create(&context->shm,
+			sizeof(oidc_cache_shm_entry_t) * cfg->cache_shm_size_max,
 			NULL, s->process->pool);
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
 				"oidc_cache_shm_init: apr_shm_create failed to create shared memory segment");
-		return FALSE;
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	/* initialize the whole segment to '/0' */
 	int i;
-	oidc_cache_shm_entry_t *table = apr_shm_baseaddr_get(cfg->cache_shm->shm);
-	for (i = 0; i < cfg->cache_shm->cache_size_max; i++) {
+	oidc_cache_shm_entry_t *table = apr_shm_baseaddr_get(context->shm);
+	for (i = 0; i < cfg->cache_shm_size_max; i++) {
 		table[i].key[0] = '\0';
 		table[i].access = 0;
 	}
 
+	const char *dir;
+	apr_temp_dir_get(&dir, s->process->pool);
 	/* construct the mutex filename */
-	cfg->cache_shm->mutex_filename = apr_psprintf(s->process->pool,
-			"%s/httpd_mutex.%ld", cfg->cache_file_dir, (long int) getpid());
+	context->mutex_filename = apr_psprintf(s->process->pool,
+			"%s/httpd_mutex.%ld.%pp", dir, (long int) getpid(), s);
 
 	/* create the mutex lock */
-	rv = apr_global_mutex_create(&cfg->cache_shm->mutex,
-			(const char *) cfg->cache_shm->mutex_filename, APR_LOCK_DEFAULT,
+	rv = apr_global_mutex_create(&context->mutex,
+			(const char *) context->mutex_filename, APR_LOCK_DEFAULT,
 			s->process->pool);
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
 				"oidc_cache_shm_init: apr_global_mutex_create failed to create mutex on file %s",
-				cfg->cache_shm->mutex_filename);
-		return FALSE;
+				context->mutex_filename);
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	/* need this on Linux */
 #ifdef AP_NEED_SET_MUTEX_PERMS
-	rv = unixd_set_global_mutex_perms(cfg->cache_shm->mutex);
+	rv = unixd_set_global_mutex_perms(context->mutex);
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
 				"oidc_cache_shm_init: unixd_set_global_mutex_perms failed; could not set permissions ");
-		return FALSE;
+		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 #endif
 
-	return TRUE;
+	return OK;
 }
 
 /*
  * initialize the shared memory segment in a child process
  */
-void oic_cache_shm_child_init(apr_pool_t *p, server_rec *s) {
+int oidc_cache_shm_child_init(apr_pool_t *p, server_rec *s) {
 	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
-
-	/*
-	 * see if any of the defined servers uses shm
-	 * need to check this because this is registered as a generic child initialization
-	 * routing, meaning it will be called for each type of cache
-	 */
-	if (oidc_cache_shm_in_use(s) == FALSE)
-		return;
+	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
 
 	/* initialize the lock for the child process */
-	// TODO: should we use getppid to construct the mutex filename in the child and get rid of the cache_shm_mutex_filename in the config struct?
-	apr_status_t rv = apr_global_mutex_child_init(&cfg->cache_shm->mutex,
-			(const char *) cfg->cache_shm->mutex_filename, p);
+	apr_status_t rv = apr_global_mutex_child_init(&context->mutex,
+			(const char *) context->mutex_filename, p);
 
 	if (rv != APR_SUCCESS) {
-		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
+		ap_log_error(APLOG_MARK, APLOG_CRIT, rv, s,
 				"oic_cache_shm_child_init: apr_global_mutex_child_init failed to reopen mutex on file %s",
-				cfg->cache_shm->mutex_filename);
-		exit(1);
+				context->mutex_filename);
 	}
+
+	return rv;
 }
 
 /*
@@ -192,22 +185,23 @@ static apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 
 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
 			&oidc_module);
+	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
 
 	apr_status_t rv;
 	int i;
 
 	/* grab the global lock */
-	if ((rv = apr_global_mutex_lock(cfg->cache_shm->mutex)) != APR_SUCCESS) {
+	if ((rv = apr_global_mutex_lock(context->mutex)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r,
 				"oidc_cache_shm_get: apr_global_mutex_lock() failed [%d]", rv);
 		return FALSE;
 	}
 
 	/* get the pointer to the start of the shared memory block */
-	oidc_cache_shm_entry_t *table = apr_shm_baseaddr_get(cfg->cache_shm->shm);
+	oidc_cache_shm_entry_t *table = apr_shm_baseaddr_get(context->shm);
 
 	/* loop over the block, looking for the key */
-	for (i = 0; i < cfg->cache_shm->cache_size_max; i++) {
+	for (i = 0; i < cfg->cache_shm_size_max; i++) {
 		const char *tablekey = table[i].key;
 
 		if (tablekey == NULL)
@@ -226,7 +220,7 @@ static apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 	}
 
 	/* release the global lock */
-	apr_global_mutex_unlock(cfg->cache_shm->mutex);
+	apr_global_mutex_unlock(context->mutex);
 
 	return TRUE;
 }
@@ -239,6 +233,7 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 
 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
 			&oidc_module);
+	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_cache_shm_set: entering \"%s\" (value size=(%ld)", key,
@@ -267,21 +262,21 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	}
 
 	/* grab the global lock */
-	if (apr_global_mutex_lock(cfg->cache_shm->mutex) != APR_SUCCESS) {
+	if (apr_global_mutex_lock(context->mutex) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_cache_shm_set: apr_global_mutex_lock() failed");
 		return FALSE;
 	}
 
 	/* get a pointer to the shared memory block */
-	table = apr_shm_baseaddr_get(cfg->cache_shm->shm);
+	table = apr_shm_baseaddr_get(context->shm);
 
 	/* get the current time */
 	current_time = apr_time_now();
 
 	/* loop over the slots in the shared memory block */
 	t = &table[0];
-	for (i = 0; i < cfg->cache_shm->cache_size_max; i++) {
+	for (i = 0; i < cfg->cache_shm_size_max; i++) {
 
 		/* see if this is a free slot */
 		if (table[i].key[0] == '\0') {
@@ -307,7 +302,7 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 		if (age < 3600) {
 			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r,
 					"oidc_cache_shm_set: dropping LRU entry with age = %" APR_TIME_T_FMT "s, which is less than one hour; consider increasing the shared memory caching space (which is %d now) with the (global) OIDCCacheShmMax setting.",
-					age, cfg->cache_shm->cache_size_max);
+					age, cfg->cache_shm_size_max);
 		}
 	}
 
@@ -318,9 +313,15 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	t->access = current_time;
 
 	/* release the global lock */
-	apr_global_mutex_unlock(cfg->cache_shm->mutex);
+	apr_global_mutex_unlock(context->mutex);
 
 	return TRUE;
 }
 
-oidc_cache_t oidc_cache_shm = { oidc_cache_shm_get, oidc_cache_shm_set };
+oidc_cache_t oidc_cache_shm = {
+		oidc_cache_shm_cfg_create,
+		oidc_cache_shm_post_config,
+		oidc_cache_shm_child_init,
+		oidc_cache_shm_get,
+		oidc_cache_shm_set
+};

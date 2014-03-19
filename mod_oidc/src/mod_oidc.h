@@ -158,12 +158,13 @@ typedef struct oidc_cfg {
 
 	/* pointer to cache functions */
 	oidc_cache_t *cache;
+	void *cache_cfg;
 	/* cache_type = file: directory that holds the cache files (if not set, we'll try and use an OS defined one like "/tmp" */
 	char *cache_file_dir;
-	/* cache_type = memcache: memcache ptr */
-	apr_memcache_t *cache_memcache;
-	/* cache_type = shm */
-	oidc_cache_cfg_shm_t *cache_shm;
+	/* cache_type= memcache: list of memcache host/port servers to use */
+	char *cache_memcache_servers;
+	/* cache_type = shm: size of the shared memory segment (cq. max number of cached entries) */
+	int cache_shm_size_max;
 
 	/* tell the module to strip any mod_oidc related headers that already have been set by the user-agent, normally required for secure operation */
 	int scrub_request_headers;
