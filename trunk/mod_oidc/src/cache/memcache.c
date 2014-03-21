@@ -218,17 +218,33 @@ static apr_byte_t oidc_cache_memcache_set(request_rec *r, const char *key,
 			&oidc_module);
 	oidc_cache_cfg_memcache_t *context = (oidc_cache_cfg_memcache_t *)cfg->cache_cfg;
 
-	/* calculate the timeout from now */
-	apr_uint32_t timeout = apr_time_sec(expiry - apr_time_now());
+	apr_status_t rv = APR_SUCCESS;
 
-	/* store it */
-	apr_status_t rv = apr_memcache_set(context->cache_memcache, key, (char *)value,
-			strlen(value), timeout, 0);
+	/* see if we should be clearing this entry */
+	if (value == NULL) {
 
-	// TODO: error strings ?
-	if (rv != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r,
-				"oidc_cache_memcache_set: apr_memcache_set returned an error");
+		rv = apr_memcache_delete(context->cache_memcache, key, 0);
+
+		// TODO: error strings ?
+		if (rv != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r,
+					"oidc_cache_memcache_set: apr_memcache_delete returned an error");
+		}
+
+	} else {
+
+		/* calculate the timeout from now */
+		apr_uint32_t timeout = apr_time_sec(expiry - apr_time_now());
+
+		/* store it */
+		rv = apr_memcache_set(context->cache_memcache, key, (char *)value,
+				strlen(value), timeout, 0);
+
+		// TODO: error strings ?
+		if (rv != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r,
+					"oidc_cache_memcache_set: apr_memcache_set returned an error");
+		}
 	}
 
 	return (rv == APR_SUCCESS);

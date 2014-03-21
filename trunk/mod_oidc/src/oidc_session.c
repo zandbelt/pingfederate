@@ -65,6 +65,8 @@ extern module AP_MODULE_DECLARE_DATA oidc_module;
 #define OIDC_SESSION_REMOTE_USER_KEY "remote-user"
 /* the name of the session expiry attribute in the session */
 #define OIDC_SESSION_EXPIRY_KEY      "oidc-expiry"
+/* the name of the uuid attribute in the session */
+#define OIDC_SESSION_UUID_KEY        "oidc-uuid"
 
 static apr_status_t (*ap_session_load_fn)(request_rec *r, session_rec **z) = NULL;
 static apr_status_t (*ap_session_get_fn)(request_rec *r, session_rec *z, const char *key, const char **value) = NULL;
@@ -74,11 +76,16 @@ static apr_status_t (*ap_session_save_fn)(request_rec *r, session_rec *z) = NULL
 apr_status_t oidc_session_load(request_rec *r, session_rec **zz) {
 	apr_status_t rc = ap_session_load_fn(r, zz);
 	(*zz)->remote_user = apr_table_get((*zz)->entries, OIDC_SESSION_REMOTE_USER_KEY);
+	const char *uuid = apr_table_get((*zz)->entries, OIDC_SESSION_UUID_KEY);
+	if (uuid != NULL) apr_uuid_parse((*zz)->uuid, uuid);
 	return rc;
 }
 
 apr_status_t oidc_session_save(request_rec *r, session_rec *z) {
 	oidc_session_set(r, z, OIDC_SESSION_REMOTE_USER_KEY, z->remote_user);
+	char key[APR_UUID_FORMATTED_LENGTH + 1];
+	apr_uuid_format((char *) &key, z->uuid);
+	oidc_session_set(r, z, OIDC_SESSION_UUID_KEY, key);
 	return ap_session_save_fn(r, z);
 }
 
@@ -88,6 +95,13 @@ apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, c
 
 apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value) {
 	return ap_session_set_fn(r, z, key, value);
+}
+
+apr_status_t oidc_session_kill(request_rec *r, session_rec *z) {
+	apr_table_clear(z->entries);
+	z->expiry = 0;
+	z->encoded = NULL;
+	return ap_session_save_fn(r, z);
 }
 
 #ifndef OIDC_SESSION_USE_APACHE_SESSIONS
@@ -343,15 +357,25 @@ static apr_status_t oidc_session_save_cache(request_rec *r, session_rec *z) {
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
-	/* convert the uuid to a string */
 	char key[APR_UUID_FORMATTED_LENGTH + 1];
 	apr_uuid_format((char *) &key, z->uuid);
 
-	/* set the uuid in the cookie */
-	oidc_set_cookie(r, d->cookie, key);
+	if (z->encoded && z->encoded[0]) {
 
-	/* store the string-encoded session in the cache */
-	c->cache->set(r, key, z->encoded, z->expiry);
+		/* set the uuid in the cookie */
+		oidc_set_cookie(r, d->cookie, key);
+
+		/* store the string-encoded session in the cache */
+		c->cache->set(r, key, z->encoded, z->expiry);
+
+	} else {
+
+		/* clear the cookie */
+		oidc_set_cookie(r, d->cookie, "");
+
+		/* remove the session from the cache */
+		c->cache->set(r, key, NULL, 0);
+	}
 
 	return APR_SUCCESS;
 }
@@ -370,8 +394,10 @@ static apr_status_t oidc_session_load_cookie(request_rec *r, session_rec *z) {
 static apr_status_t oidc_session_save_cookie(request_rec *r, session_rec *z) {
 	oidc_dir_cfg *d = ap_get_module_config(r->per_dir_config, &oidc_module);
 
-	char *cookieValue = NULL;
-	oidc_encrypt_base64url_encode_string(r, &cookieValue, z->encoded);
+	char *cookieValue = "";
+	if (z->encoded && z->encoded[0]) {
+		oidc_encrypt_base64url_encode_string(r, &cookieValue, z->encoded);
+	}
 	oidc_set_cookie(r, d->cookie, cookieValue);
 
 	return APR_SUCCESS;

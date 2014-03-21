@@ -533,7 +533,7 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 /*
  * set a cookie in the HTTP response headers
  */
-void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue) {
+void oidc_set_cookie(request_rec *r, const char *cookieName, const char *cookieValue) {
 
 	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
 	char *headerString, *currentCookies;
