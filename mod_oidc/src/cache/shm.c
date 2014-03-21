@@ -237,9 +237,9 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 			"oidc_cache_shm_set: entering \"%s\" (value size=(%ld)", key,
-			strlen(value));
+			value ? strlen(value) : 0);
 
-	oidc_cache_shm_entry_t *t;
+	oidc_cache_shm_entry_t *match, *free, *lru;
 	oidc_cache_shm_entry_t *table;
 	apr_time_t current_time;
 	int i;
@@ -254,9 +254,9 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	}
 
 	/* check that the passed in value is valid */
-	if (value == NULL || strlen(value) > OIDC_CACHE_SHM_VALUE_MAX) {
+	if ( (value != NULL) && strlen(value) > OIDC_CACHE_SHM_VALUE_MAX) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_shm_set: could not set value since value is NULL or too long (%ld > %d)",
+				"oidc_cache_shm_set: could not set value since value is too long (%ld > %d)",
 				strlen(value), OIDC_CACHE_SHM_VALUE_MAX);
 		return FALSE;
 	}
@@ -274,31 +274,40 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	/* get the current time */
 	current_time = apr_time_now();
 
-	/* loop over the slots in the shared memory block */
-	t = &table[0];
+	/* loop over the block, looking for the key */
+	match = NULL;
+	free = NULL;
+	lru = &table[0];
 	for (i = 0; i < cfg->cache_shm_size_max; i++) {
 
-		/* see if this is a free slot */
+		/* see if this slot is free */
 		if (table[i].key[0] == '\0') {
-			t = &table[i];
+			if (free == NULL) free = &table[i];
+			continue;
+		}
+
+		/* see if a value already exists for this key */
+		if (strcmp(table[i].key, key) == 0) {
+			match = &table[i];
 			break;
 		}
 
 		/* see if this slot has expired */
 		if (table[i].expires <= current_time) {
-			t = &table[i];
-			break;
+			if (free == NULL) free = &table[i];
+			continue;
 		}
 
 		/* see if this slot was less recently used than the current pointer */
-		if (table[i].access < t->access) {
-			t = &table[i];
+		if (table[i].access < lru->access) {
+			lru = &table[i];
 		}
+
 	}
 
 	/* if we have no free slots, issue a warning about the LRU entry */
-	if (t->key[0] != '\0' && t->expires > current_time) {
-		age = (current_time - t->access) / 1000000;
+	if (match == NULL && free == NULL) {
+		age = (current_time - lru->access) / 1000000;
 		if (age < 3600) {
 			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r,
 					"oidc_cache_shm_set: dropping LRU entry with age = %" APR_TIME_T_FMT "s, which is less than one hour; consider increasing the shared memory caching space (which is %d now) with the (global) OIDCCacheShmMax setting.",
@@ -306,11 +315,20 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 		}
 	}
 
-	/* fill out the entry with the provided data */
-	strcpy(t->key, key);
-	strcpy(t->value, value);
-	t->expires = expiry;
-	t->access = current_time;
+	oidc_cache_shm_entry_t *t = match ? match : (free ? free : lru);
+
+	if (value != NULL) {
+
+		/* fill out the entry with the provided data */
+		strcpy(t->key, key);
+		strcpy(t->value, value);
+		t->expires = expiry;
+		t->access = current_time;
+
+	} else {
+
+		t->key[0] = '\0';
+	}
 
 	/* release the global lock */
 	apr_global_mutex_unlock(context->mutex);

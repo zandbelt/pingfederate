@@ -78,12 +78,11 @@
 
 #include "mod_oidc.h"
 
-// TODO: support a logout URL (/redirect_uri?cmd=logout) to allow apps to kill the session (maybe relate it to OIDC federated/SLO??)
-//       see: http://auth-openid.sourceforge.net/
+// TODO: verify memcache and shm cache delete (session logout) functions
 
 // TODO: check token_type and expires_in on incoming access_token using "token ..." flows?
 // TODO: support more hybrid flows ("code id_token" (for MS), "code token" etc.)
-// TODO: support cache_unset for cleanup purposes?
+// TODO: rigid input checking on discovery responses and authorization responses
 
 // TODO: document optional custom extensions to client metadata
 // TODO: support PS??? and EC??? algorithms
@@ -1069,6 +1068,21 @@ int oidc_handle_redirect_uri_request(request_rec *r, oidc_cfg *c) {
 }
 
 /*
+ * kill session
+ */
+int oidc_handle_logout(request_rec *r, session_rec *session) {
+	char *url = NULL;
+
+	oidc_session_kill(r, session);
+
+	oidc_util_get_request_parameter(r, "logout", &url);
+
+	apr_table_add(r->headers_out, "Location", url);
+
+	return HTTP_MOVED_TEMPORARILY;
+}
+
+/*
  * main routine: handle OpenID Connect authentication
  */
 static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
@@ -1082,6 +1096,11 @@ static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 
 		/* initial request, first check if we have an existing session */
 		if (session->remote_user != NULL) {
+
+			if ( (oidc_util_request_matches_url(r, c->redirect_uri) == TRUE) && (oidc_util_request_has_parameter(r, "logout") == TRUE) ) {
+
+				return oidc_handle_logout(r, session);
+			}
 
 			/* set the user in the main request for further (incl. sub-request) processing */
 			r->user = (char *) session->remote_user;

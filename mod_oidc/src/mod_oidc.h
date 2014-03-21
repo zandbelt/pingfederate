@@ -245,7 +245,7 @@ char *oidc_get_cookie_path(request_rec *r);
 int oidc_strnenvcmp(const char *a, const char *b, int len);
 int oidc_base64url_encode(request_rec *r, char **dst, const char *src, int src_len);
 int oidc_base64url_decode(request_rec *r, char **dst, const char *src, int padding);
-void oidc_set_cookie(request_rec *r, char *cookieName, char *cookieValue);
+void oidc_set_cookie(request_rec *r, const char *cookieName, const char *cookieValue);
 char *oidc_get_cookie(request_rec *r, char *cookieName);
 int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst, const char *src);
 int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst, const char *src);
@@ -308,5 +308,6 @@ apr_status_t oidc_session_load(request_rec *r, session_rec **z);
 apr_status_t oidc_session_get(request_rec *r, session_rec *z, const char *key, const char **value);
 apr_status_t oidc_session_set(request_rec *r, session_rec *z, const char *key, const char *value);
 apr_status_t oidc_session_save(request_rec *r, session_rec *z);
+apr_status_t oidc_session_kill(request_rec *r, session_rec *z);
 
 #endif /* MOD_OIDC_H_ */

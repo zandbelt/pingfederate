@@ -400,6 +400,16 @@ static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key, const cha
 	/* only on writes (not on reads) we clean the cache first (if not done recently) */
 	oidc_cache_file_clean(r);
 
+	/* just remove cache file if value is NULL */
+	if (value == NULL) {
+		if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+					"oidc_cache_file_set: could not delete cache file \"%s\" (%s)",
+					path, apr_strerror(rc, s_err, sizeof(s_err)));
+		}
+		return TRUE;
+	}
+
 	/* try to open the cache file for writing, creating it if it does not exist */
 	if ((rc = apr_file_open(&fd, path, (APR_FOPEN_WRITE | APR_FOPEN_CREATE),
 			APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
