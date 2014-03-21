@@ -1,5 +1,6 @@
 3/21/2014
 - implement logout function (and cache delete)
+- check token_type == Bearer on implicit flows
 
 3/19/2014
 - make all caching (incl. shm) vhost specific
