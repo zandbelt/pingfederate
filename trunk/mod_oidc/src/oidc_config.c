@@ -813,7 +813,7 @@ int oidc_post_config(apr_pool_t *pool, apr_pool_t *p1, apr_pool_t *p2,
 
 	server_rec *sp = s;
 	while (sp != NULL) {
-		oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config,
+		oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(sp->module_config,
 				&oidc_module);
 		if (cfg->cache->post_config != NULL) {
 			if (cfg->cache->post_config(sp) != OK) return HTTP_INTERNAL_SERVER_ERROR;

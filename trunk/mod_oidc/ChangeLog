@@ -1,3 +1,8 @@
+3/24/2014
+- add support for Apache 2.4 mutex permission call
+- fix shm post_config init bug/typo
+- correct shm debug function name printouts
+
 3/21/2014
 - implement logout function (and cache delete)
 - check token_type == Bearer on implicit flows

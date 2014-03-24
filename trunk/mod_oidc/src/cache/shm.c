@@ -112,7 +112,7 @@ int oidc_cache_shm_post_config(server_rec *s) {
 			NULL, s->process->pool);
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
-				"oidc_cache_shm_init: apr_shm_create failed to create shared memory segment");
+				"oidc_cache_shm_post_config: apr_shm_create failed to create shared memory segment");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
@@ -136,17 +136,21 @@ int oidc_cache_shm_post_config(server_rec *s) {
 			s->process->pool);
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
-				"oidc_cache_shm_init: apr_global_mutex_create failed to create mutex on file %s",
+				"oidc_cache_shm_post_config: apr_global_mutex_create failed to create mutex on file %s",
 				context->mutex_filename);
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	/* need this on Linux */
 #ifdef AP_NEED_SET_MUTEX_PERMS
+#if MODULE_MAGIC_NUMBER_MAJOR >= 20081201
+	rv = ap_unixd_set_global_mutex_perms(context->mutex);
+#else
 	rv = unixd_set_global_mutex_perms(context->mutex);
+#endif
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
-				"oidc_cache_shm_init: unixd_set_global_mutex_perms failed; could not set permissions ");
+				"oidc_cache_shm_post_config: unixd_set_global_mutex_perms failed; could not set permissions ");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 #endif
