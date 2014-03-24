@@ -78,14 +78,13 @@
 
 #include "mod_oidc.h"
 
-// TODO: support more hybrid flows ("code id_token" (for MS), "code token" etc.)
 // TODO: rigid input checking on discovery responses and authorization responses
-
 // TODO: document optional custom extensions to client metadata
-// TODO: support PS??? and EC??? algorithms
-// TODO: override more stuff (eg. client_name, id_token_signed_response_alg) using client metadata
 
 // TODO: use oidc_get_current_url + configured RedirectURIPath to determine the RedirectURI more dynamically
+// TODO: support more hybrid flows ("code id_token" (for MS), "code token" etc.)
+// TODO: support PS??? and EC??? algorithms
+// TODO: override more stuff (eg. client_name, id_token_signed_response_alg) using client metadata
 
 // TODO: do we always want to refresh keys when signature does not validate? (risking DOS attacks, or does the nonce help against that?)
 //       do we now still want to refresh jkws once per hour (it helps to reduce the number of failed verifications, at the cost of too-many-downloads overhead)
