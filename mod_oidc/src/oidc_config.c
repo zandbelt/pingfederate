@@ -96,6 +96,8 @@
 #define OIDC_DEFAULT_JWKS_REFRESH_INTERVAL 3600
 /* default max cache size for shm */
 #define OIDC_DEFAULT_CACHE_SHM_SIZE 500
+/* for issued-at timestamp (iat) checking */
+#define OIDC_DEFAULT_IDTOKEN_IAT_SLACK 600
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -396,6 +398,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->provider.scope = OIDC_DEFAULT_SCOPE;
 	c->provider.response_type = OIDC_DEFAULT_RESPONSE_TYPE;
 	c->provider.jwks_refresh_interval = OIDC_DEFAULT_JWKS_REFRESH_INTERVAL;
+	c->provider.idtoken_iat_slack = OIDC_DEFAULT_IDTOKEN_IAT_SLACK;
 
 	c->oauth.ssl_validate_server = OIDC_DEFAULT_SSL_VALIDATE_SERVER;
 	c->oauth.client_id = NULL;
@@ -494,6 +497,11 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 					!= OIDC_DEFAULT_JWKS_REFRESH_INTERVAL ?
 					add->provider.jwks_refresh_interval :
 					base->provider.jwks_refresh_interval;
+	c->provider.idtoken_iat_slack =
+			add->provider.idtoken_iat_slack != OIDC_DEFAULT_IDTOKEN_IAT_SLACK ?
+					add->provider.idtoken_iat_slack :
+					base->provider.idtoken_iat_slack;
+
 
 	c->oauth.ssl_validate_server =
 			add->oauth.ssl_validate_server != OIDC_DEFAULT_SSL_VALIDATE_SERVER ?
@@ -945,6 +953,11 @@ const command_rec oidc_config_cmds[] = {
 				(void*)APR_OFFSETOF(oidc_cfg, provider.jwks_refresh_interval),
 				RSRC_CONF,
 				"Duration in seconds after which retrieved JWS should be refreshed."),
+		AP_INIT_TAKE1("OIDCIDTokenIatSlack",
+				oidc_set_int_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, provider.idtoken_iat_slack),
+				RSRC_CONF,
+				"Acceptable offset (both before and after) for checking the \"iat\" (= issued at) timestamp in the id_token."),
 
 		AP_INIT_TAKE1("OIDCClientID", oidc_set_string_slot,
 				(void*)APR_OFFSETOF(oidc_cfg, provider.client_id),

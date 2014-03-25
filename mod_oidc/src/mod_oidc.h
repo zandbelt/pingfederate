@@ -104,9 +104,6 @@
 /* use for JSON encoded POST calls to endpoints */
 #define OIDC_HTTP_POST_JSON 2
 
-/* for issued-at timestamp (iat) checking */
-#define OIDC_IDTOKEN_IAT_SLACK 600
-
 typedef struct oidc_provider_t {
 	char *issuer;
 	char *authorization_endpoint_url;
@@ -124,6 +121,7 @@ typedef struct oidc_provider_t {
 	char *scope;
 	char *response_type;
 	int jwks_refresh_interval;
+	int idtoken_iat_slack;
 } oidc_provider_t ;
 
 typedef struct oidc_oauth_t {

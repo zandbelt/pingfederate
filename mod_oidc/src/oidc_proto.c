@@ -222,13 +222,13 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 		return FALSE;
 	}
 
-	/* check if this id_token has been issued just now +- 60 seconds */
-	if ((apr_time_sec(apr_time_now()) - OIDC_IDTOKEN_IAT_SLACK) > iat->value.lnumber) {
+	/* check if this id_token has been issued just now +- slack (default 10 minutes) */
+	if ((apr_time_sec(apr_time_now()) - provider->idtoken_iat_slack) > iat->value.lnumber) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_proto_is_valid_idtoken: token was issued more than 1 minute ago");
 		return FALSE;
 	}
-	if ((apr_time_sec(apr_time_now()) + OIDC_IDTOKEN_IAT_SLACK) < iat->value.lnumber) {
+	if ((apr_time_sec(apr_time_now()) + provider->idtoken_iat_slack) < iat->value.lnumber) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_proto_is_valid_idtoken: token was issued more than 1 minute in the future");
 		return FALSE;
@@ -236,7 +236,7 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 
 	if (nonce != NULL) {
 		/* cache the nonce for the window time of the token for replay prevention plus 10 seconds for safety */
-		cfg->cache->set(r, nonce, nonce, apr_time_from_sec(OIDC_IDTOKEN_IAT_SLACK * 2 + 10));
+		cfg->cache->set(r, nonce, nonce, apr_time_from_sec(provider->idtoken_iat_slack * 2 + 10));
 	}
 
 	/* get the "azp" value from the JSON payload, which may be NULL */
