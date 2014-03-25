@@ -1,0 +1,3 @@
+usr/lib/apache2/modules
+var/cache/apache2/mod_oidc
+var/cache/apache2/mod_oidc/metadata

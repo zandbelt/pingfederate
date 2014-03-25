@@ -1,0 +1,1 @@
+LoadModule oidc_module /usr/lib/apache2/modules/mod_oidc.so

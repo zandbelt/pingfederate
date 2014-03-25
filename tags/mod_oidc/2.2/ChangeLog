@@ -1,0 +1,126 @@
+3/25/2014
+- version 2.2
+- support configurable iat checking acceptance interval
+- add configurable file cache clean interval
+- add some docs on proprietary client metadata config extensions
+
+3/24/2014
+- add support for Apache 2.4 mutex permission call
+- fix shm post_config init bug/typo
+- correct shm debug function name printouts
+
+3/21/2014
+- implement logout function (and cache delete)
+- check token_type == Bearer on implicit flows
+
+3/19/2014
+- make all caching (incl. shm) vhost specific
+
+3/18/2014
+- complete re-factoring caching layer
+- documentation: caching primitives/update README
+
+3/17/2014
+- first batch of rewriting caching layer
+- add memcache and shared memory support
+- store jwks in cache
+
+3/16/2014
+- loosen response_types_supported (provider) and response_types (client) handling; .provider only warns, .client overrides now
+
+3/14/2014
+- fix warning/debug printout in handle_implicit_post (was logging as warning: handle_implicit_redirect)
+- include nonce in "token" flow as well (mitreid.org)
+- spelling fixes
+
+3/13/2014
+- version 2.1
+- change README an provide example RedirectURI's that don't collide with protected content
+
+3/12/2014
+- added support for calling the userinfo endpoint in implicit flows ("token id_token")
+- allow for returning account names, domain names or partial issuer identifiers in the discovered oidc_provider value
+- normalize issuer filenames cq. no trailing slashes included anymore, no leading "https%3A%2F%2F"
+- added configurable JWK key set retrieve interval
+- improved error response handling
+
+3/11/2014
+- delete metadata files also when they do not parse as JSON
+- strip charset utf-8 addition from application/json Content-Type
+- allow to override default response_type in client metadata
+
+3/10/2014
+- version 2.0.1
+- extend iat window to 10 minutes (due to interop test results Google/Mitre...)
+- don't write more than strlen for metadata files
+
+3/10/2014
+- version 2.0
+- Debian packaging
+- more complete documentation of configuration primitives
+- iat checking with 60 seconds slack and iat-based nonce caching
+- support for HMAC verification (HS256, HS384, HS512)
+
+3/9/2014
+- improve javascript for implicit post
+- always check the signature on the id_token now, Basic or Implicit
+- factor out reading files in oidc_util 
+- revert adding /0 at end of file
+- add option to specify id_token_signed_response_alg during dynamic client registration
+- check return value on oidc_base64url_decode_decrypt_string for state and session cookie
+- allow token_endpoint and jwks_uri not to be set in OP metadata (for self-issued support)
+
+3/6/2014
+- add/fix termination of subrequest processing after sending javascript for implicit client profile
+- support configuring/overriding the token_endpoint authentication method in client metadata
+- improve HTTP call result checking for downloading Google JWKs
+- minor documentation updates
+- allow .client metadata to override global SSL validation setting for JWK downloads too
+- cleanup resources used in Google JWK conversion
+- minor variable initialization improvements (to silence valgrind)
+- code re-formatting
+
+2/28/2014
+- add implicit client support
+- support passing long/float values in app headers
+
+2/26/2014
+- add configurable timestamp check in state
+
+2/19/2014
+- correct OP metadata validation: userinfo_endpoint is optional, not mandatory
+
+2/18/2014
+- add configurable cookie-only-based (zero server state) session mode
+
+2/12/2014
+- minor correction in documentation on config primitives
+- move config checks from request handler to post_config hook (and fix oauth config check at the same time)
+
+1/27/2014
+- require TLS for AS/OP endpoints
+
+1/23/2014
+- adhere to more strict JSON compliancy in what we send
+- be more liberal in accepting "iss" values ending with a trailing slash
+- debug printout of id_token payload on validating it
+- avoid complaining about aud/azp matching if there's only one value in the aud array
+- change author's e-mail address
+- remove some unused variables and silence compiler warnings
+- add autoconfigure/automake stuff
+
+1/19/2014
+- fix registration-endpoint-does-not-exist-in-metadata logic null pointer core dump
+- Apache 2.4 fix in oidc_authz.c
+- fixes in debug/error printout, spelling, syntax etc.
+- apply eclipse code formatting and indentation
+
+1/15/2014
+- check for mandatory settings in the configuration
+- present user facing text in discovery errors
+- use proper (curl) url-encode/url-decode routines
+- re-organize metadata handling (incl. validation)
+- move stuff around to oidc_util.c, oidc_proto.c and some renaming
+
+1/9/2014
+- version 1.0
