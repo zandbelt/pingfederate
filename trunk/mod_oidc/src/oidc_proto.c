@@ -225,12 +225,12 @@ static apr_byte_t oidc_proto_is_valid_idtoken(request_rec *r,
 	/* check if this id_token has been issued just now +- slack (default 10 minutes) */
 	if ((apr_time_sec(apr_time_now()) - provider->idtoken_iat_slack) > iat->value.lnumber) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_proto_is_valid_idtoken: token was issued more than 1 minute ago");
+				"oidc_proto_is_valid_idtoken: token was issued more than %d seconds ago", provider->idtoken_iat_slack);
 		return FALSE;
 	}
 	if ((apr_time_sec(apr_time_now()) + provider->idtoken_iat_slack) < iat->value.lnumber) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_proto_is_valid_idtoken: token was issued more than 1 minute in the future");
+				"oidc_proto_is_valid_idtoken: token was issued more than %d seconds in the future", provider->idtoken_iat_slack);
 		return FALSE;
 	}
 
