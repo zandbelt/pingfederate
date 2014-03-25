@@ -193,6 +193,7 @@ static apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 
 	apr_status_t rv;
 	int i;
+	*value = NULL;
 
 	/* grab the global lock */
 	if ((rv = apr_global_mutex_lock(context->mutex)) != APR_SUCCESS) {
@@ -226,7 +227,7 @@ static apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 	/* release the global lock */
 	apr_global_mutex_unlock(context->mutex);
 
-	return TRUE;
+	return (*value == NULL) ? FALSE : TRUE;
 }
 
 /*
@@ -240,7 +241,7 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
 
 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_cache_shm_set: entering \"%s\" (value size=(%ld)", key,
+			"oidc_cache_shm_set: entering \"%s\" (value size=(%zu)", key,
 			value ? strlen(value) : 0);
 
 	oidc_cache_shm_entry_t *match, *free, *lru;
@@ -260,7 +261,7 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	/* check that the passed in value is valid */
 	if ( (value != NULL) && strlen(value) > OIDC_CACHE_SHM_VALUE_MAX) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_shm_set: could not set value since value is too long (%ld > %d)",
+				"oidc_cache_shm_set: could not set value since value is too long (%zu > %d)",
 				strlen(value), OIDC_CACHE_SHM_VALUE_MAX);
 		return FALSE;
 	}

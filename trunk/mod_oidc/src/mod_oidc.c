@@ -798,8 +798,7 @@ static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
 	if (apr_is_empty_table(params)) {
 		return oidc_util_http_sendstring(r,
 				apr_psprintf(r->pool,
-						"mod_oidc: you've hit an OpenID Connect callback URL with no parameters; this is an invalid request (you should not open this URL in your browser directly)"),
-				HTTP_INTERNAL_SERVER_ERROR);
+						"mod_oidc: you've hit an OpenID Connect callback URL with no parameters; this is an invalid request (you should not open this URL in your browser directly)"));
 	}
 
 	/* see if the response is an error response */
@@ -894,8 +893,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 	apr_array_header_t *arr = NULL;
 	if (oidc_metadata_list(r, cfg, &arr) == FALSE)
 		return oidc_util_http_sendstring(r,
-				"mod_oidc: no configured providers found, contact your administrator",
-				HTTP_UNAUTHORIZED);
+				"mod_oidc: no configured providers found, contact your administrator");
 
 	/* assemble a where-are-you-from IDP discovery HTML page */
 	// TODO: yes, we could use some templating here...
@@ -956,7 +954,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 			"</html>\n", s);
 
 	/* now send the HTML contents to the user agent */
-	return oidc_util_http_sendstring(r, s, HTTP_UNAUTHORIZED);
+	return oidc_util_http_sendstring(r, s);
 }
 
 /*
@@ -1026,8 +1024,7 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
 	if ((issuer == NULL) || (original_url == NULL)) {
 		return oidc_util_http_sendstring(r,
-				"mod_oidc: wherever you came from, it sent you here with the wrong parameters...",
-				HTTP_INTERNAL_SERVER_ERROR);
+				"mod_oidc: wherever you came from, it sent you here with the wrong parameters...");
 	}
 
 	/* find out if the user entered an account name or selected an OP manually */
@@ -1038,8 +1035,7 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
 			/* something did not work out, show a user facing error */
 			return oidc_util_http_sendstring(r,
-					"mod_oidc: could not resolve the provided account name to an OpenID Connect provider; check your syntax",
-					HTTP_NOT_FOUND);
+					"mod_oidc: could not resolve the provided account name to an OpenID Connect provider; check your syntax");
 		}
 
 		/* issuer is set now, so let's continue as planned */
@@ -1068,8 +1064,7 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
 	/* something went wrong */
 	return oidc_util_http_sendstring(r,
-			"mod_oidc: could not find valid provider metadata for the selected OpenID Connect provider; contact the administrator",
-			HTTP_NOT_FOUND);
+			"mod_oidc: could not find valid provider metadata for the selected OpenID Connect provider; contact the administrator");
 }
 
 /*
@@ -1094,7 +1089,7 @@ int oidc_handle_redirect_uri_request(request_rec *r, oidc_cfg *c) {
 	return oidc_util_http_sendstring(r,
 			apr_psprintf(r->pool,
 					"mod_oidc: the OpenID Connect callback URL received an invalid request: %s",
-					r->args), HTTP_INTERNAL_SERVER_ERROR);
+					r->args));
 }
 
 /*
@@ -1103,8 +1098,12 @@ int oidc_handle_redirect_uri_request(request_rec *r, oidc_cfg *c) {
 int oidc_handle_logout(request_rec *r, session_rec *session) {
 	char *url = NULL;
 
-	/* remove session state (cq. cache entry and cookie) */
-	oidc_session_kill(r, session);
+	/* if there's no remote_user then there's no (stored) session to kill */
+	if (session->remote_user != NULL) {
+
+		/* remove session state (cq. cache entry and cookie) */
+		oidc_session_kill(r, session);
+	}
 
 	/* pickup the URL where the user wants to go after logout */
 	oidc_util_get_request_parameter(r, "logout", &url);
@@ -1126,16 +1125,16 @@ static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 		session_rec *session = NULL;
 		oidc_session_load(r, &session);
 
+		/* see if this is a logout trigger */
+		if ((oidc_util_request_matches_url(r, c->redirect_uri) == TRUE)
+				&& (oidc_util_request_has_parameter(r, "logout") == TRUE)) {
+
+			/* handle logout */
+			return oidc_handle_logout(r, session);
+		}
+
 		/* initial request, first check if we have an existing session */
 		if (session->remote_user != NULL) {
-
-			/* see if this is a logout trigger */
-			if ((oidc_util_request_matches_url(r, c->redirect_uri) == TRUE)
-					&& (oidc_util_request_has_parameter(r, "logout") == TRUE)) {
-
-				/* handle logout */
-				return oidc_handle_logout(r, session);
-			}
 
 			/* set the user in the main request for further (incl. sub-request) processing */
 			r->user = (char *) session->remote_user;
