@@ -977,6 +977,14 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 		jwks_refresh_interval = j_jwks_refresh_interval->value.lnumber;
 	}
 
+	/* see if we've got a custom IAT slack interval */
+	int idtoken_iat_slack = cfg->provider.idtoken_iat_slack;
+	apr_json_value_t *j_idtoken_iat_slack = apr_hash_get(j_client->value.object, "idtoken_iat_slack",
+			APR_HASH_KEY_STRING);
+	if ((j_idtoken_iat_slack != NULL) && (j_idtoken_iat_slack->type == APR_JSON_LONG)) {
+		idtoken_iat_slack = j_idtoken_iat_slack->value.lnumber;
+	}
+
 	/* put whatever we've found out about the provider in (the client part of) the metadata struct */
 	provider->ssl_validate_server = validate;
 	provider->client_id = apr_pstrdup(r->pool, j_client_id->value.string.p);
@@ -984,6 +992,7 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 			j_client_secret->value.string.p);
 	provider->scope = apr_pstrdup(r->pool, scope);
 	provider->jwks_refresh_interval = jwks_refresh_interval;
+	provider->idtoken_iat_slack = idtoken_iat_slack;
 
 	return TRUE;
 }
