@@ -271,7 +271,6 @@ apr_byte_t oidc_util_issuer_match(const char *a, const char *b);
 int oidc_util_html_send_error(request_rec *r, const char *error, const char *description, int status_code);
 int oidc_base64url_decode_rsa_verify(request_rec *r, const char *alg, const char *signature, const char *message, const char *modulus, const char *exponent);
 apr_byte_t oidc_util_json_array_has_value(request_rec *r, apr_json_value_t *haystack, const char *needle);
-apr_status_t oidc_util_http_sendstring_out_filter(ap_filter_t *f,apr_bucket_brigade *bb_in);
 
 // oidc_crypto.c
 unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg, unsigned char *plaintext, int *len);
