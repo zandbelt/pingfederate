@@ -79,7 +79,6 @@
 #include "mod_oidc.h"
 
 // TODO: rigid input checking on discovery responses and authorization responses
-// TODO: document optional custom extensions to client metadata
 
 // TODO: use oidc_get_current_url + configured RedirectURIPath to determine the RedirectURI more dynamically
 // TODO: support more hybrid flows ("code id_token" (for MS), "code token" etc.)
