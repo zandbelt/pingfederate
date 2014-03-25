@@ -787,7 +787,7 @@ apr_status_t oidc_util_http_sendstring_out_filter(ap_filter_t *f, apr_bucket_bri
 /*
  * sends HTML content to the user agent
  */
-int oidc_util_http_sendstring(request_rec *r, const char *html) {
+int oidc_util_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
 	oidc_util_http_sendstring_t *ctx = apr_pcalloc(r->pool, sizeof(oidc_util_http_sendstring_t));
 	ctx->content = apr_pstrdup(r->pool, html);
 	ctx->content_type = "text/html";
@@ -1010,7 +1010,7 @@ int oidc_util_html_send_error(request_rec *r, const char *error, const char *des
 				msg, description);
 	}
 
-	return oidc_util_http_sendstring(r, msg);
+	return oidc_util_http_sendstring(r, msg, status_code);
 }
 
 /*

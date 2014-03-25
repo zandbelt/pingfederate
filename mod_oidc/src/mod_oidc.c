@@ -798,7 +798,8 @@ static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
 	if (apr_is_empty_table(params)) {
 		return oidc_util_http_sendstring(r,
 				apr_psprintf(r->pool,
-						"mod_oidc: you've hit an OpenID Connect callback URL with no parameters; this is an invalid request (you should not open this URL in your browser directly)"));
+						"mod_oidc: you've hit an OpenID Connect callback URL with no parameters; this is an invalid request (you should not open this URL in your browser directly)"),
+				HTTP_INTERNAL_SERVER_ERROR);
 	}
 
 	/* see if the response is an error response */
@@ -893,7 +894,8 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 	apr_array_header_t *arr = NULL;
 	if (oidc_metadata_list(r, cfg, &arr) == FALSE)
 		return oidc_util_http_sendstring(r,
-				"mod_oidc: no configured providers found, contact your administrator");
+				"mod_oidc: no configured providers found, contact your administrator",
+				HTTP_UNAUTHORIZED);
 
 	/* assemble a where-are-you-from IDP discovery HTML page */
 	// TODO: yes, we could use some templating here...
@@ -954,7 +956,7 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 			"</html>\n", s);
 
 	/* now send the HTML contents to the user agent */
-	return oidc_util_http_sendstring(r, s);
+	return oidc_util_http_sendstring(r, s, HTTP_UNAUTHORIZED);
 }
 
 /*
@@ -1024,7 +1026,8 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
 	if ((issuer == NULL) || (original_url == NULL)) {
 		return oidc_util_http_sendstring(r,
-				"mod_oidc: wherever you came from, it sent you here with the wrong parameters...");
+				"mod_oidc: wherever you came from, it sent you here with the wrong parameters...",
+				HTTP_INTERNAL_SERVER_ERROR);
 	}
 
 	/* find out if the user entered an account name or selected an OP manually */
@@ -1035,7 +1038,8 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
 			/* something did not work out, show a user facing error */
 			return oidc_util_http_sendstring(r,
-					"mod_oidc: could not resolve the provided account name to an OpenID Connect provider; check your syntax");
+					"mod_oidc: could not resolve the provided account name to an OpenID Connect provider; check your syntax",
+					HTTP_NOT_FOUND);
 		}
 
 		/* issuer is set now, so let's continue as planned */
@@ -1064,7 +1068,8 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 
 	/* something went wrong */
 	return oidc_util_http_sendstring(r,
-			"mod_oidc: could not find valid provider metadata for the selected OpenID Connect provider; contact the administrator");
+			"mod_oidc: could not find valid provider metadata for the selected OpenID Connect provider; contact the administrator",
+			HTTP_NOT_FOUND);
 }
 
 /*
@@ -1089,7 +1094,7 @@ int oidc_handle_redirect_uri_request(request_rec *r, oidc_cfg *c) {
 	return oidc_util_http_sendstring(r,
 			apr_psprintf(r->pool,
 					"mod_oidc: the OpenID Connect callback URL received an invalid request: %s",
-					r->args));
+					r->args), HTTP_INTERNAL_SERVER_ERROR);
 }
 
 /*
