@@ -80,11 +80,12 @@ typedef struct {
 
 /* post config routine */
 int oidc_cache_file_post_config(server_rec *s) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(
-			s->module_config, &oidc_module);
+	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config,
+			&oidc_module);
 	if (cfg->cache_file_dir == NULL) {
 		/* by default we'll use the OS specified /tmp dir for cache files */
-		apr_temp_dir_get((const char **) &cfg->cache_file_dir, s->process->pool);
+		apr_temp_dir_get((const char **) &cfg->cache_file_dir,
+				s->process->pool);
 	}
 	return OK;
 }
@@ -100,7 +101,8 @@ static const char *oidc_cache_file_name(request_rec *r, const char *key) {
  * return the fully qualified path name to a cache file for a specified key
  */
 static const char *oidc_cache_file_path(request_rec *r, const char *key) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&oidc_module);
 	return apr_psprintf(r->pool, "%s/%s", cfg->cache_file_dir,
 			oidc_cache_file_name(r, key));
 }
@@ -171,7 +173,8 @@ static apr_status_t oidc_cache_file_write(request_rec *r, const char *path,
 /*
  * get a value for the specified key from the cache
  */
-static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key, const char **value) {
+static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key,
+		const char **value) {
 	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
 	char s_err[128];
@@ -181,7 +184,7 @@ static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key, const cha
 
 	/* open the cache file if it exists, otherwise we just have a "regular" cache miss */
 	if (apr_file_open(&fd, path, APR_FOPEN_READ | APR_FOPEN_BUFFERED,
-			APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
+	APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
 				"oidc_cache_file_get: cache miss for key \"%s\"", key);
 		return TRUE;
@@ -232,7 +235,8 @@ static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key, const cha
 	/* barf on failure */
 	if (rc != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_file_get: could not read cache value from \"%s\"", path);
+				"oidc_cache_file_get: could not read cache value from \"%s\"",
+				path);
 		goto error_close;
 	}
 
@@ -274,39 +278,51 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 	oidc_cache_file_info_t info;
 	char s_err[128];
 
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config, &oidc_module);
+	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&oidc_module);
 
 	/* get the path to the metadata file that holds "last cleaned" metadata info */
 	const char *metadata_path = oidc_cache_file_path(r,
-			OIDC_CACHE_FILE_LAST_CLEANED);
+	OIDC_CACHE_FILE_LAST_CLEANED);
 
 	/* open the metadata file if it exists */
 	if ((rc = apr_stat(&fi, metadata_path, APR_FINFO_MTIME, r->pool))
 			== APR_SUCCESS) {
 
 		/* really only clean once per so much time, check that we haven not recently run */
-		if (apr_time_now() < fi.mtime + apr_time_from_sec(cfg->cache_file_clean_interval)) {ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than %d seconds ago (next one as early as in %" APR_TIME_T_FMT " secs)", cfg->cache_file_clean_interval, apr_time_sec(fi.mtime + apr_time_from_sec(cfg->cache_file_clean_interval) - apr_time_now()));
-		return APR_SUCCESS;
+		if (apr_time_now() < fi.mtime + apr_time_from_sec(cfg->cache_file_clean_interval)) {
+			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+					"oidc_cache_clean: last cleanup call was less than %d seconds ago (next one as early as in %" APR_TIME_T_FMT " secs)",
+					cfg->cache_file_clean_interval,
+					apr_time_sec(
+							fi.mtime + apr_time_from_sec(cfg->cache_file_clean_interval) - apr_time_now()));
+			return APR_SUCCESS;
+		}
+
+		/* time to clean, reset the modification time of the metadata file to reflect the timestamp of this cleaning cycle */
+		apr_file_mtime_set(metadata_path, apr_time_now(), r->pool);
+
+	} else {
+
+		/* no metadata file exists yet, create one (and open it) */
+		if ((rc = apr_file_open(&fd, metadata_path,
+				(APR_FOPEN_WRITE | APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool))
+				!= APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+					"oidc_cache_file_clean: error creating cache timestamp file '%s' (%s)",
+					metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
+			return rc;
+		}
+
+		/* and cleanup... */
+		if ((rc = apr_file_close(fd)) != APR_SUCCESS) {
+			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+					"oidc_cache_file_clean: error closing cache timestamp file '%s' (%s)",
+					metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
+		}
 	}
 
-	/* time to clean, reset the modification time of the metadata file to reflect the timestamp of this cleaning cycle */
-	apr_file_mtime_set(metadata_path, apr_time_now(), r->pool);
-
-} else {
-
-	/* no metadata file exists yet, create one (and open it) */
-	if ((rc = apr_file_open(&fd, metadata_path, (APR_FOPEN_WRITE|APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_file_clean: error creating cache timestamp file '%s' (%s)", metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
-		return rc;
-	}
-
-	/* and cleanup... */
-	if ((rc = apr_file_close(fd)) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "oidc_cache_file_clean: error closing cache timestamp file '%s' (%s)", metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
-	}
-}
-
-		/* time to clean, open the cache directory */
+	/* time to clean, open the cache directory */
 	if ((rc = apr_dir_open(&dir, cfg->cache_file_dir, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_cache_file_clean: error opening cache directory '%s' for cleaning (%s)",
@@ -325,14 +341,13 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 			/* skip non-cache entries, cq. the ".", ".." and the metadata file */
 			if ((fi.name[0] == '.')
 					|| (strstr(fi.name, OIDC_CACHE_FILE_PREFIX) != fi.name)
-					|| ((apr_strnatcmp(fi.name,
-							oidc_cache_file_name(r,
-									OIDC_CACHE_FILE_LAST_CLEANED)) == 0)))
+					|| ((apr_strnatcmp(fi.name, oidc_cache_file_name(r,
+					OIDC_CACHE_FILE_LAST_CLEANED)) == 0)))
 				continue;
 
 			/* get the fully qualified path to the cache file and open it */
-			const char *path = apr_psprintf(r->pool, "%s/%s", cfg->cache_file_dir,
-					fi.name);
+			const char *path = apr_psprintf(r->pool, "%s/%s",
+					cfg->cache_file_dir, fi.name);
 			if ((rc = apr_file_open(&fd, path, APR_FOPEN_READ, APR_OS_DEFAULT,
 					r->pool)) != APR_SUCCESS) {
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
@@ -387,8 +402,8 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 /*
  * write a value for the specified key to the cache
  */
-static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key, const char *value,
-		apr_time_t expiry) {
+static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key,
+		const char *value, apr_time_t expiry) {
 	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
 	char s_err[128];
@@ -411,7 +426,7 @@ static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key, const cha
 
 	/* try to open the cache file for writing, creating it if it does not exist */
 	if ((rc = apr_file_open(&fd, path, (APR_FOPEN_WRITE | APR_FOPEN_CREATE),
-			APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
+	APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
 				"oidc_cache_file_set: cache file \"%s\" could not be opened (%s)",
 				path, apr_strerror(rc, s_err, sizeof(s_err)));
