@@ -159,6 +159,8 @@ typedef struct oidc_cfg {
 	void *cache_cfg;
 	/* cache_type = file: directory that holds the cache files (if not set, we'll try and use an OS defined one like "/tmp" */
 	char *cache_file_dir;
+	/* cache_type = file: clean interval */
+	int cache_file_clean_interval;
 	/* cache_type= memcache: list of memcache host/port servers to use */
 	char *cache_memcache_servers;
 	/* cache_type = shm: size of the shared memory segment (cq. max number of cached entries) */

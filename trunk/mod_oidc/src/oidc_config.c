@@ -98,6 +98,8 @@
 #define OIDC_DEFAULT_CACHE_SHM_SIZE 500
 /* for issued-at timestamp (iat) checking */
 #define OIDC_DEFAULT_IDTOKEN_IAT_SLACK 600
+/* for file-based caching: clean interval in seconds */
+#define OIDC_DEFAULT_CACHE_FILE_CLEAN_INTERVAL 60
 
 extern module AP_MODULE_DECLARE_DATA oidc_module;
 
@@ -409,6 +411,7 @@ void *oidc_create_server_config(apr_pool_t *pool, server_rec *svr) {
 	c->cache = &oidc_cache_file;
 	c->cache_cfg = c->cache->create_config? c->cache->create_config(pool) : NULL;
 	c->cache_file_dir = NULL;
+	c->cache_file_clean_interval = OIDC_DEFAULT_CACHE_FILE_CLEAN_INTERVAL;
 	c->cache_memcache_servers = NULL;
 	c->cache_shm_size_max = OIDC_DEFAULT_CACHE_SHM_SIZE;
 
@@ -544,6 +547,12 @@ void *oidc_merge_server_config(apr_pool_t *pool, void *BASE, void *ADD) {
 	c->cache_file_dir =
 			add->cache_file_dir != NULL ?
 					add->cache_file_dir : base->cache_file_dir;
+	c->cache_file_clean_interval =
+			add->cache_file_clean_interval
+			!= OIDC_DEFAULT_CACHE_FILE_CLEAN_INTERVAL ?
+					add->cache_file_clean_interval :
+					base->cache_file_clean_interval;
+
 	c->cache_memcache_servers =
 			add->cache_memcache_servers != NULL ?
 					add->cache_memcache_servers : base->cache_memcache_servers;
@@ -1066,6 +1075,10 @@ const command_rec oidc_config_cmds[] = {
 				(void*)APR_OFFSETOF(oidc_cfg, cache_file_dir),
 				RSRC_CONF,
 				"Directory used for file-based caching."),
+		AP_INIT_TAKE1("OIDCCacheFileCleanInterval", oidc_set_int_slot,
+				(void*)APR_OFFSETOF(oidc_cfg, cache_file_clean_interval),
+				RSRC_CONF,
+				"Cache file clean interval in seconds."),
 		AP_INIT_TAKE1("OIDCMemCacheServers",
 				oidc_set_string_slot,
 				(void*)APR_OFFSETOF(oidc_cfg, cache_memcache_servers),
