@@ -931,14 +931,8 @@ int oidc_proto_javascript_implicit(request_rec *r, oidc_cfg *c) {
 		"  </body>\n"
 		"</html>\n";
 
-	/*
-	 * need to put in an error code to terminate sub-request processing... (which OK would allow)
-	 * TODO: is this really unavoidable?
-	 * I'm not sure that every browser will interpret a 302 without a location header and HTML/Javascript
-	 * content in the way that we want here...
-	 */
 	//return oidc_util_http_sendstring(r, apr_psprintf(r->pool, java_script, c->redirect_uri), OK);
 	//return oidc_util_http_sendstring(r, apr_psprintf(r->pool, java_script, c->redirect_uri), HTTP_MOVED_TEMPORARILY);
-	return oidc_util_http_sendstring(r, java_script, HTTP_MOVED_TEMPORARILY);
+	return oidc_util_http_sendstring(r, java_script);
 }
 

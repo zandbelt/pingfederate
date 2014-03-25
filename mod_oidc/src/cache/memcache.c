@@ -198,7 +198,7 @@ static apr_byte_t oidc_cache_memcache_get(request_rec *r, const char *key,
 	/* do sanity checking on the string value */
 	if ( (*value) && (strlen(*value) != len) ) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r,
-				"oidc_cache_memcache_get: apr_memcache_getp returned less bytes than expected: strlen(value) [%ld] != len [%ld]", strlen(*value), len);
+				"oidc_cache_memcache_get: apr_memcache_getp returned less bytes than expected: strlen(value) [%zu] != len [%" APR_SIZE_T_FMT "]", strlen(*value), len);
 		return FALSE;
 	}
 

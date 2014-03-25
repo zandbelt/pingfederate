@@ -1,4 +1,10 @@
 3/25/2014
+- rewrite sending HTML using output filters (and fix 2.4 subrequests issue with it)
+- change some size_t format modifiers to avoid compiler warnings
+- better handling of logout when no session exists
+- have cache_shm_get return FALSE if no entry found (similar to the other cache impls)
+
+3/25/2014
 - version 2.2
 - support configurable iat checking acceptance interval
 - add configurable file cache clean interval

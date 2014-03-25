@@ -756,28 +756,43 @@ apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r,
 	return TRUE;
 }
 
+typedef struct oidc_util_http_sendstring_t {
+	const char *content;
+	const char *content_type;
+} oidc_util_http_sendstring_t;
+
+/*
+ * callback filter hook for sending HTML
+ */
+apr_status_t oidc_util_http_sendstring_out_filter(ap_filter_t *f, apr_bucket_brigade *bb_in) {
+
+	oidc_util_http_sendstring_t *ctx = f->ctx;
+	apr_bucket *b;
+
+	// set the context type header
+	ap_set_content_type(f->r, ctx->content_type);
+
+	// do some magic copied from somewhere
+	apr_bucket_brigade *bb = apr_brigade_create(f->r->pool, f->c->bucket_alloc);
+	b = apr_bucket_transient_create(ctx->content, strlen(ctx->content), f->c->bucket_alloc);
+	APR_BRIGADE_INSERT_TAIL(bb, b);
+	b = apr_bucket_eos_create(f->c->bucket_alloc);
+	APR_BRIGADE_INSERT_TAIL(bb, b);
+
+	ap_remove_output_filter(f);
+
+	return ap_pass_brigade(f->next, bb);
+}
+
 /*
  * sends HTML content to the user agent
  */
-int oidc_util_http_sendstring(request_rec *r, const char *html,
-		int success_rvalue) {
-
-	conn_rec *c = r->connection;
-	apr_bucket *b;
-
-	/* set the context type header to HTML */
-	ap_set_content_type(r, "text/html");
-
-	/* do some magic copied from somewhere */
-	apr_bucket_brigade *bb = apr_brigade_create(r->pool, c->bucket_alloc);
-	b = apr_bucket_transient_create(html, strlen(html), c->bucket_alloc);
-	APR_BRIGADE_INSERT_TAIL(bb, b);
-	b = apr_bucket_eos_create(c->bucket_alloc);
-	APR_BRIGADE_INSERT_TAIL(bb, b);
-	if (ap_pass_brigade(r->output_filters, bb) != APR_SUCCESS)
-		return HTTP_INTERNAL_SERVER_ERROR;
-
-	return success_rvalue;
+int oidc_util_http_sendstring(request_rec *r, const char *html) {
+	oidc_util_http_sendstring_t *ctx = apr_pcalloc(r->pool, sizeof(oidc_util_http_sendstring_t));
+	ctx->content = apr_pstrdup(r->pool, html);
+	ctx->content_type = "text/html";
+	ap_add_output_filter(OIDC_UTIL_HTTP_SENDSTRING, ctx, r, r->connection);
+	return OK;
 }
 
 int oidc_base64url_decode_rsa_verify(request_rec *r, const char *alg, const char *signature, const char *message, const char *modulus, const char *exponent) {
@@ -995,7 +1010,7 @@ int oidc_util_html_send_error(request_rec *r, const char *error, const char *des
 				msg, description);
 	}
 
-	return oidc_util_http_sendstring(r, msg, OK);
+	return oidc_util_http_sendstring(r, msg);
 }
 
 /*
