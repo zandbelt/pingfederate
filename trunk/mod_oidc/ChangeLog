@@ -1,4 +1,5 @@
 3/25/2014
+- version 2.2
 - support configurable iat checking acceptance interval
 - add configurable file cache clean interval
 - add some docs on proprietary client metadata config extensions

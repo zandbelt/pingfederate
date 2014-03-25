@@ -2,7 +2,7 @@ libapache2-mod-oidc (2.2) unstable; urgency=low
 
   * add memcache/shm caching support
 
- -- Hans Zandbelt <hans.zandbelt@gmail.com>  Sun, 16 Mar 2014 20:24:01 +0100
+ -- Hans Zandbelt <hans.zandbelt@gmail.com>  Tue, 25 Mar 2014 10:24:01 +0100
 
 libapache2-mod-oidc (2.1) unstable; urgency=low
 
