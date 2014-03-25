@@ -260,7 +260,6 @@ error_close:
 }
 
 // TODO: make these configurable?
-#define OIDC_CACHE_FILE_CLEAN_ONLY_ONCE_PER_N_SECS 60
 #define OIDC_CACHE_FILE_LAST_CLEANED "last-cleaned"
 
 /*
@@ -286,7 +285,7 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 			== APR_SUCCESS) {
 
 		/* really only clean once per so much time, check that we haven not recently run */
-		if (apr_time_now() < fi.mtime + apr_time_from_sec(OIDC_CACHE_FILE_CLEAN_ONLY_ONCE_PER_N_SECS)) {ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in %" APR_TIME_T_FMT " secs)", apr_time_sec(fi.mtime + apr_time_from_sec(OIDC_CACHE_FILE_CLEAN_ONLY_ONCE_PER_N_SECS) - apr_time_now()));
+		if (apr_time_now() < fi.mtime + apr_time_from_sec(cfg->cache_file_clean_interval)) {ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_cache_clean: last cleanup call was less than a minute ago (next one as early as in %" APR_TIME_T_FMT " secs)", apr_time_sec(fi.mtime + apr_time_from_sec(cfg->cache_file_clean_interval) - apr_time_now()));
 		return APR_SUCCESS;
 	}
 

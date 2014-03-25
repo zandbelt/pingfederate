@@ -1,5 +1,6 @@
 3/25/2014
 - support configurable iat checking acceptance interval
+- add configurable file cache clean interval
 
 3/24/2014
 - add support for Apache 2.4 mutex permission call
