@@ -1,6 +1,6 @@
 Source: libapache2-mod-auth-connect
 Priority: extra
-Maintainer: Hans Zandbelt <hans.zandbelt@gmail.com>
+Maintainer: Hans Zandbelt <hzandbelt@pingidentity.com>
 Build-Depends: debhelper (>= 8.0.0), autotools-dev, dh-apache2, apache2-dev, libcurl3-dev
 Standards-Version: 3.9.4
 Section: web
