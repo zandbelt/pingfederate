@@ -1,4 +1,4 @@
-AC_INIT([mod_auth_connect],[1.0],[hans.zandbelt@gmail.com])
+AC_INIT([mod_auth_connect],[1.0],[hzandbelt@pingidentity.com])
 
 AC_SUBST(NAMEVER, AC_PACKAGE_TARNAME()-AC_PACKAGE_VERSION())
 
