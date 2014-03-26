@@ -1,14 +1,14 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: mod-oidc
-Upstream-Contact: Hans Zandbelt <hans.zandbelt@gmail.com>
-Source: https://code.google.com/p/pingfederate/source/browse/#svn%2Ftrunk%2Fmod_oidc
+Upstream-Name: mod-auth-connect
+Upstream-Contact: Hans Zandbelt <hzandbelt@pingidentity.com>
+Source: https://github.com/pingidentity/mod_auth_connect
 
 Files: *
-Copyright: 2013-2014 Hans Zandbelt <hans.zandbelt@gmail.com>
+Copyright: 2013-2014 Hans Zandbelt <hzandbelt@pingidentity.com>
 License: Apache-2.0
 
 Files: debian/*
-Copyright: 2014 Hans Zandbelt <hans.zandbelt@gmail.com>
+Copyright: 2014 Hans Zandbelt <hzandbelt@pingidentity.com>
 License: Apache-2.0
 
 License: Apache-2.0

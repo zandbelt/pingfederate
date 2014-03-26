@@ -46,7 +46,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
 #include <apr_lib.h>
@@ -56,20 +56,20 @@
 #include <http_log.h>
 #include <http_request.h>
 
-#include "mod_oidc.h"
+#include "mod_auth_connect.h"
 
 /* the grant type string that the Authorization server expects when validating access tokens */
-#define OIDC_OAUTH_VALIDATION_GRANT_TYPE "urn:pingidentity.com:oauth2:grant_type:validate_bearer"
+#define MAC_OAUTH_VALIDATION_GRANT_TYPE "urn:pingidentity.com:oauth2:grant_type:validate_bearer"
 
 /*
  * validates an access token against the validation endpoint of the Authorization server and gets a response back
  */
-static int oidc_oauth_validate_access_token(request_rec *r, oidc_cfg *c,
+static int mac_oauth_validate_access_token(request_rec *r, mac_cfg *c,
 		const char *token, const char **response) {
 
 	/* assemble parameters to call the token endpoint for validation */
 	apr_table_t *params = apr_table_make(r->pool, 4);
-	apr_table_addn(params, "grant_type", OIDC_OAUTH_VALIDATION_GRANT_TYPE);
+	apr_table_addn(params, "grant_type", MAC_OAUTH_VALIDATION_GRANT_TYPE);
 	apr_table_addn(params, "token", token);
 
 	/* see if we want to do basic auth or post-param-based auth */
@@ -84,30 +84,30 @@ static int oidc_oauth_validate_access_token(request_rec *r, oidc_cfg *c,
 	}
 
 	/* call the endpoint with the constructed parameter set and return the resulting response */
-	return oidc_util_http_call(r, c->oauth.validate_endpoint_url,
-			OIDC_HTTP_POST_FORM, params, basic_auth, NULL,
+	return mac_util_http_call(r, c->oauth.validate_endpoint_url,
+			MAC_HTTP_POST_FORM, params, basic_auth, NULL,
 			c->oauth.ssl_validate_server, response, c->http_timeout_long);
 }
 
 /*
  * get the authorization header that should contain a bearer token
  */
-static apr_byte_t oidc_oauth_get_bearer_token(request_rec *r,
+static apr_byte_t mac_oauth_get_bearer_token(request_rec *r,
 		const char **access_token) {
 
 	/* get the authorization header */
 	const char *auth_line;
 	auth_line = apr_table_get(r->headers_in, "Authorization");
 	if (!auth_line) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_oauth_get_bearer_token: no authorization header found");
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_oauth_get_bearer_token: no authorization header found");
 		return FALSE;
 	}
 
 	/* look for the Bearer keyword */
 	if (apr_strnatcasecmp(ap_getword(r->pool, &auth_line, ' '), "Bearer")) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_oauth_get_bearer_token: client used unsupported authentication scheme: %s",
+				"mac_oauth_get_bearer_token: client used unsupported authentication scheme: %s",
 				r->uri);
 		return FALSE;
 	}
@@ -121,13 +121,13 @@ static apr_byte_t oidc_oauth_get_bearer_token(request_rec *r,
 	*access_token = apr_pstrdup(r->pool, auth_line);
 
 	/* log some stuff */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_oauth_get_bearer_token: bearer token: %s", *access_token);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_oauth_get_bearer_token: bearer token: %s", *access_token);
 
 	return TRUE;
 }
 
-static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
+static apr_byte_t mac_oauth_resolve_access_token(request_rec *r, mac_cfg *c,
 		const char *access_token, apr_json_value_t **token) {
 
 	apr_json_value_t *result = NULL;
@@ -139,14 +139,14 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
 	if (json == NULL) {
 
 		/* not cached, go out and validate the access_token against the Authorization server and get the JSON claims back */
-		if (oidc_oauth_validate_access_token(r, c, access_token, &json) == FALSE) {
+		if (mac_oauth_validate_access_token(r, c, access_token, &json) == FALSE) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_oauth_resolve_access_token: could not get a validation response from the Authorization server");
+					"mac_oauth_resolve_access_token: could not get a validation response from the Authorization server");
 			return FALSE;
 		}
 
 		/* decode and see if it is not an error response somehow */
-		if (oidc_util_decode_json_and_check_error(r, json, &result) == FALSE)
+		if (mac_util_decode_json_and_check_error(r, json, &result) == FALSE)
 			return FALSE;
 
 		/* get and check the expiry timestamp */
@@ -154,12 +154,12 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
 				"expires_in", APR_HASH_KEY_STRING);
 		if ((expires_in == NULL) || (expires_in->type != APR_JSON_LONG)) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_oauth_resolve_access_token: response JSON object did not contain an \"expires_in\" number");
+					"mac_oauth_resolve_access_token: response JSON object did not contain an \"expires_in\" number");
 			return FALSE;
 		}
 		if (expires_in->value.lnumber <= 0) {
 			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-					"oidc_oauth_resolve_access_token: \"expires_in\" number <= 0 (%ld); token already expired...",
+					"mac_oauth_resolve_access_token: \"expires_in\" number <= 0 (%ld); token already expired...",
 					expires_in->value.lnumber);
 			return FALSE;
 		}
@@ -173,7 +173,7 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
 		/* we got the claims for this access_token in our cache, decode it in to a JSON structure */
 		if (apr_json_decode(&result, json, strlen(json), r->pool) != APR_SUCCESS) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_oauth_resolve_access_token: cached JSON was corrupted");
+					"mac_oauth_resolve_access_token: cached JSON was corrupted");
 			return FALSE;
 		}
 		/* the NULL and APR_JSON_OBJECT checks really are superfluous here */
@@ -184,14 +184,14 @@ static apr_byte_t oidc_oauth_resolve_access_token(request_rec *r, oidc_cfg *c,
 			APR_HASH_KEY_STRING);
 	if ((*token == NULL) || ((*token)->type != APR_JSON_OBJECT)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_oauth_resolve_access_token: response JSON object did not contain an access_token object");
+				"mac_oauth_resolve_access_token: response JSON object did not contain an access_token object");
 		return FALSE;
 	}
 
 	return TRUE;
 }
 
-int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c) {
+int mac_oauth_check_userid(request_rec *r, mac_cfg *c) {
 
 	/* check if this is a sub-request or an initial request */
 	if (!ap_is_initial_req(r)) {
@@ -204,8 +204,8 @@ int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c) {
 		if (r->user != NULL) {
 
 			/* this is a sub-request and we have a session */
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_oauth_check_userid: recycling user '%s' from initial request for sub-request",
+			ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+					"mac_oauth_check_userid: recycling user '%s' from initial request for sub-request",
 					r->user);
 
 			return OK;
@@ -216,16 +216,16 @@ int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c) {
 
 	/* get the bearer access token from the Authorization header */
 	const char *access_token = NULL;
-	if (oidc_oauth_get_bearer_token(r, &access_token) == FALSE)
+	if (mac_oauth_get_bearer_token(r, &access_token) == FALSE)
 		return HTTP_UNAUTHORIZED;
 
 	/* validate the obtained access token against the OAuth AS validation endpoint */
 	apr_json_value_t *token = NULL;
-	if (oidc_oauth_resolve_access_token(r, c, access_token, &token) == FALSE)
+	if (mac_oauth_resolve_access_token(r, c, access_token, &token) == FALSE)
 		return HTTP_UNAUTHORIZED;
 
 	/* store the parsed token (cq. the claims from the response) in the request state so it can be accessed by the authz routines */
-	oidc_request_state_set(r, OIDC_CLAIMS_SESSION_KEY, (const char *) token);
+	mac_request_state_set(r, MAC_CLAIMS_SESSION_KEY, (const char *) token);
 
 	// TODO: user attribute header settings & scrubbing ?
 
@@ -234,10 +234,10 @@ int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c) {
 			APR_HASH_KEY_STRING);
 	if ((username == NULL) || (username->type != APR_JSON_STRING)) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_oauth_check_userid: response JSON object did not contain a Username string");
+				"mac_oauth_check_userid: response JSON object did not contain a Username string");
 	} else {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_oauth_check_userid: returned username: %s",
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_oauth_check_userid: returned username: %s",
 				username->value.string.p);
 		r->user = apr_pstrdup(r->pool, username->value.string.p);
 	}

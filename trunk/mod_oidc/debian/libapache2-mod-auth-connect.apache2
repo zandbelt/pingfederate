@@ -1,0 +1,3 @@
+mod src/.libs/mod_auth_connect.so
+mod debian/auth_connect.load
+mod debian/auth_connect.conf

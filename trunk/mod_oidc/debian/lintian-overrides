@@ -1,2 +1,2 @@
-libapache2-mod-oidc: non-standard-dir-perm var/cache/apache2/mod_oidc/ 0700 != 0755
-libapache2-mod-oidc: non-standard-dir-perm var/cache/apache2/mod_oidc/metadata/ 0700 != 0755
+libapache2-mod-auth-connect: non-standard-dir-perm var/cache/apache2/mod_auth_connect/ 0700 != 0755
+libapache2-mod-auth-connect: non-standard-dir-perm var/cache/apache2/mod_auth_connect/metadata/ 0700 != 0755

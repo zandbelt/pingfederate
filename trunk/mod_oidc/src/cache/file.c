@@ -48,7 +48,7 @@
  *
  * caching using a file storage backend
  *
- * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
 #include <apr_hash.h>
@@ -59,9 +59,9 @@
 #include <httpd.h>
 #include <http_log.h>
 
-#include "../mod_oidc.h"
+#include "../mod_auth_connect.h"
 
-extern module AP_MODULE_DECLARE_DATA oidc_module;
+extern module AP_MODULE_DECLARE_DATA auth_connect_module;
 
 /*
  * header structure that holds the metadata info for a cache file entry
@@ -71,17 +71,17 @@ typedef struct {
 	apr_size_t len;
 	/* cache expiry timestamp */
 	apr_time_t expire;
-} oidc_cache_file_info_t;
+} mac_cache_file_info_t;
 
 /*
- * prefix that distinguishes mod_oidc cache files from other files in the same directory (/tmp)
+ * prefix that distinguishes mod_auth_connect cache files from other files in the same directory (/tmp)
  */
-#define OIDC_CACHE_FILE_PREFIX "mod-oidc-"
+#define MAC_CACHE_FILE_PREFIX "mod-auth-connect-"
 
 /* post config routine */
-int oidc_cache_file_post_config(server_rec *s) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config,
-			&oidc_module);
+int mac_cache_file_post_config(server_rec *s) {
+	mac_cfg *cfg = (mac_cfg *) ap_get_module_config(s->module_config,
+			&auth_connect_module);
 	if (cfg->cache_file_dir == NULL) {
 		/* by default we'll use the OS specified /tmp dir for cache files */
 		apr_temp_dir_get((const char **) &cfg->cache_file_dir,
@@ -93,24 +93,24 @@ int oidc_cache_file_post_config(server_rec *s) {
 /*
  * return the cache file name for a specified key
  */
-static const char *oidc_cache_file_name(request_rec *r, const char *key) {
-	return apr_psprintf(r->pool, "%s%s", OIDC_CACHE_FILE_PREFIX, key);
+static const char *mac_cache_file_name(request_rec *r, const char *key) {
+	return apr_psprintf(r->pool, "%s%s", MAC_CACHE_FILE_PREFIX, key);
 }
 
 /*
  * return the fully qualified path name to a cache file for a specified key
  */
-static const char *oidc_cache_file_path(request_rec *r, const char *key) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
-			&oidc_module);
+static const char *mac_cache_file_path(request_rec *r, const char *key) {
+	mac_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&auth_connect_module);
 	return apr_psprintf(r->pool, "%s/%s", cfg->cache_file_dir,
-			oidc_cache_file_name(r, key));
+			mac_cache_file_name(r, key));
 }
 
 /*
  * read a specified number of bytes from a cache file in to a preallocated buffer
  */
-static apr_status_t oidc_cache_file_read(request_rec *r, const char *path,
+static apr_status_t mac_cache_file_read(request_rec *r, const char *path,
 		apr_file_t *fd, void *buf, const apr_size_t len) {
 
 	apr_status_t rc = APR_SUCCESS;
@@ -123,14 +123,14 @@ static apr_status_t oidc_cache_file_read(request_rec *r, const char *path,
 	/* test for system errors */
 	if (rc != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_file_read: could not read from: %s (%s)", path,
+				"mac_cache_file_read: could not read from: %s (%s)", path,
 				apr_strerror(rc, s_err, sizeof(s_err)));
 	}
 
 	/* ensure that we've got the requested number of bytes */
 	if (bytes_read != len) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_file_read: could not read enough bytes from: \"%s\", bytes_read (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")",
+				"mac_cache_file_read: could not read enough bytes from: \"%s\", bytes_read (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")",
 				path, bytes_read, len);
 		rc = APR_EGENERAL;
 	}
@@ -141,7 +141,7 @@ static apr_status_t oidc_cache_file_read(request_rec *r, const char *path,
 /*
  * write a specified number of bytes from a buffer to a cache file
  */
-static apr_status_t oidc_cache_file_write(request_rec *r, const char *path,
+static apr_status_t mac_cache_file_write(request_rec *r, const char *path,
 		apr_file_t *fd, void *buf, const apr_size_t len) {
 
 	apr_status_t rc = APR_SUCCESS;
@@ -154,7 +154,7 @@ static apr_status_t oidc_cache_file_write(request_rec *r, const char *path,
 	/* check for a system error */
 	if (rc != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_file_write: could not write to: \"%s\" (%s)", path,
+				"mac_cache_file_write: could not write to: \"%s\" (%s)", path,
 				apr_strerror(rc, s_err, sizeof(s_err)));
 		return rc;
 	}
@@ -162,7 +162,7 @@ static apr_status_t oidc_cache_file_write(request_rec *r, const char *path,
 	/* check that all bytes from the header were written */
 	if (bytes_written != len) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_file_write: could not write enough bytes to: \"%s\", bytes_written (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")",
+				"mac_cache_file_write: could not write enough bytes to: \"%s\", bytes_written (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")",
 				path, bytes_written, len);
 		return APR_EGENERAL;
 	}
@@ -173,20 +173,20 @@ static apr_status_t oidc_cache_file_write(request_rec *r, const char *path,
 /*
  * get a value for the specified key from the cache
  */
-static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key,
+static apr_byte_t mac_cache_file_get(request_rec *r, const char *key,
 		const char **value) {
 	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
 	char s_err[128];
 
 	/* get the fully qualified path to the cache file based on the key name */
-	const char *path = oidc_cache_file_path(r, key);
+	const char *path = mac_cache_file_path(r, key);
 
 	/* open the cache file if it exists, otherwise we just have a "regular" cache miss */
 	if (apr_file_open(&fd, path, APR_FOPEN_READ | APR_FOPEN_BUFFERED,
 	APR_OS_DEFAULT, r->pool) != APR_SUCCESS) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_cache_file_get: cache miss for key \"%s\"", key);
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_cache_file_get: cache miss for key \"%s\"", key);
 		return TRUE;
 	}
 
@@ -198,9 +198,9 @@ static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key,
 	apr_file_seek(fd, APR_SET, &begin);
 
 	/* read a header with metadata */
-	oidc_cache_file_info_t info;
-	if ((rc = oidc_cache_file_read(r, path, fd, &info,
-			sizeof(oidc_cache_file_info_t))) != APR_SUCCESS)
+	mac_cache_file_info_t info;
+	if ((rc = mac_cache_file_read(r, path, fd, &info,
+			sizeof(mac_cache_file_info_t))) != APR_SUCCESS)
 		goto error_close;
 
 	/* check if this cache entry has already expired */
@@ -211,14 +211,14 @@ static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key,
 		apr_file_close(fd);
 
 		/* log this event */
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_cache_file_get: cache entry \"%s\" expired, removing file \"%s\"",
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_cache_file_get: cache entry \"%s\" expired, removing file \"%s\"",
 				key, path);
 
 		/* and kill it */
 		if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_cache_file_get: could not delete cache file \"%s\" (%s)",
+					"mac_cache_file_get: could not delete cache file \"%s\" (%s)",
 					path, apr_strerror(rc, s_err, sizeof(s_err)));
 		}
 
@@ -230,12 +230,12 @@ static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key,
 	*value = apr_palloc(r->pool, info.len);
 
 	/* (blocking) read the requested data in to the buffer */
-	rc = oidc_cache_file_read(r, path, fd, (void *) *value, info.len);
+	rc = mac_cache_file_read(r, path, fd, (void *) *value, info.len);
 
 	/* barf on failure */
 	if (rc != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_file_get: could not read cache value from \"%s\"",
+				"mac_cache_file_get: could not read cache value from \"%s\"",
 				path);
 		goto error_close;
 	}
@@ -245,8 +245,8 @@ static apr_byte_t oidc_cache_file_get(request_rec *r, const char *key,
 	apr_file_close(fd);
 
 	/* log a successful cache hit */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_cache_file_get: cache hit for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expiring in: %" APR_TIME_T_FMT ")",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_cache_file_get: cache hit for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expiring in: %" APR_TIME_T_FMT ")",
 			key, info.len, apr_time_sec(info.expire - apr_time_now()));
 
 	return TRUE;
@@ -257,33 +257,33 @@ error_close:
 	apr_file_close(fd);
 
 	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-			"oidc_cache_file_get: return error status %d (%s)", rc,
+			"mac_cache_file_get: return error status %d (%s)", rc,
 			apr_strerror(rc, s_err, sizeof(s_err)));
 
 	return FALSE;
 }
 
 // TODO: make these configurable?
-#define OIDC_CACHE_FILE_LAST_CLEANED "last-cleaned"
+#define MAC_CACHE_FILE_LAST_CLEANED "last-cleaned"
 
 /*
  * delete all expired entries from the cache directory
  */
-static apr_status_t oidc_cache_file_clean(request_rec *r) {
+static apr_status_t mac_cache_file_clean(request_rec *r) {
 	apr_status_t rc = APR_SUCCESS;
 	apr_dir_t *dir = NULL;
 	apr_file_t *fd = NULL;
 	apr_status_t i;
 	apr_finfo_t fi;
-	oidc_cache_file_info_t info;
+	mac_cache_file_info_t info;
 	char s_err[128];
 
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
-			&oidc_module);
+	mac_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&auth_connect_module);
 
 	/* get the path to the metadata file that holds "last cleaned" metadata info */
-	const char *metadata_path = oidc_cache_file_path(r,
-	OIDC_CACHE_FILE_LAST_CLEANED);
+	const char *metadata_path = mac_cache_file_path(r,
+	MAC_CACHE_FILE_LAST_CLEANED);
 
 	/* open the metadata file if it exists */
 	if ((rc = apr_stat(&fi, metadata_path, APR_FINFO_MTIME, r->pool))
@@ -291,8 +291,8 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 
 		/* really only clean once per so much time, check that we haven not recently run */
 		if (apr_time_now() < fi.mtime + apr_time_from_sec(cfg->cache_file_clean_interval)) {
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_cache_clean: last cleanup call was less than %d seconds ago (next one as early as in %" APR_TIME_T_FMT " secs)",
+			ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+					"mac_cache_clean: last cleanup call was less than %d seconds ago (next one as early as in %" APR_TIME_T_FMT " secs)",
 					cfg->cache_file_clean_interval,
 					apr_time_sec(
 							fi.mtime + apr_time_from_sec(cfg->cache_file_clean_interval) - apr_time_now()));
@@ -309,7 +309,7 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 				(APR_FOPEN_WRITE | APR_FOPEN_CREATE), APR_OS_DEFAULT, r->pool))
 				!= APR_SUCCESS) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_cache_file_clean: error creating cache timestamp file '%s' (%s)",
+					"mac_cache_file_clean: error creating cache timestamp file '%s' (%s)",
 					metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
 			return rc;
 		}
@@ -317,7 +317,7 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 		/* and cleanup... */
 		if ((rc = apr_file_close(fd)) != APR_SUCCESS) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_cache_file_clean: error closing cache timestamp file '%s' (%s)",
+					"mac_cache_file_clean: error closing cache timestamp file '%s' (%s)",
 					metadata_path, apr_strerror(rc, s_err, sizeof(s_err)));
 		}
 	}
@@ -325,7 +325,7 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 	/* time to clean, open the cache directory */
 	if ((rc = apr_dir_open(&dir, cfg->cache_file_dir, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_file_clean: error opening cache directory '%s' for cleaning (%s)",
+				"mac_cache_file_clean: error opening cache directory '%s' for cleaning (%s)",
 				cfg->cache_file_dir, apr_strerror(rc, s_err, sizeof(s_err)));
 		return rc;
 	}
@@ -340,9 +340,9 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 
 			/* skip non-cache entries, cq. the ".", ".." and the metadata file */
 			if ((fi.name[0] == '.')
-					|| (strstr(fi.name, OIDC_CACHE_FILE_PREFIX) != fi.name)
-					|| ((apr_strnatcmp(fi.name, oidc_cache_file_name(r,
-					OIDC_CACHE_FILE_LAST_CLEANED)) == 0)))
+					|| (strstr(fi.name, MAC_CACHE_FILE_PREFIX) != fi.name)
+					|| ((apr_strnatcmp(fi.name, mac_cache_file_name(r,
+					MAC_CACHE_FILE_LAST_CLEANED)) == 0)))
 				continue;
 
 			/* get the fully qualified path to the cache file and open it */
@@ -351,14 +351,14 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 			if ((rc = apr_file_open(&fd, path, APR_FOPEN_READ, APR_OS_DEFAULT,
 					r->pool)) != APR_SUCCESS) {
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-						"oidc_cache_file_clean: unable to open cache entry \"%s\" (%s)",
+						"mac_cache_file_clean: unable to open cache entry \"%s\" (%s)",
 						path, apr_strerror(rc, s_err, sizeof(s_err)));
 				continue;
 			}
 
 			/* read the header with cache metadata info */
-			rc = oidc_cache_file_read(r, path, fd, &info,
-					sizeof(oidc_cache_file_info_t));
+			rc = mac_cache_file_read(r, path, fd, &info,
+					sizeof(mac_cache_file_info_t));
 			apr_file_close(fd);
 
 			if (rc == APR_SUCCESS) {
@@ -368,15 +368,15 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 					continue;
 
 				/* the cache entry expired, we're going to remove it so log that event */
-				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-						"oidc_cache_file_clean: cache entry (%s) expired, removing file \"%s\")",
+				ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+						"mac_cache_file_clean: cache entry (%s) expired, removing file \"%s\")",
 						fi.name, path);
 
 			} else {
 
 				/* file open returned an error, log that */
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-						"oidc_cache_file_clean: cache entry (%s) corrupted (%s), removing file \"%s\"",
+						"mac_cache_file_clean: cache entry (%s) corrupted (%s), removing file \"%s\"",
 						fi.name, apr_strerror(rc, s_err, sizeof(s_err)), path);
 
 			}
@@ -386,7 +386,7 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 
 				/* hrm, this will most probably happen again on the next run... */
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-						"oidc_cache_file_clean: could not delete cache file \"%s\" (%s)",
+						"mac_cache_file_clean: could not delete cache file \"%s\" (%s)",
 						path, apr_strerror(rc, s_err, sizeof(s_err)));
 			}
 
@@ -402,23 +402,23 @@ static apr_status_t oidc_cache_file_clean(request_rec *r) {
 /*
  * write a value for the specified key to the cache
  */
-static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key,
+static apr_byte_t mac_cache_file_set(request_rec *r, const char *key,
 		const char *value, apr_time_t expiry) {
 	apr_file_t *fd = NULL;
 	apr_status_t rc = APR_SUCCESS;
 	char s_err[128];
 
 	/* get the fully qualified path to the cache file based on the key name */
-	const char *path = oidc_cache_file_path(r, key);
+	const char *path = mac_cache_file_path(r, key);
 
 	/* only on writes (not on reads) we clean the cache first (if not done recently) */
-	oidc_cache_file_clean(r);
+	mac_cache_file_clean(r);
 
 	/* just remove cache file if value is NULL */
 	if (value == NULL) {
 		if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_cache_file_set: could not delete cache file \"%s\" (%s)",
+					"mac_cache_file_set: could not delete cache file \"%s\" (%s)",
 					path, apr_strerror(rc, s_err, sizeof(s_err)));
 		}
 		return TRUE;
@@ -428,7 +428,7 @@ static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key,
 	if ((rc = apr_file_open(&fd, path, (APR_FOPEN_WRITE | APR_FOPEN_CREATE),
 	APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_file_set: cache file \"%s\" could not be opened (%s)",
+				"mac_cache_file_set: cache file \"%s\" could not be opened (%s)",
 				path, apr_strerror(rc, s_err, sizeof(s_err)));
 		return FALSE;
 	}
@@ -439,17 +439,17 @@ static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key,
 	apr_file_seek(fd, APR_SET, &begin);
 
 	/* construct the metadata for this cache entry in the header info */
-	oidc_cache_file_info_t info;
+	mac_cache_file_info_t info;
 	info.expire = expiry;
 	info.len = strlen(value) + 1;
 
 	/* write the header */
-	if ((rc = oidc_cache_file_write(r, path, fd, &info,
-			sizeof(oidc_cache_file_info_t))) != APR_SUCCESS)
+	if ((rc = mac_cache_file_write(r, path, fd, &info,
+			sizeof(mac_cache_file_info_t))) != APR_SUCCESS)
 		return FALSE;
 
 	/* next write the value */
-	if ((rc = oidc_cache_file_write(r, path, fd, (void *) value, info.len))
+	if ((rc = mac_cache_file_write(r, path, fd, (void *) value, info.len))
 			!= APR_SUCCESS)
 		return FALSE;
 
@@ -458,17 +458,17 @@ static apr_byte_t oidc_cache_file_set(request_rec *r, const char *key,
 	apr_file_close(fd);
 
 	/* log our success */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_cache_file_set: set entry for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expires in: %" APR_TIME_T_FMT ")",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_cache_file_set: set entry for key \"%s\" (%" APR_SIZE_T_FMT " bytes, expires in: %" APR_TIME_T_FMT ")",
 			key, info.len, apr_time_sec(expiry - apr_time_now()));
 
 	return TRUE;
 }
 
-oidc_cache_t oidc_cache_file = {
+mac_cache_t mac_cache_file = {
 		NULL,
-		oidc_cache_file_post_config,
+		mac_cache_file_post_config,
 		NULL,
-		oidc_cache_file_get,
-		oidc_cache_file_set
+		mac_cache_file_get,
+		mac_cache_file_set
 };

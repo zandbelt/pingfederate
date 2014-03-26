@@ -56,7 +56,7 @@
  * session handling backport: http://contribsoft.caixamagica.pt/browser/internals/2012/apachecc/trunk/mod_session-port/src/util_port_compat.c
  * shared memory caching: mod_auth_mellon
  *
- * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  *
  **************************************************************************/
 
@@ -76,11 +76,11 @@
 #include "http_protocol.h"
 #include "http_request.h"
 
-#include "mod_oidc.h"
+#include "mod_auth_connect.h"
 
 // TODO: rigid input checking on discovery responses and authorization responses
 
-// TODO: use oidc_get_current_url + configured RedirectURIPath to determine the RedirectURI more dynamically
+// TODO: use mac_get_current_url + configured RedirectURIPath to determine the RedirectURI more dynamically
 // TODO: support more hybrid flows ("code id_token" (for MS), "code token" etc.)
 // TODO: support PS??? and EC??? algorithms
 // TODO: override more stuff (eg. client_name, id_token_signed_response_alg) using client metadata
@@ -90,12 +90,12 @@
 //       refresh metadata once-per too? (for non-signing key changes)
 // TODO: check the Apache 2.4 compilation/#defines
 
-extern module AP_MODULE_DECLARE_DATA oidc_module;
+extern module AP_MODULE_DECLARE_DATA auth_connect_module;
 
 /*
  * clean any suspicious headers in the HTTP request sent by the user agent
  */
-static void oidc_scrub_request_headers(request_rec *r, const char *claim_prefix,
+static void mac_scrub_request_headers(request_rec *r, const char *claim_prefix,
 		const char *authn_header) {
 
 	const int prefix_len = claim_prefix ? strlen(claim_prefix) : 0;
@@ -112,26 +112,26 @@ static void oidc_scrub_request_headers(request_rec *r, const char *claim_prefix,
 	for (i = 0; i < h->nelts; i++) {
 		const char * const k = e[i].key;
 
-		/* is this header's name equivalent to the header that OIDC would set for the authenticated user? */
+		/* is this header's name equivalent to the header that mod_auth_connect would set for the authenticated user? */
 		const int authn_header_matches = (k != NULL) && authn_header
-				&& (oidc_strnenvcmp(k, authn_header, -1) == 0);
+				&& (mac_strnenvcmp(k, authn_header, -1) == 0);
 
 		/*
-		 * would this header be interpreted as a OIDC attribute? Note
+		 * would this header be interpreted as a mod_auth_connect attribute? Note
 		 * that prefix_len will be zero if no attr_prefix is defined,
 		 * so this will always be false. Also note that we do not
 		 * scrub headers if the prefix is empty because every header
 		 * would match.
 		 */
 		const int prefix_matches = (k != NULL) && prefix_len
-				&& (oidc_strnenvcmp(k, claim_prefix, prefix_len) == 0);
+				&& (mac_strnenvcmp(k, claim_prefix, prefix_len) == 0);
 
 		/* add to the clean_headers if non-suspicious, skip and report otherwise */
 		if (!prefix_matches && !authn_header_matches) {
 			apr_table_addn(clean_headers, k, e[i].val);
 		} else {
 			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-					"oidc_scrub_request_headers: scrubbed suspicious request header (%s: %.32s)",
+					"mac_scrub_request_headers: scrubbed suspicious request header (%s: %.32s)",
 					k, e[i].val);
 		}
 	}
@@ -143,10 +143,10 @@ static void oidc_scrub_request_headers(request_rec *r, const char *claim_prefix,
 /*
  * calculates a hash value based on request fingerprint plus a provided state string.
  */
-static char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
+static char *mac_get_browser_state_hash(request_rec *r, const char *state) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_get_browser_state_hash: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_get_browser_state_hash: entering");
 
 	/* helper to hold to header values */
 	const char *value = NULL;
@@ -192,90 +192,90 @@ static char *oidc_get_browser_state_hash(request_rec *r, const char *state) {
 /*
  * see if the state that came back from the OP matches what we've stored in the cookie
  */
-static int oidc_check_state(request_rec *r, oidc_cfg *c, const char *state,
+static int mac_check_state(request_rec *r, mac_cfg *c, const char *state,
 		char **original_url, char **issuer, char **nonce) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_check_state: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r, "mac_check_state: entering");
 
 	/* get the state cookie value first */
-	char *cookieValue = oidc_get_cookie(r, OIDCStateCookieName);
+	char *cookieValue = mac_get_cookie(r, MACStateCookieName);
 	if (cookieValue == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: no \"%s\" state cookie found",
-				OIDCStateCookieName);
+				"mac_check_state: no \"%s\" state cookie found",
+				MACStateCookieName);
 		return FALSE;
 	}
 
 	/* clear state cookie because we don't need it anymore */
-	oidc_set_cookie(r, OIDCStateCookieName, "");
+	mac_set_cookie(r, MACStateCookieName, "");
 
 	/* decrypt the state obtained from the cookie */
 	char *svalue;
-	if (oidc_base64url_decode_decrypt_string(r, &svalue, cookieValue) <= 0)
+	if (mac_base64url_decode_decrypt_string(r, &svalue, cookieValue) <= 0)
 		return FALSE;
 
 	/* context to iterate over the entries in the decrypted state cookie value */
 	char *ctx = NULL;
 
 	/* first get the base64-encoded random value */
-	*nonce = apr_strtok(svalue, OIDCStateCookieSep, &ctx);
+	*nonce = apr_strtok(svalue, MACStateCookieSep, &ctx);
 	if (*nonce == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: no nonce element found in \"%s\" cookie (%s)",
-				OIDCStateCookieName, cookieValue);
+				"mac_check_state: no nonce element found in \"%s\" cookie (%s)",
+				MACStateCookieName, cookieValue);
 		return FALSE;
 	}
 
 	/* calculate the hash of the browser fingerprint concatenated with the nonce */
-	char *calc = oidc_get_browser_state_hash(r, *nonce);
+	char *calc = mac_get_browser_state_hash(r, *nonce);
 
 	/* compare the calculated hash with the value provided in the authorization response */
 	if (apr_strnatcmp(calc, state) != 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: calculated state from cookie does not match state parameter passed back in URL: \"%s\" != \"%s\"",
+				"mac_check_state: calculated state from cookie does not match state parameter passed back in URL: \"%s\" != \"%s\"",
 				state, calc);
 		return FALSE;
 	}
 
 	/* since we're OK, get the original URL as the next value in the decrypted cookie */
-	*original_url = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
+	*original_url = apr_strtok(NULL, MACStateCookieSep, &ctx);
 	if (*original_url == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: no separator (%s) found in \"%s\" cookie (%s)",
-				OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
+				"mac_check_state: no separator (%s) found in \"%s\" cookie (%s)",
+				MACStateCookieSep, MACStateCookieName, cookieValue);
 		return FALSE;
 	}
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_check_state: \"original_url\" restored from cookie: %s",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_check_state: \"original_url\" restored from cookie: %s",
 			*original_url);
 
 	/* thirdly, get the issuer value stored in the cookie */
-	*issuer = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
+	*issuer = apr_strtok(NULL, MACStateCookieSep, &ctx);
 	if (*issuer == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: no second separator (%s) found in \"%s\" cookie (%s)",
-				OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
+				"mac_check_state: no second separator (%s) found in \"%s\" cookie (%s)",
+				MACStateCookieSep, MACStateCookieName, cookieValue);
 		return FALSE;
 	}
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_check_state: \"issuer\" restored from cookie: %s", *issuer);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_check_state: \"issuer\" restored from cookie: %s", *issuer);
 
 	/* lastly, get the timestamp value stored in the cookie */
-	char *timestamp = apr_strtok(NULL, OIDCStateCookieSep, &ctx);
+	char *timestamp = apr_strtok(NULL, MACStateCookieSep, &ctx);
 	if (timestamp == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: no third separator (%s) found in \"%s\" cookie (%s)",
-				OIDCStateCookieSep, OIDCStateCookieName, cookieValue);
+				"mac_check_state: no third separator (%s) found in \"%s\" cookie (%s)",
+				MACStateCookieSep, MACStateCookieName, cookieValue);
 		return FALSE;
 	}
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_check_state: \"timestamp\" restored from cookie: %s",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_check_state: \"timestamp\" restored from cookie: %s",
 			timestamp);
 
 	apr_time_t then;
 	if (sscanf(timestamp, "%" APR_TIME_T_FMT, &then) != 1) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: could not parse timestamp restored from state cookie (%s)",
+				"mac_check_state: could not parse timestamp restored from state cookie (%s)",
 				timestamp);
 		return FALSE;
 	}
@@ -283,7 +283,7 @@ static int oidc_check_state(request_rec *r, oidc_cfg *c, const char *state,
 	apr_time_t now = apr_time_sec(apr_time_now());
 	if (now > then + c->state_timeout) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_check_state: state has expired");
+				"mac_check_state: state has expired");
 		return FALSE;
 	}
 
@@ -295,11 +295,11 @@ static int oidc_check_state(request_rec *r, oidc_cfg *c, const char *state,
  * create a state parameter to be passed in an authorization request to an OP
  * and set a cookie in the browser that is cryptographically bound to that
  */
-static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url,
+static char *mac_create_state_and_set_cookie(request_rec *r, const char *url,
 		const char *issuer, const char *nonce) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_create_state_and_set_cookie: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_create_state_and_set_cookie: entering");
 
 	char *cookieValue = NULL;
 
@@ -310,34 +310,34 @@ static char *oidc_create_state_and_set_cookie(request_rec *r, const char *url,
 	apr_time_t now = apr_time_sec(apr_time_now());
 	char *rvalue = apr_psprintf(r->pool, "%s%s%s%s%s%s%" APR_TIME_T_FMT "",
 			nonce,
-			OIDCStateCookieSep, url, OIDCStateCookieSep, issuer,
-			OIDCStateCookieSep, now);
+			MACStateCookieSep, url, MACStateCookieSep, issuer,
+			MACStateCookieSep, now);
 
 	/* encrypt the resulting value and set it as a cookie */
-	oidc_encrypt_base64url_encode_string(r, &cookieValue, rvalue);
-	oidc_set_cookie(r, OIDCStateCookieName, cookieValue);
+	mac_encrypt_base64url_encode_string(r, &cookieValue, rvalue);
+	mac_set_cookie(r, MACStateCookieName, cookieValue);
 
 	/* return a hash value that fingerprints the browser concatenated with the random input */
-	return oidc_get_browser_state_hash(r, nonce);
+	return mac_get_browser_state_hash(r, nonce);
 }
 
 /*
- * get the mod_oidc related context from the (userdata in the) request
+ * get the mod_auth_connect related context from the (userdata in the) request
  * (used for passing state between various Apache request processing stages and hook callbacks)
  */
-static apr_table_t *oidc_request_state(request_rec *rr) {
+static apr_table_t *mac_request_state(request_rec *rr) {
 
 	/* our state is always stored in the main request */
 	request_rec *r = (rr->main != NULL) ? rr->main : rr;
 
 	/* our state is a table, get it */
 	apr_table_t *state = NULL;
-	apr_pool_userdata_get((void **) &state, MOD_OIDC_USERDATA_KEY, r->pool);
+	apr_pool_userdata_get((void **) &state, MAC_USERDATA_KEY, r->pool);
 
 	/* if it does not exist, we'll create a new table */
 	if (state == NULL) {
 		state = apr_table_make(r->pool, 5);
-		apr_pool_userdata_set(state, MOD_OIDC_USERDATA_KEY, NULL, r->pool);
+		apr_pool_userdata_set(state, MAC_USERDATA_KEY, NULL, r->pool);
 	}
 
 	/* return the resulting table, always non-null now */
@@ -345,26 +345,26 @@ static apr_table_t *oidc_request_state(request_rec *rr) {
 }
 
 /*
- * set a name/value pair in the mod_oidc-specific request context
+ * set a name/value pair in the mod_auth_connect-specific request context
  * (used for passing state between various Apache request processing stages and hook callbacks)
  */
-void oidc_request_state_set(request_rec *r, const char *key, const char *value) {
+void mac_request_state_set(request_rec *r, const char *key, const char *value) {
 
 	/* get a handle to the global state, which is a table */
-	apr_table_t *state = oidc_request_state(r);
+	apr_table_t *state = mac_request_state(r);
 
 	/* put the name/value pair in that table */
 	apr_table_setn(state, key, value);
 }
 
 /*
- * get a name/value pair from the mod_oidc-specific request context
+ * get a name/value pair from the mod_auth_connect-specific request context
  * (used for passing state between various Apache request processing stages and hook callbacks)
  */
-const char*oidc_request_state_get(request_rec *r, const char *key) {
+const char*mac_request_state_get(request_rec *r, const char *key) {
 
 	/* get a handle to the global state, which is a table */
-	apr_table_t *state = oidc_request_state(r);
+	apr_table_t *state = mac_request_state(r);
 
 	/* return the value from the table */
 	return apr_table_get(state, key);
@@ -373,16 +373,16 @@ const char*oidc_request_state_get(request_rec *r, const char *key) {
 /*
  * set an HTTP header to pass information to the application
  */
-static void oidc_set_app_header(request_rec *r, const char *s_key,
+static void mac_set_app_header(request_rec *r, const char *s_key,
 		const char *s_value, const char *claim_prefix) {
 
 	/* construct the header name, cq. put the prefix in front of a normalized key name */
 	const char *s_name = apr_psprintf(r->pool, "%s%s", claim_prefix,
-			oidc_normalize_header_name(r, s_key));
+			mac_normalize_header_name(r, s_key));
 
 	/* do some logging about this event */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_set_app_header: setting header \"%s: %s\"", s_name, s_value);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_set_app_header: setting header \"%s: %s\"", s_name, s_value);
 
 	/* now set the actual header name/value */
 	apr_table_set(r->headers_in, s_name, s_value);
@@ -391,12 +391,12 @@ static void oidc_set_app_header(request_rec *r, const char *s_key,
 /*
  * set the user/claims information from the session in HTTP headers passed on to the application
  */
-static void oidc_set_app_headers(request_rec *r,
+static void mac_set_app_headers(request_rec *r,
 		const apr_json_value_t *j_attrs, const char *authn_header,
 		const char *claim_prefix, const char *claim_delimiter) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_set_app_headers: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_set_app_headers: entering");
 
 	apr_json_value_t *j_value = NULL;
 	apr_hash_index_t *hi = NULL;
@@ -408,8 +408,8 @@ static void oidc_set_app_headers(request_rec *r,
 
 	/* if not attributes are set, nothing needs to be done */
 	if (j_attrs == NULL) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_set_app_headers: no attributes to set (j_attrs=NULL)");
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_set_app_headers: no attributes to set (j_attrs=NULL)");
 		return;
 	}
 
@@ -424,26 +424,26 @@ static void oidc_set_app_headers(request_rec *r,
 		if (j_value->type == APR_JSON_STRING) {
 
 			/* set the single string in the application header whose name is based on the key and the prefix */
-			oidc_set_app_header(r, s_key, j_value->value.string.p,
+			mac_set_app_header(r, s_key, j_value->value.string.p,
 					claim_prefix);
 
 		} else if (j_value->type == APR_JSON_BOOLEAN) {
 
 			/* set boolean value in the application header whose name is based on the key and the prefix */
-			oidc_set_app_header(r, s_key, j_value->value.boolean ? "1" : "0",
+			mac_set_app_header(r, s_key, j_value->value.boolean ? "1" : "0",
 					claim_prefix);
 
 		} else if (j_value->type == APR_JSON_LONG) {
 
 			/* set long value in the application header whose name is based on the key and the prefix */
-			oidc_set_app_header(r, s_key,
+			mac_set_app_header(r, s_key,
 					apr_psprintf(r->pool, "%ld", j_value->value.lnumber),
 					claim_prefix);
 
 		} else if (j_value->type == APR_JSON_DOUBLE) {
 
 			/* set float value in the application header whose name is based on the key and the prefix */
-			oidc_set_app_header(r, s_key,
+			mac_set_app_header(r, s_key,
 					apr_psprintf(r->pool, "%lf", j_value->value.dnumber),
 					claim_prefix);
 
@@ -451,8 +451,8 @@ static void oidc_set_app_headers(request_rec *r,
 		} else if (j_value->type == APR_JSON_ARRAY) {
 
 			/* some logging about what we're going to do */
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_set_app_headers: parsing attribute array for key \"%s\" (#nr-of-elems: %d)",
+			ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+					"mac_set_app_headers: parsing attribute array for key \"%s\" (#nr-of-elems: %d)",
 					s_key, j_value->value.array->nelts);
 
 			/* string to hold the concatenated array string values */
@@ -470,7 +470,7 @@ static void oidc_set_app_headers(request_rec *r,
 				if (elem->type == APR_JSON_STRING) {
 
 					/* concatenate the string to the s_concat value using the configured separator char */
-					// TODO: escape the delimiter in the values (maybe reuse/extract url-formatted code from oidc_session_identity_encode)
+					// TODO: escape the delimiter in the values (maybe reuse/extract url-formatted code from mac_session_identity_encode)
 					if (apr_strnatcmp(s_concat, "") != 0) {
 						s_concat = apr_psprintf(r->pool, "%s%s%s", s_concat,
 								claim_delimiter, elem->value.string.p);
@@ -494,19 +494,19 @@ static void oidc_set_app_headers(request_rec *r,
 
 					/* don't know how to handle a non-string array element */
 					ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-							"oidc_set_app_headers: unhandled in-array JSON object type [%d] for key \"%s\" when parsing claims array elements",
+							"mac_set_app_headers: unhandled in-array JSON object type [%d] for key \"%s\" when parsing claims array elements",
 							elem->type, s_key);
 				}
 			}
 
 			/* set the concatenated string */
-			oidc_set_app_header(r, s_key, s_concat, claim_prefix);
+			mac_set_app_header(r, s_key, s_concat, claim_prefix);
 
 		} else {
 
 			/* no string and no array, so unclear how to handle this */
 			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-					"oidc_set_app_headers: unhandled JSON object type [%d] for key \"%s\" when parsing claims",
+					"mac_set_app_headers: unhandled JSON object type [%d] for key \"%s\" when parsing claims",
 					j_value->type, s_key);
 		}
 	}
@@ -515,29 +515,29 @@ static void oidc_set_app_headers(request_rec *r,
 /*
  * handle the case where we have identified an existing authentication session for a user
  */
-static int oidc_handle_existing_session(request_rec *r,
-		const oidc_cfg * const cfg, session_rec *session) {
+static int mac_handle_existing_session(request_rec *r,
+		const mac_cfg * const cfg, session_rec *session) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_handle_existing_session: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_handle_existing_session: entering");
 
 	const char *s_attrs = NULL;
 	apr_json_value_t *j_attrs = NULL;
 
 	/* get a handle to the director config */
-	oidc_dir_cfg *dir_cfg = ap_get_module_config(r->per_dir_config,
-			&oidc_module);
+	mac_dir_cfg *dir_cfg = ap_get_module_config(r->per_dir_config,
+			&auth_connect_module);
 
 	/*
 	 * we're going to pass the information that we have to the application,
 	 * but first we need to scrub the headers that we're going to use for security reasons
 	 */
 	if (cfg->scrub_request_headers != 0) {
-		oidc_scrub_request_headers(r, cfg->claim_prefix, dir_cfg->authn_header);
+		mac_scrub_request_headers(r, cfg->claim_prefix, dir_cfg->authn_header);
 	}
 
 	/* get the string-encoded attributes from the session */
-	oidc_session_get(r, session, OIDC_CLAIMS_SESSION_KEY, &s_attrs);
+	mac_session_get(r, session, MAC_CLAIMS_SESSION_KEY, &s_attrs);
 
 	/* decode the string-encoded attributes in to a JSON structure */
 	if ((s_attrs != NULL)
@@ -546,18 +546,18 @@ static int oidc_handle_existing_session(request_rec *r,
 
 		/* whoops, attributes have been corrupted */
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_handle_existing_session: unable to parse string-encoded claims stored in the session, returning internal server error");
+				"mac_handle_existing_session: unable to parse string-encoded claims stored in the session, returning internal server error");
 
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	/* pass the user/claims in the session to the application by setting the appropriate headers */
 	// TODO: combine already resolved attrs from id_token with those from user_info endpoint
-	oidc_set_app_headers(r, j_attrs, dir_cfg->authn_header, cfg->claim_prefix,
+	mac_set_app_headers(r, j_attrs, dir_cfg->authn_header, cfg->claim_prefix,
 			cfg->claim_delimiter);
 
 	/* set the attributes JSON structure in the request state so it is available for authz purposes later on */
-	oidc_request_state_set(r, OIDC_CLAIMS_SESSION_KEY, (const char *) j_attrs);
+	mac_request_state_set(r, MAC_CLAIMS_SESSION_KEY, (const char *) j_attrs);
 
 	/* return "user authenticated" status */
 	return OK;
@@ -566,17 +566,17 @@ static int oidc_handle_existing_session(request_rec *r,
 /*
  * helper function for basic/implicit client flows upon receiving an authorization response:
  * check that it matches the state stored in the browser and return the variables associated
- * with the state, such as original_url and OP oidc_provider_t pointer.
+ * with the state, such as original_url and OP mac_provider_t pointer.
  */
-static apr_byte_t oidc_authorization_response_match_state(request_rec *r,
-		oidc_cfg *c, const char *state, char **original_url,
-		struct oidc_provider_t **provider, char **nonce) {
+static apr_byte_t mac_authorization_response_match_state(request_rec *r,
+		mac_cfg *c, const char *state, char **original_url,
+		struct mac_provider_t **provider, char **nonce) {
 	char *issuer = NULL;
 
 	/* check the state parameter against what we stored in a cookie */
-	if (oidc_check_state(r, c, state, original_url, &issuer, nonce) == FALSE) {
+	if (mac_check_state(r, c, state, original_url, &issuer, nonce) == FALSE) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_authorization_response_match_state: unable to restore state");
+				"mac_authorization_response_match_state: unable to restore state");
 		return FALSE;
 	}
 
@@ -587,12 +587,12 @@ static apr_byte_t oidc_authorization_response_match_state(request_rec *r,
 	if (c->metadata_dir != NULL) {
 
 		/* try and get metadata from the metadata directory for the OP that sent this response */
-		if ((oidc_metadata_get(r, c, issuer, provider) == FALSE)
+		if ((mac_metadata_get(r, c, issuer, provider) == FALSE)
 				|| (provider == NULL)) {
 
 			// something went wrong here between sending the request and receiving the response
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_authorization_response_match_state: no provider metadata found for provider \"%s\"",
+					"mac_authorization_response_match_state: no provider metadata found for provider \"%s\"",
 					issuer);
 			return FALSE;
 		}
@@ -606,7 +606,7 @@ static apr_byte_t oidc_authorization_response_match_state(request_rec *r,
  * complete the handling of an authorization response by storing the
  * authenticated user state in the session
  */
-static int oidc_authorization_response_finalize(request_rec *r, oidc_cfg *c,
+static int mac_authorization_response_finalize(request_rec *r, mac_cfg *c,
 		session_rec *session, const char *id_token, const char *claims,
 		char *remoteUser, apr_time_t expires, const char *original_url) {
 
@@ -617,7 +617,7 @@ static int oidc_authorization_response_finalize(request_rec *r, oidc_cfg *c,
 	session->expiry = expires;
 
 	/* store the whole contents of the id_token for later reference too */
-	oidc_session_set(r, session, OIDC_IDTOKEN_SESSION_KEY, id_token);
+	mac_session_set(r, session, MAC_IDTOKEN_SESSION_KEY, id_token);
 
 	/* see if we've resolved any claims */
 	if (claims != NULL) {
@@ -626,11 +626,11 @@ static int oidc_authorization_response_finalize(request_rec *r, oidc_cfg *c,
 		 * (well actually the stringified representation in the response)
 		 * in the session context safely now
 		 */
-		oidc_session_set(r, session, OIDC_CLAIMS_SESSION_KEY, claims);
+		mac_session_set(r, session, MAC_CLAIMS_SESSION_KEY, claims);
 	}
 
 	/* store the session */
-	oidc_session_save(r, session);
+	mac_session_save(r, session);
 
 	/* not sure whether this is required, but it won't hurt */
 	r->user = remoteUser;
@@ -639,8 +639,8 @@ static int oidc_authorization_response_finalize(request_rec *r, oidc_cfg *c,
 	apr_table_add(r->headers_out, "Location", original_url);
 
 	/* log the successful response */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_authorization_response_finalize: session created and stored, redirecting to original url: %s",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_authorization_response_finalize: session created and stored, redirecting to original url: %s",
 			original_url);
 
 	/* do the actual redirect to the original URL */
@@ -650,24 +650,24 @@ static int oidc_authorization_response_finalize(request_rec *r, oidc_cfg *c,
 /*
  * handle an OpenID Connect Authorization Response using the Basic Client profile from the OP
  */
-static int oidc_handle_basic_authorization_response(request_rec *r, oidc_cfg *c,
+static int mac_handle_basic_authorization_response(request_rec *r, mac_cfg *c,
 		session_rec *session) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_handle_basic_authorization_response: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_handle_basic_authorization_response: entering");
 
 	/* initialize local variables */
 	char *code = NULL, *state = NULL;
 
 	/* by now we're pretty sure the code & state parameters exist */
-	oidc_util_get_request_parameter(r, "code", &code);
-	oidc_util_get_request_parameter(r, "state", &state);
+	mac_util_get_request_parameter(r, "code", &code);
+	mac_util_get_request_parameter(r, "state", &state);
 
 	/* match the returned state parameter against the state stored in the browser */
-	struct oidc_provider_t *provider = NULL;
+	struct mac_provider_t *provider = NULL;
 	char *original_url = NULL;
 	char *nonce = NULL;
-	if (oidc_authorization_response_match_state(r, c, state, &original_url,
+	if (mac_authorization_response_match_state(r, c, state, &original_url,
 			&provider, &nonce) == FALSE)
 		return HTTP_INTERNAL_SERVER_ERROR;
 
@@ -683,7 +683,7 @@ static int oidc_handle_basic_authorization_response(request_rec *r, oidc_cfg *c,
 	 * TODO: now I'm setting the nonce to NULL since google does not allow using a nonce in the "code" flow...
 	 */
 	nonce = NULL;
-	if (oidc_proto_resolve_code(r, c, provider, code, nonce, &remoteUser,
+	if (mac_proto_resolve_code(r, c, provider, code, nonce, &remoteUser,
 			&j_idtoken_payload, &id_token, &access_token, &expires) == FALSE) {
 		/* errors have already been reported */
 		return HTTP_UNAUTHORIZED;
@@ -694,33 +694,33 @@ static int oidc_handle_basic_authorization_response(request_rec *r, oidc_cfg *c,
 	 * parsed claims are not actually used here but need to be parsed anyway for error checking purposes
 	 */
 	apr_json_value_t *claims = NULL;
-	if (oidc_proto_resolve_userinfo(r, c, provider, access_token, &response,
+	if (mac_proto_resolve_userinfo(r, c, provider, access_token, &response,
 			&claims) == FALSE) {
 		response = NULL;
 	}
 
 	/* complete handling of the response by storing stuff in the session and redirecting to the original URL */
-	return oidc_authorization_response_finalize(r, c, session, id_token,
+	return mac_authorization_response_finalize(r, c, session, id_token,
 			response, remoteUser, expires, original_url);
 }
 
 /*
  * handle an OpenID Connect Authorization Response using the Implicit Client profile from the OP
  */
-static int oidc_handle_implicit_authorization_response(request_rec *r,
-		oidc_cfg *c, session_rec *session, const char *state,
+static int mac_handle_implicit_authorization_response(request_rec *r,
+		mac_cfg *c, session_rec *session, const char *state,
 		const char *id_token, const char *access_token, const char *token_type) {
 
 	/* log what we've received */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_handle_implicit_authorization_response: state = \"%s\", id_token= \"%s\", access_token=\"%s\", token_type=\"%s\"",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_handle_implicit_authorization_response: state = \"%s\", id_token= \"%s\", access_token=\"%s\", token_type=\"%s\"",
 			state, id_token, access_token, token_type);
 
 	/* match the returned state parameter against the state stored in the browser */
-	struct oidc_provider_t *provider = NULL;
+	struct mac_provider_t *provider = NULL;
 	char *original_url = NULL;
 	char *nonce = NULL;
-	if (oidc_authorization_response_match_state(r, c, state, &original_url,
+	if (mac_authorization_response_match_state(r, c, state, &original_url,
 			&provider, &nonce) == FALSE)
 		return HTTP_INTERNAL_SERVER_ERROR;
 
@@ -731,10 +731,10 @@ static int oidc_handle_implicit_authorization_response(request_rec *r,
 	char *s_idtoken_payload = NULL;
 
 	/* parse and validate the id_token */
-	if (oidc_proto_parse_idtoken(r, c, provider, id_token, nonce, &remoteUser,
+	if (mac_proto_parse_idtoken(r, c, provider, id_token, nonce, &remoteUser,
 			&j_idtoken_payload, &s_idtoken_payload, &expires) != TRUE) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_handle_implicit_authorization_response: could not verify the id_token contents, return HTTP_UNAUTHORIZED");
+				"mac_handle_implicit_authorization_response: could not verify the id_token contents, return HTTP_UNAUTHORIZED");
 		return HTTP_UNAUTHORIZED;
 	}
 
@@ -750,7 +750,7 @@ static int oidc_handle_implicit_authorization_response(request_rec *r,
 	if ((token_type != NULL) && (strcmp(token_type, "") != 0)) {
 		if (apr_strnatcasecmp(token_type, "Bearer") != 0) {
 			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r,
-					"oidc_handle_implicit_authorization_response: dropping unsupported (cq. non \"Bearer\") token_type: \"%s\"",
+					"mac_handle_implicit_authorization_response: dropping unsupported (cq. non \"Bearer\") token_type: \"%s\"",
 					token_type);
 			access_token = NULL;
 		}
@@ -766,39 +766,39 @@ static int oidc_handle_implicit_authorization_response(request_rec *r,
 
 		/* parsed claims are not actually used here but need to be parsed anyway for error checking purposes */
 		apr_json_value_t *claims = NULL;
-		if (oidc_proto_resolve_userinfo(r, c, provider, access_token, &s_claims,
+		if (mac_proto_resolve_userinfo(r, c, provider, access_token, &s_claims,
 				&claims) == FALSE) {
 			s_claims = NULL;
 		}
 	}
 
 	/* complete handling of the response by storing stuff in the session and redirecting to the original URL */
-	return oidc_authorization_response_finalize(r, c, session, id_token,
+	return mac_authorization_response_finalize(r, c, session, id_token,
 			s_claims, remoteUser, expires, original_url);
 }
 
 /*
  * handle an OpenID Connect Authorization Response using the fragment(+POST) response_mode with the Implicit Client profile from the OP
  */
-static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
+static int mac_handle_implicit_post(request_rec *r, mac_cfg *c,
 		session_rec *session) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_handle_implicit_post: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_handle_implicit_post: entering");
 
 	/* read the parameters that are POST-ed to us */
 	apr_table_t *params = apr_table_make(r->pool, 8);
-	if (oidc_util_read_post(r, params) == FALSE) {
+	if (mac_util_read_post(r, params) == FALSE) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_handle_implicit_post: something went wrong when reading the POST parameters");
+				"mac_handle_implicit_post: something went wrong when reading the POST parameters");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	/* see if we've got any POST-ed data at all */
 	if (apr_is_empty_table(params)) {
-		return oidc_util_http_sendstring(r,
+		return mac_util_http_sendstring(r,
 				apr_psprintf(r->pool,
-						"mod_oidc: you've hit an OpenID Connect callback URL with no parameters; this is an invalid request (you should not open this URL in your browser directly)"),
+						"mod_auth_connect: you've hit an OpenID Connect callback URL with no parameters; this is an invalid request (you should not open this URL in your browser directly)"),
 				HTTP_INTERNAL_SERVER_ERROR);
 	}
 
@@ -807,13 +807,13 @@ static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
 	char *error_description = (char *) apr_table_get(params,
 			"error_description");
 	if (error != NULL)
-		return oidc_util_html_send_error(r, error, error_description, OK);
+		return mac_util_html_send_error(r, error, error_description, OK);
 
 	/* get the state */
 	char *state = (char *) apr_table_get(params, "state");
 	if (state == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_handle_implicit_post: no state parameter found in the POST, returning internal server error");
+				"mac_handle_implicit_post: no state parameter found in the POST, returning internal server error");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
@@ -821,7 +821,7 @@ static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
 	char *id_token = (char *) apr_table_get(params, "id_token");
 	if (id_token == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_handle_implicit_post: no id_token parameter found in the POST, returning internal server error");
+				"mac_handle_implicit_post: no id_token parameter found in the POST, returning internal server error");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
@@ -832,43 +832,43 @@ static int oidc_handle_implicit_post(request_rec *r, oidc_cfg *c,
 	char *token_type = (char *) apr_table_get(params, "token_type");
 
 	/* do the actual implicit work */
-	return oidc_handle_implicit_authorization_response(r, c, session, state,
+	return mac_handle_implicit_authorization_response(r, c, session, state,
 			id_token, access_token, token_type);
 }
 
 /*
  * handle an OpenID Connect Authorization Response using the redirect response_mode with the Implicit Client profile from the OP
  */
-static int oidc_handle_implicit_redirect(request_rec *r, oidc_cfg *c,
+static int mac_handle_implicit_redirect(request_rec *r, mac_cfg *c,
 		session_rec *session) {
 
 	ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-			"oidc_handle_implicit_redirect: handling non-spec-compliant authorization response since the default response_mode when using the Implicit Client flow must be \"fragment\"");
+			"mac_handle_implicit_redirect: handling non-spec-compliant authorization response since the default response_mode when using the Implicit Client flow must be \"fragment\"");
 
 	/* initialize local variables */
 	char *state = NULL, *id_token = NULL, *access_token = NULL, *token_type =
 			NULL;
 
 	/* by now we're pretty sure the state & id_token parameters exist */
-	oidc_util_get_request_parameter(r, "state", &state);
-	oidc_util_get_request_parameter(r, "id_token", &id_token);
-	oidc_util_get_request_parameter(r, "access_token", &access_token);
-	oidc_util_get_request_parameter(r, "token_type", &token_type);
+	mac_util_get_request_parameter(r, "state", &state);
+	mac_util_get_request_parameter(r, "id_token", &id_token);
+	mac_util_get_request_parameter(r, "access_token", &access_token);
+	mac_util_get_request_parameter(r, "token_type", &token_type);
 
 	/* do the actual implicit work */
-	return oidc_handle_implicit_authorization_response(r, c, session, state,
+	return mac_handle_implicit_authorization_response(r, c, session, state,
 			id_token, access_token, token_type);
 }
 
 /*
  * present the user with an OP selection screen
  */
-static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
+static int mac_discovery(request_rec *r, mac_cfg *cfg) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_discovery: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r, "mac_discovery: entering");
 
 	/* obtain the URL we're currently accessing, to be stored in the state/session */
-	char *current_url = oidc_get_current_url(r, cfg);
+	char *current_url = mac_get_current_url(r, cfg);
 
 	/* see if there's an external discovery page configured */
 	if (cfg->discover_url != NULL) {
@@ -876,13 +876,13 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 		/* yes, assemble the parameters for external discovery */
 		char *url = apr_psprintf(r->pool, "%s%s%s=%s&%s=%s", cfg->discover_url,
 				strchr(cfg->discover_url, '?') != NULL ? "&" : "?",
-				OIDC_DISC_RT_PARAM, oidc_util_escape_string(r, current_url),
-				OIDC_DISC_CB_PARAM,
-				oidc_util_escape_string(r, cfg->redirect_uri));
+				MAC_DISC_RT_PARAM, mac_util_escape_string(r, current_url),
+				MAC_DISC_CB_PARAM,
+				mac_util_escape_string(r, cfg->redirect_uri));
 
 		/* log what we're about to do */
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_discovery: redirecting to external discovery page: %s",
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_discovery: redirecting to external discovery page: %s",
 				url);
 
 		/* do the actual redirect to an external discovery page */
@@ -892,9 +892,9 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 
 	/* get a list of all providers configured in the metadata directory */
 	apr_array_header_t *arr = NULL;
-	if (oidc_metadata_list(r, cfg, &arr) == FALSE)
-		return oidc_util_http_sendstring(r,
-				"mod_oidc: no configured providers found, contact your administrator",
+	if (mac_metadata_list(r, cfg, &arr) == FALSE)
+		return mac_util_http_sendstring(r,
+				"mod_auth_connect: no configured providers found, contact your administrator",
 				HTTP_UNAUTHORIZED);
 
 	/* assemble a where-are-you-from IDP discovery HTML page */
@@ -927,9 +927,9 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 		/* point back to the redirect_uri, where the selection is handled, with an IDP selection and return_to URL */
 		s = apr_psprintf(r->pool,
 				"%s<p><a href=\"%s?%s=%s&amp;%s=%s\">%s</a></p>\n", s,
-				cfg->redirect_uri, OIDC_DISC_OP_PARAM,
-				oidc_util_escape_string(r, issuer), OIDC_DISC_RT_PARAM,
-				oidc_util_escape_string(r, current_url), display);
+				cfg->redirect_uri, MAC_DISC_OP_PARAM,
+				mac_util_escape_string(r, issuer), MAC_DISC_RT_PARAM,
+				mac_util_escape_string(r, current_url), display);
 	}
 
 	/* add an option to enter an account or issuer name for dynamic OP discovery */
@@ -937,14 +937,14 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 			cfg->redirect_uri);
 	s = apr_psprintf(r->pool,
 			"%s<input type=\"hidden\" name=\"%s\" value=\"%s\"><br>\n", s,
-			OIDC_DISC_RT_PARAM, current_url);
+			MAC_DISC_RT_PARAM, current_url);
 	s =
 			apr_psprintf(r->pool,
 					"%sOr enter your account name (eg. \"mike@seed.gluu.org\", or an IDP identifier (eg. \"mitreid.org\"):<br>\n",
 					s);
 	s = apr_psprintf(r->pool,
 			"%s<p><input type=\"text\" name=\"%s\" value=\"%s\"></p>\n", s,
-			OIDC_DISC_OP_PARAM, "");
+			MAC_DISC_OP_PARAM, "");
 	s = apr_psprintf(r->pool, "%s<input type=\"submit\" value=\"Submit\">\n",
 			s);
 	s = apr_psprintf(r->pool, "%s</form>\n", s);
@@ -956,77 +956,77 @@ static int oidc_discovery(request_rec *r, oidc_cfg *cfg) {
 			"</html>\n", s);
 
 	/* now send the HTML contents to the user agent */
-	return oidc_util_http_sendstring(r, s, HTTP_UNAUTHORIZED);
+	return mac_util_http_sendstring(r, s, HTTP_UNAUTHORIZED);
 }
 
 /*
  * authenticate the user to the selected OP, if the OP is not selected yet perform discovery first
  */
-static int oidc_authenticate_user(request_rec *r, oidc_cfg *c,
-		oidc_provider_t *provider, const char *original_url) {
+static int mac_authenticate_user(request_rec *r, mac_cfg *c,
+		mac_provider_t *provider, const char *original_url) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_authenticate_user: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_authenticate_user: entering");
 
 	if (provider == NULL) {
 
 		// TODO: should we use an explicit redirect to the discovery endpoint (maybe a "discovery" param to the redirect_uri)?
 		if (c->metadata_dir != NULL)
-			return oidc_discovery(r, c);
+			return mac_discovery(r, c);
 
 		/* we're not using multiple OP's configured in a metadata directory, pick the statically configured OP */
 		provider = &c->provider;
 	}
 
 	char *nonce = NULL;
-	oidc_util_generate_random_base64url_encoded_value(r, 32, &nonce);
+	mac_util_generate_random_base64url_encoded_value(r, 32, &nonce);
 
 	/* create state that restores the context when the authorization response comes in; cryptographically bind it to the browser */
-	const char *state = oidc_create_state_and_set_cookie(r, original_url,
+	const char *state = mac_create_state_and_set_cookie(r, original_url,
 			provider->issuer, nonce);
 
 	// TODO: maybe show intermediate/progress screen "redirecting to"
 
 	/* send off to the OpenID Connect Provider */
-	return oidc_proto_authorization_request(r, provider, c->redirect_uri, state,
+	return mac_proto_authorization_request(r, provider, c->redirect_uri, state,
 			original_url, nonce);
 }
 
 /*
  * find out whether the request is a response from an IDP discovery page
  */
-static apr_byte_t oidc_is_discovery_response(request_rec *r, oidc_cfg *cfg) {
+static apr_byte_t mac_is_discovery_response(request_rec *r, mac_cfg *cfg) {
 	/*
 	 * see if this is a call to the configured redirect_uri and
-	 * the OIDC_RT_PARAM_NAME parameter is present and
-	 * the OIDC_DISC_ACCT_PARAM or OIDC_DISC_OP_PARAM is present
+	 * the MAC_RT_PARAM_NAME parameter is present and
+	 * the MAC_DISC_ACCT_PARAM or MAC_DISC_OP_PARAM is present
 	 */
-	return ((oidc_util_request_matches_url(r, cfg->redirect_uri) == TRUE)
-			&& oidc_util_request_has_parameter(r, OIDC_DISC_RT_PARAM)
-			&& (oidc_util_request_has_parameter(r, OIDC_DISC_OP_PARAM)));
+	return ((mac_util_request_matches_url(r, cfg->redirect_uri) == TRUE)
+			&& mac_util_request_has_parameter(r, MAC_DISC_RT_PARAM)
+			&& (mac_util_request_has_parameter(r, MAC_DISC_OP_PARAM)));
 }
 
 /*
  * handle a response from an IDP discovery page
  */
-static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
+static int mac_handle_discovery_response(request_rec *r, mac_cfg *c) {
 
 	/* variables to hold the values (original_url+issuer or original_url+acct) returned in the response */
 	char *issuer = NULL, *original_url = NULL;
-	oidc_provider_t *provider = NULL;
+	mac_provider_t *provider = NULL;
 
-	oidc_util_get_request_parameter(r, OIDC_DISC_OP_PARAM, &issuer);
-	oidc_util_get_request_parameter(r, OIDC_DISC_RT_PARAM, &original_url);
+	mac_util_get_request_parameter(r, MAC_DISC_OP_PARAM, &issuer);
+	mac_util_get_request_parameter(r, MAC_DISC_RT_PARAM, &original_url);
 
 	// TODO: trim issuer/accountname/domain input and do more input validation
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_handle_discovery_response: issuer=\"%s\", original_url=\"%s\"",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_handle_discovery_response: issuer=\"%s\", original_url=\"%s\"",
 			issuer, original_url);
 
 	if ((issuer == NULL) || (original_url == NULL)) {
-		return oidc_util_http_sendstring(r,
-				"mod_oidc: wherever you came from, it sent you here with the wrong parameters...",
+		return mac_util_http_sendstring(r,
+				"mod_auth_connect: wherever you came from, it sent you here with the wrong parameters...",
 				HTTP_INTERNAL_SERVER_ERROR);
 	}
 
@@ -1034,11 +1034,11 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 	if (strstr(issuer, "@") != NULL) {
 
 		/* got an account name as input, perform OP discovery with that */
-		if (oidc_proto_account_based_discovery(r, c, issuer, &issuer) == FALSE) {
+		if (mac_proto_account_based_discovery(r, c, issuer, &issuer) == FALSE) {
 
 			/* something did not work out, show a user facing error */
-			return oidc_util_http_sendstring(r,
-					"mod_oidc: could not resolve the provided account name to an OpenID Connect provider; check your syntax",
+			return mac_util_http_sendstring(r,
+					"mod_auth_connect: could not resolve the provided account name to an OpenID Connect provider; check your syntax",
 					HTTP_NOT_FOUND);
 		}
 
@@ -1059,59 +1059,59 @@ static int oidc_handle_discovery_response(request_rec *r, oidc_cfg *c) {
 		issuer[n - 1] = '\0';
 
 	/* try and get metadata from the metadata directories for the selected OP */
-	if ((oidc_metadata_get(r, c, issuer, &provider) == TRUE)
+	if ((mac_metadata_get(r, c, issuer, &provider) == TRUE)
 			&& (provider != NULL)) {
 
 		/* now we've got a selected OP, send the user there to authenticate */
-		return oidc_authenticate_user(r, c, provider, original_url);
+		return mac_authenticate_user(r, c, provider, original_url);
 	}
 
 	/* something went wrong */
-	return oidc_util_http_sendstring(r,
-			"mod_oidc: could not find valid provider metadata for the selected OpenID Connect provider; contact the administrator",
+	return mac_util_http_sendstring(r,
+			"mod_auth_connect: could not find valid provider metadata for the selected OpenID Connect provider; contact the administrator",
 			HTTP_NOT_FOUND);
 }
 
 /*
  * handle "all other" requests to the redirect_uri
  */
-int oidc_handle_redirect_uri_request(request_rec *r, oidc_cfg *c) {
+int mac_handle_redirect_uri_request(request_rec *r, mac_cfg *c) {
 	if (r->args == NULL)
 		/* this is a "bare" request to the redirect URI, indicating implicit flow using the fragment response_mode */
-		return oidc_proto_javascript_implicit(r, c);
+		return mac_proto_javascript_implicit(r, c);
 
 	/* TODO: check for "error" response */
-	if (oidc_util_request_has_parameter(r, "error")) {
+	if (mac_util_request_has_parameter(r, "error")) {
 
 		char *error = NULL, *descr = NULL;
-		oidc_util_get_request_parameter(r, "error", &error);
-		oidc_util_get_request_parameter(r, "error_description", &descr);
+		mac_util_get_request_parameter(r, "error", &error);
+		mac_util_get_request_parameter(r, "error_description", &descr);
 
-		return oidc_util_html_send_error(r, error, descr, OK);
+		return mac_util_html_send_error(r, error, descr, OK);
 	}
 
 	/* something went wrong */
-	return oidc_util_http_sendstring(r,
+	return mac_util_http_sendstring(r,
 			apr_psprintf(r->pool,
-					"mod_oidc: the OpenID Connect callback URL received an invalid request: %s",
+					"mod_auth_connect: the OpenID Connect callback URL received an invalid request: %s",
 					r->args), HTTP_INTERNAL_SERVER_ERROR);
 }
 
 /*
  * kill session
  */
-int oidc_handle_logout(request_rec *r, session_rec *session) {
+int mac_handle_logout(request_rec *r, session_rec *session) {
 	char *url = NULL;
 
 	/* if there's no remote_user then there's no (stored) session to kill */
 	if (session->remote_user != NULL) {
 
 		/* remove session state (cq. cache entry and cookie) */
-		oidc_session_kill(r, session);
+		mac_session_kill(r, session);
 	}
 
 	/* pickup the URL where the user wants to go after logout */
-	oidc_util_get_request_parameter(r, "logout", &url);
+	mac_util_get_request_parameter(r, "logout", &url);
 
 	/* send him there */
 	apr_table_add(r->headers_out, "Location", url);
@@ -1121,21 +1121,21 @@ int oidc_handle_logout(request_rec *r, session_rec *session) {
 /*
  * main routine: handle OpenID Connect authentication
  */
-static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
+static int mac_check_userid_openid_connect(request_rec *r, mac_cfg *c) {
 
 	/* check if this is a sub-request or an initial request */
 	if (ap_is_initial_req(r)) {
 
 		/* load the session from the request state; this will be a new "empty" session if no state exists */
 		session_rec *session = NULL;
-		oidc_session_load(r, &session);
+		mac_session_load(r, &session);
 
 		/* see if this is a logout trigger */
-		if ((oidc_util_request_matches_url(r, c->redirect_uri) == TRUE)
-				&& (oidc_util_request_has_parameter(r, "logout") == TRUE)) {
+		if ((mac_util_request_matches_url(r, c->redirect_uri) == TRUE)
+				&& (mac_util_request_has_parameter(r, "logout") == TRUE)) {
 
 			/* handle logout */
-			return oidc_handle_logout(r, session);
+			return mac_handle_logout(r, session);
 		}
 
 		/* initial request, first check if we have an existing session */
@@ -1145,32 +1145,32 @@ static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 			r->user = (char *) session->remote_user;
 
 			/* this is initial request and we already have a session */
-			return oidc_handle_existing_session(r, c, session);
+			return mac_handle_existing_session(r, c, session);
 
-		} else if (oidc_is_discovery_response(r, c)) {
+		} else if (mac_is_discovery_response(r, c)) {
 
 			/* this is response from the OP discovery page */
-			return oidc_handle_discovery_response(r, c);
+			return mac_handle_discovery_response(r, c);
 
-		} else if (oidc_proto_is_basic_authorization_response(r, c)) {
+		} else if (mac_proto_is_basic_authorization_response(r, c)) {
 
 			/* this is an authorization response from the OP using the Basic Client profile */
-			return oidc_handle_basic_authorization_response(r, c, session);
+			return mac_handle_basic_authorization_response(r, c, session);
 
-		} else if (oidc_proto_is_implicit_post(r, c)) {
+		} else if (mac_proto_is_implicit_post(r, c)) {
 
 			/* this is an authorization response using the fragment(+POST) response_mode with the Implicit Client profile */
-			return oidc_handle_implicit_post(r, c, session);
+			return mac_handle_implicit_post(r, c, session);
 
-		} else if (oidc_proto_is_implicit_redirect(r, c)) {
+		} else if (mac_proto_is_implicit_redirect(r, c)) {
 
 			/* this is an authorization response using the redirect response_mode with the Implicit Client profile */
-			return oidc_handle_implicit_redirect(r, c, session);
+			return mac_handle_implicit_redirect(r, c, session);
 
-		} else if (oidc_util_request_matches_url(r, c->redirect_uri) == TRUE) {
+		} else if (mac_util_request_matches_url(r, c->redirect_uri) == TRUE) {
 
 			/* some other request to the redirect_uri */
-			return oidc_handle_redirect_uri_request(r, c);
+			return mac_handle_redirect_uri_request(r, c);
 		}
 		/*
 		 * else: initial request, we have no session and it is not an authorization or
@@ -1187,8 +1187,8 @@ static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 		if (r->user != NULL) {
 
 			/* this is a sub-request and we have a session (headers will have been scrubbed and set already) */
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_check_userid_openid_connect: recycling user '%s' from initial request for sub-request",
+			ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+					"mac_check_userid_openid_connect: recycling user '%s' from initial request for sub-request",
 					r->user);
 
 			return OK;
@@ -1200,19 +1200,19 @@ static int oidc_check_userid_openid_connect(request_rec *r, oidc_cfg *c) {
 	}
 
 	/* no session (regardless of whether it is main or sub-request), go and authenticate the user */
-	return oidc_authenticate_user(r, c, NULL, oidc_get_current_url(r, c));
+	return mac_authenticate_user(r, c, NULL, mac_get_current_url(r, c));
 }
 
 /*
  * generic Apache authentication hook for this module: dispatches to OpenID Connect or OAuth 2.0 specific routines
  */
-int oidc_check_user_id(request_rec *r) {
+int mac_check_user_id(request_rec *r) {
 
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+	mac_cfg *c = ap_get_module_config(r->server->module_config, &auth_connect_module);
 
 	/* log some stuff about the incoming HTTP request */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_check_user_id: incoming request: \"%s?%s\", ap_is_initial_req(r)=%d",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_check_user_id: incoming request: \"%s?%s\", ap_is_initial_req(r)=%d",
 			r->parsed_uri.path, r->args, ap_is_initial_req(r));
 
 	/* see if any authentication has been defined at all */
@@ -1222,11 +1222,11 @@ int oidc_check_user_id(request_rec *r) {
 	/* see if we've configured OpenID Connect user authentication for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "openid-connect")
 			== 0)
-		return oidc_check_userid_openid_connect(r, c);
+		return mac_check_userid_openid_connect(r, c);
 
 	/* see if we've configured OAuth 2.0 access control for this request */
 	if (apr_strnatcasecmp((const char *) ap_auth_type(r), "oauth20") == 0)
-		return oidc_oauth_check_userid(r, c);
+		return mac_oauth_check_userid(r, c);
 
 	/* this is not for us but for some other handler */
 	return DECLINED;
@@ -1237,24 +1237,24 @@ int oidc_check_user_id(request_rec *r) {
  * generic Apache >=2.4 authorization hook for this module
  * handles both OpenID Connect or OAuth 2.0 in the same way, based on the claims stored in the session
  */
-authz_status oidc_authz_checker(request_rec *r, const char *require_args, const void *parsed_require_args) {
+authz_status mac_authz_checker(request_rec *r, const char *require_args, const void *parsed_require_args) {
 
 	/* get the set of claims from the request state (they've been set in the authentication part earlier */
-	apr_json_value_t *attrs = (apr_json_value_t *)oidc_request_state_get(r, OIDC_CLAIMS_SESSION_KEY);
+	apr_json_value_t *attrs = (apr_json_value_t *)mac_request_state_get(r, MAC_CLAIMS_SESSION_KEY);
 
 	/* dispatch to the >=2.4 specific authz routine */
-	return oidc_authz_worker24(r, attrs, require_args);
+	return mac_authz_worker24(r, attrs, require_args);
 }
 #else
 /*
  * generic Apache <2.4 authorization hook for this module
  * handles both OpenID Connect and OAuth 2.0 in the same way, based on the claims stored in the request context
  */
-int oidc_auth_checker(request_rec *r) {
+int mac_auth_checker(request_rec *r) {
 
 	/* get the set of claims from the request state (they've been set in the authentication part earlier) */
-	apr_json_value_t *attrs = (apr_json_value_t *) oidc_request_state_get(r,
-	OIDC_CLAIMS_SESSION_KEY);
+	apr_json_value_t *attrs = (apr_json_value_t *) mac_request_state_get(r,
+	MAC_CLAIMS_SESSION_KEY);
 
 	/* get the Require statements */
 	const apr_array_header_t * const reqs_arr = ap_requires(r);
@@ -1263,25 +1263,25 @@ int oidc_auth_checker(request_rec *r) {
 	const require_line * const reqs =
 			reqs_arr ? (require_line *) reqs_arr->elts : NULL;
 	if (!reqs_arr) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
 				"No require statements found, "
 						"so declining to perform authorization.");
 		return DECLINED;
 	}
 
 	/* dispatch to the <2.4 specific authz routine */
-	return oidc_authz_worker(r, attrs, reqs, reqs_arr->nelts);
+	return mac_authz_worker(r, attrs, reqs, reqs_arr->nelts);
 }
 #endif
 
-extern const command_rec oidc_config_cmds[];
+extern const command_rec mac_config_cmds[];
 
-module AP_MODULE_DECLARE_DATA oidc_module = {
+module AP_MODULE_DECLARE_DATA auth_connect_module = {
 		STANDARD20_MODULE_STUFF,
-		oidc_create_dir_config,
-		oidc_merge_dir_config,
-		oidc_create_server_config,
-		oidc_merge_server_config,
-		oidc_config_cmds,
-		oidc_register_hooks
+		mac_create_dir_config,
+		mac_merge_dir_config,
+		mac_create_server_config,
+		mac_merge_server_config,
+		mac_config_cmds,
+		mac_register_hooks
 };

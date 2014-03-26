@@ -48,7 +48,7 @@
  *
  * OpenID Connect metadata handling routines, for both OP discovery and client registration
  *
- * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
 #include <apr_hash.h>
@@ -65,18 +65,18 @@
 #include <openssl/err.h>
 #include <openssl/pem.h>
 
-#include "mod_oidc.h"
+#include "mod_auth_connect.h"
 
-extern module AP_MODULE_DECLARE_DATA oidc_module;
+extern module AP_MODULE_DECLARE_DATA auth_connect_module;
 
-#define OIDC_METADATA_SUFFIX_PROVIDER "provider"
-#define OIDC_METADATA_SUFFIX_CLIENT "client"
-#define OIDC_METADATA_SUFFIX_JWKS "jwks"
+#define MAC_METADATA_SUFFIX_PROVIDER "provider"
+#define MAC_METADATA_SUFFIX_CLIENT "client"
+#define MAC_METADATA_SUFFIX_JWKS "jwks"
 
 /*
  * get the metadata filename for a specified issuer (cq. urlencode it)
  */
-static const char *oidc_metadata_issuer_to_filename(request_rec *r,
+static const char *mac_metadata_issuer_to_filename(request_rec *r,
 		const char *issuer) {
 
 	/* strip leading https:// */
@@ -91,55 +91,55 @@ static const char *oidc_metadata_issuer_to_filename(request_rec *r,
 	int n = strlen(p);
 	if (p[n - 1] == '/') p[n - 1] = '\0';
 
-	return oidc_util_escape_string(r, p);
+	return mac_util_escape_string(r, p);
 }
 
 /*
  * get the issuer from a metadata filename (cq. urldecode it)
  */
-static const char *oidc_metadata_filename_to_issuer(request_rec *r,
+static const char *mac_metadata_filename_to_issuer(request_rec *r,
 		const char *filename) {
 	char *result = apr_pstrdup(r->pool, filename);
 	char *p = strrchr(result, '.');
 	*p = '\0';
-	p = oidc_util_unescape_string(r, result);
+	p = mac_util_unescape_string(r, result);
 	return (strcmp(p, "accounts.google.com") == 0) ? p : apr_psprintf(r->pool, "https://%s", p);
 }
 
 /*
  * get the full path to the metadata file for a specified issuer and directory
  */
-static const char *oidc_metadata_file_path(request_rec *r, oidc_cfg *cfg,
+static const char *mac_metadata_file_path(request_rec *r, mac_cfg *cfg,
 		const char *issuer, const char *type) {
 	return apr_psprintf(r->pool, "%s/%s.%s", cfg->metadata_dir,
-			oidc_metadata_issuer_to_filename(r, issuer), type);
+			mac_metadata_issuer_to_filename(r, issuer), type);
 }
 
 /*
  * get the full path to the provider metadata file for a specified issuer
  */
-static const char *oidc_metadata_provider_file_path(request_rec *r,
+static const char *mac_metadata_provider_file_path(request_rec *r,
 		const char *issuer) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
-			&oidc_module);
-	return oidc_metadata_file_path(r, cfg, issuer,
-	OIDC_METADATA_SUFFIX_PROVIDER);
+	mac_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&auth_connect_module);
+	return mac_metadata_file_path(r, cfg, issuer,
+	MAC_METADATA_SUFFIX_PROVIDER);
 }
 
 /*
  * get the full path to the client metadata file for a specified issuer
  */
-static const char *oidc_metadata_client_file_path(request_rec *r,
+static const char *mac_metadata_client_file_path(request_rec *r,
 		const char *issuer) {
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
-			&oidc_module);
-	return oidc_metadata_file_path(r, cfg, issuer, OIDC_METADATA_SUFFIX_CLIENT);
+	mac_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&auth_connect_module);
+	return mac_metadata_file_path(r, cfg, issuer, MAC_METADATA_SUFFIX_CLIENT);
 }
 
 /*
  * get the full path to the jwks metadata file for a specified issuer
  */
-static const char *oidc_metadata_jwks_cache_key(request_rec *r,
+static const char *mac_metadata_jwks_cache_key(request_rec *r,
 		const char *issuer) {
 	return apr_psprintf(r->pool, "%s.jwks", issuer);
 }
@@ -147,20 +147,20 @@ static const char *oidc_metadata_jwks_cache_key(request_rec *r,
 /*
  * read a JSON metadata file from disk
  */
-static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path,
+static apr_byte_t mac_metadata_file_read_json(request_rec *r, const char *path,
 		apr_json_value_t **result) {
 	apr_status_t rc = APR_SUCCESS;
 	char *buf = NULL;
 
 	/* read the file contents */
-	if (oidc_util_file_read(r, path, &buf) == FALSE)
+	if (mac_util_file_read(r, path, &buf) == FALSE)
 		return FALSE;
 
 	/* decode the JSON contents of the buffer */
 	if ((rc = apr_json_decode(result, buf, strlen(buf), r->pool)) != APR_SUCCESS) {
 		/* something went wrong */
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_file_read_json: JSON parsing (%s) returned an error: (%d)",
+				"mac_metadata_file_read_json: JSON parsing (%s) returned an error: (%d)",
 				path, rc);
 		return FALSE;
 	}
@@ -168,14 +168,14 @@ static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path,
 	if ((*result == NULL) || ((*result)->type != APR_JSON_OBJECT)) {
 		/* oops, no JSON */
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_file_read_json: parsed JSON from (%s) did not contain a JSON object",
+				"mac_metadata_file_read_json: parsed JSON from (%s) did not contain a JSON object",
 				path);
 		return FALSE;
 	}
 
 	/* log successful metadata retrieval */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_file_read_json: JSON parsed from file \"%s\"", path);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_metadata_file_read_json: JSON parsed from file \"%s\"", path);
 
 	return TRUE;
 }
@@ -183,25 +183,25 @@ static apr_byte_t oidc_metadata_file_read_json(request_rec *r, const char *path,
 /*
  * check to see if JSON provider metadata is valid
  */
-static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
+static apr_byte_t mac_metadata_provider_is_valid(request_rec *r,
 		apr_json_value_t *j_provider, const char *issuer) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_provider_is_valid: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_metadata_provider_is_valid: entering");
 
 	/* get the "issuer" from the provider metadata and double-check that it matches what we looked for */
 	apr_json_value_t *j_issuer = apr_hash_get(j_provider->value.object,
 			"issuer", APR_HASH_KEY_STRING);
 	if ((j_issuer == NULL) || (j_issuer->type != APR_JSON_STRING)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_provider_is_valid: provider JSON object did not contain an \"issuer\" string");
+				"mac_metadata_provider_is_valid: provider JSON object did not contain an \"issuer\" string");
 		return FALSE;
 	}
 
 	/* check that the issuer matches */
-	if (oidc_util_issuer_match(issuer, j_issuer->value.string.p) == FALSE) {
+	if (mac_util_issuer_match(issuer, j_issuer->value.string.p) == FALSE) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_provider_is_valid: requested issuer (%s) does not match the \"issuer\" value in the provider metadata file: %s",
+				"mac_metadata_provider_is_valid: requested issuer (%s) does not match the \"issuer\" value in the provider metadata file: %s",
 				issuer, j_issuer->value.string.p);
 		return FALSE;
 	}
@@ -212,21 +212,21 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 			APR_HASH_KEY_STRING);
 	if ((j_response_types_supported != NULL)
 			&& (j_response_types_supported->type == APR_JSON_ARRAY)) {
-		if ((oidc_util_json_array_has_value(r, j_response_types_supported,
+		if ((mac_util_json_array_has_value(r, j_response_types_supported,
 				"code") == FALSE)
-				&& (oidc_util_json_array_has_value(r,
+				&& (mac_util_json_array_has_value(r,
 						j_response_types_supported, "id_token") == FALSE)
-						&& (oidc_util_json_array_has_value(r,
+						&& (mac_util_json_array_has_value(r,
 								j_response_types_supported, "token id_token") == FALSE)
-								&& (oidc_util_json_array_has_value(r,
+								&& (mac_util_json_array_has_value(r,
 										j_response_types_supported, "id_token token") == FALSE)) {
 			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-					"oidc_metadata_provider_is_valid: could not find a supported value [\"code\" | \"id_token\" | \"token id_token\" | \"id_token token\"] in provider metadata for entry \"response_types_supported\"; assuming that \"code\" flow is supported...");
+					"mac_metadata_provider_is_valid: could not find a supported value [\"code\" | \"id_token\" | \"token id_token\" | \"id_token token\"] in provider metadata for entry \"response_types_supported\"; assuming that \"code\" flow is supported...");
 			//return FALSE;
 		}
 	} else {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"response_types_supported\" array; assuming that \"code\" flow is supported...");
+				"mac_metadata_provider_is_valid: provider JSON object did not contain a \"response_types_supported\" array; assuming that \"code\" flow is supported...");
 		// TODO: hey, this is required-by-spec stuff right?
 	}
 
@@ -237,7 +237,7 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 	if ((j_authorization_endpoint == NULL)
 			|| (j_authorization_endpoint->type != APR_JSON_STRING)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_provider_is_valid: provider JSON object did not contain an \"authorization_endpoint\" string");
+				"mac_metadata_provider_is_valid: provider JSON object did not contain an \"authorization_endpoint\" string");
 		return FALSE;
 	}
 
@@ -247,7 +247,7 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 	if ((j_token_endpoint == NULL)
 			|| (j_token_endpoint->type != APR_JSON_STRING)) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"token_endpoint\" string");
+				"mac_metadata_provider_is_valid: provider JSON object did not contain a \"token_endpoint\" string");
 		//return FALSE;
 	}
 
@@ -256,8 +256,8 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 			j_provider->value.object, "userinfo_endpoint", APR_HASH_KEY_STRING);
 	if ((j_userinfo_endpoint != NULL)
 			&& (j_userinfo_endpoint->type != APR_JSON_STRING)) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_metadata_provider_is_valid: provider JSON object contains a \"userinfo_endpoint\" entry, but it is not a string value");
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_metadata_provider_is_valid: provider JSON object contains a \"userinfo_endpoint\" entry, but it is not a string value");
 	}
 	// TODO: check for valid URL
 
@@ -266,7 +266,7 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 			"jwks_uri", APR_HASH_KEY_STRING);
 	if ((j_jwks_uri == NULL) || (j_jwks_uri->type != APR_JSON_STRING)) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"jwks_uri\" string");
+				"mac_metadata_provider_is_valid: provider JSON object did not contain a \"jwks_uri\" string");
 		//return FALSE;
 	}
 
@@ -276,8 +276,8 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 			APR_HASH_KEY_STRING);
 	if ((j_token_endpoint_auth_methods_supported == NULL)
 			|| (j_token_endpoint_auth_methods_supported->type != APR_JSON_ARRAY)) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_metadata_provider_is_valid: provider JSON object did not contain a \"token_endpoint_auth_methods_supported\" array, assuming \"client_secret_basic\" is supported");
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_metadata_provider_is_valid: provider JSON object did not contain a \"token_endpoint_auth_methods_supported\" array, assuming \"client_secret_basic\" is supported");
 	} else {
 		int i;
 		for (i = 0;
@@ -288,7 +288,7 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 					apr_json_value_t *);
 			if (elem->type != APR_JSON_STRING) {
 				ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-						"oidc_metadata_provider_is_valid: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"",
+						"mac_metadata_provider_is_valid: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"",
 						elem->type);
 				continue;
 			}
@@ -301,7 +301,7 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 		}
 		if (i == j_token_endpoint_auth_methods_supported->value.array->nelts) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_metadata_provider_is_valid: could not find a supported value [client_secret_post|client_secret_basic] in provider metadata for entry \"token_endpoint_auth_methods_supported\"");
+					"mac_metadata_provider_is_valid: could not find a supported value [client_secret_post|client_secret_basic] in provider metadata for entry \"token_endpoint_auth_methods_supported\"");
 			return FALSE;
 		}
 	}
@@ -312,18 +312,18 @@ static apr_byte_t oidc_metadata_provider_is_valid(request_rec *r,
 /*
  * check to see if dynamically registered JSON client metadata has not expired
  */
-static apr_byte_t oidc_metadata_client_is_valid(request_rec *r,
+static apr_byte_t mac_metadata_client_is_valid(request_rec *r,
 		apr_json_value_t *j_client, const char *issuer) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_client_is_valid: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_metadata_client_is_valid: entering");
 
 	/* get a handle to the client_id we need to use for this provider */
 	apr_json_value_t *j_client_id = apr_hash_get(j_client->value.object,
 			"client_id", APR_HASH_KEY_STRING);
 	if ((j_client_id == NULL) || (j_client_id->type != APR_JSON_STRING)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_client_is_valid: client JSON object did not contain a \"client_id\" string");
+				"mac_metadata_client_is_valid: client JSON object did not contain a \"client_id\" string");
 		return FALSE;
 	}
 
@@ -333,7 +333,7 @@ static apr_byte_t oidc_metadata_client_is_valid(request_rec *r,
 	if ((j_client_secret == NULL)
 			|| (j_client_secret->type != APR_JSON_STRING)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_client_is_valid: client JSON object did not contain a \"client_secret\" string");
+				"mac_metadata_client_is_valid: client JSON object did not contain a \"client_secret\" string");
 		return FALSE;
 	}
 
@@ -341,8 +341,8 @@ static apr_byte_t oidc_metadata_client_is_valid(request_rec *r,
 	apr_json_value_t *expires_at = apr_hash_get(j_client->value.object,
 			"client_secret_expires_at", APR_HASH_KEY_STRING);
 	if ((expires_at == NULL) || (expires_at->type != APR_JSON_LONG)) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_metadata_client_is_valid: client metadata for \"%s\" did not contain a \"client_secret_expires_at\" setting",
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_metadata_client_is_valid: client metadata for \"%s\" did not contain a \"client_secret_expires_at\" setting",
 				issuer);
 		/* assume that it never expires */
 		return TRUE;
@@ -350,8 +350,8 @@ static apr_byte_t oidc_metadata_client_is_valid(request_rec *r,
 
 	/* see if it is unrestricted */
 	if (expires_at->value.lnumber == 0) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_metadata_client_is_valid: client metadata for \"%s\" never expires (client_secret_expires_at=0)",
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_metadata_client_is_valid: client metadata for \"%s\" never expires (client_secret_expires_at=0)",
 				issuer);
 		return TRUE;
 	}
@@ -359,13 +359,13 @@ static apr_byte_t oidc_metadata_client_is_valid(request_rec *r,
 	/* check if the value >= now */
 	if (apr_time_sec(apr_time_now()) > expires_at->value.lnumber) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_metadata_client_is_valid: client secret for \"%s\" expired",
+				"mac_metadata_client_is_valid: client secret for \"%s\" expired",
 				issuer);
 		return FALSE;
 	}
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_client_is_valid: client secret for \"%s\" has not expired, return OK",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_metadata_client_is_valid: client secret for \"%s\" has not expired, return OK",
 			issuer);
 
 	/* all ok, not expired */
@@ -375,17 +375,17 @@ static apr_byte_t oidc_metadata_client_is_valid(request_rec *r,
 /*
  * checks if a parsed JWKs file is a valid one, cq. contains "keys"
  */
-static apr_byte_t oidc_metadata_jwks_is_valid(request_rec *r,
+static apr_byte_t mac_metadata_jwks_is_valid(request_rec *r,
 		apr_json_value_t *j_jwks, const char *issuer) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_jwks_is_valid: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_metadata_jwks_is_valid: entering");
 
 	apr_json_value_t *keys = apr_hash_get(j_jwks->value.object, "keys",
 	APR_HASH_KEY_STRING);
 	if ((keys == NULL) || (keys->type != APR_JSON_ARRAY)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_jwks_is_valid: JWKS JSON object did not contain a \"keys\" array");
+				"mac_metadata_jwks_is_valid: JWKS JSON object did not contain a \"keys\" array");
 		return FALSE;
 	}
 	return TRUE;
@@ -394,7 +394,7 @@ static apr_byte_t oidc_metadata_jwks_is_valid(request_rec *r,
 /*
  * write JSON metadata to a file
  */
-static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
+static apr_byte_t mac_metadata_file_write(request_rec *r, const char *path,
 		const char *data) {
 
 	// TODO: completely erase the contents of the file if it already exists....
@@ -408,7 +408,7 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
 	if ((rc = apr_file_open(&fd, path, (APR_FOPEN_WRITE | APR_FOPEN_CREATE),
 	APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_file_write: file \"%s\" could not be opened (%s)",
+				"mac_metadata_file_write: file \"%s\" could not be opened (%s)",
 				path, apr_strerror(rc, s_err, sizeof(s_err)));
 		return FALSE;
 	}
@@ -427,7 +427,7 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
 	/* check for a system error */
 	if (rc != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_file_write: could not write to: \"%s\" (%s)",
+				"mac_metadata_file_write: could not write to: \"%s\" (%s)",
 				path, apr_strerror(rc, s_err, sizeof(s_err)));
 		return FALSE;
 	}
@@ -435,7 +435,7 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
 	/* check that all bytes from the header were written */
 	if (bytes_written != len) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_file_write: could not write enough bytes to: \"%s\", bytes_written (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")",
+				"mac_metadata_file_write: could not write enough bytes to: \"%s\", bytes_written (%" APR_SIZE_T_FMT ") != len (%" APR_SIZE_T_FMT ")",
 				path, bytes_written, len);
 		return FALSE;
 	}
@@ -444,22 +444,22 @@ static apr_byte_t oidc_metadata_file_write(request_rec *r, const char *path,
 	apr_file_unlock(fd);
 	apr_file_close(fd);
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_file_write: file \"%s\" written; number of bytes (%" APR_SIZE_T_FMT ")",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_metadata_file_write: file \"%s\" written; number of bytes (%" APR_SIZE_T_FMT ")",
 			path, len);
 
 	return TRUE;
 }
 
 /* callback function type for checking metadata validity (provider or client) */
-typedef apr_byte_t (*oidc_is_valid_function_t)(request_rec *,
+typedef apr_byte_t (*mac_is_valid_function_t)(request_rec *,
 		apr_json_value_t *, const char *);
 
 /*
  * helper function to get the JSON (client or provider) metadata from the specified file path and check its validity
  */
-static apr_byte_t oidc_metadata_get_and_check(request_rec *r, const char *path,
-		const char *issuer, oidc_is_valid_function_t metadata_is_valid,
+static apr_byte_t mac_metadata_get_and_check(request_rec *r, const char *path,
+		const char *issuer, mac_is_valid_function_t metadata_is_valid,
 		apr_json_value_t **j_metadata) {
 
 	apr_finfo_t fi;
@@ -467,7 +467,7 @@ static apr_byte_t oidc_metadata_get_and_check(request_rec *r, const char *path,
 	char s_err[128];
 
 	/* read the metadata from a file in to a variable */
-	if (oidc_metadata_file_read_json(r, path, j_metadata) == FALSE)
+	if (mac_metadata_file_read_json(r, path, j_metadata) == FALSE)
 		goto error_delete;
 
 	/* we've got metadata that is JSON and no error-JSON, but now we check provider/client validity */
@@ -487,11 +487,11 @@ error_delete:
 
 		if ((rc = apr_file_remove(path, r->pool)) != APR_SUCCESS) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_metadata_get_and_check: could not delete invalid metadata file %s (%s)",
+					"mac_metadata_get_and_check: could not delete invalid metadata file %s (%s)",
 					path, apr_strerror(rc, s_err, sizeof(s_err)));
 		} else {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_metadata_get_and_check: removed invalid metadata file %s",
+					"mac_metadata_get_and_check: removed invalid metadata file %s",
 					path);
 		}
 	}
@@ -502,20 +502,20 @@ error_delete:
 /*
  * helper function to retrieve (client or provider) metadata from a URL, check it and store it
  */
-static apr_byte_t oidc_metadata_retrieve_and_store(request_rec *r,
-		oidc_cfg *cfg, const char *url, int action, apr_table_t *params,
+static apr_byte_t mac_metadata_retrieve_and_store(request_rec *r,
+		mac_cfg *cfg, const char *url, int action, apr_table_t *params,
 		int ssl_validate_server, const char *issuer,
-		oidc_is_valid_function_t f_is_valid, const char *path,
+		mac_is_valid_function_t f_is_valid, const char *path,
 		apr_json_value_t **j_metadata) {
 	const char *response = NULL;
 
 	/* no valid provider metadata, get it at the specified URL with the specified parameters */
-	if (oidc_util_http_call(r, url, action, params, NULL, NULL,
+	if (mac_util_http_call(r, url, action, params, NULL, NULL,
 			ssl_validate_server, &response, cfg->http_timeout_short) == FALSE)
 		return FALSE;
 
 	/* decode and see if it is not an error response somehow */
-	if (oidc_util_decode_json_and_check_error(r, response, j_metadata) == FALSE)
+	if (mac_util_decode_json_and_check_error(r, response, j_metadata) == FALSE)
 		return FALSE;
 
 	/* check to see if it is valid metadata */
@@ -523,7 +523,7 @@ static apr_byte_t oidc_metadata_retrieve_and_store(request_rec *r,
 		return FALSE;
 
 	/* since it is valid, write the obtained provider metadata file */
-	if (oidc_metadata_file_write(r, path, response) == FALSE)
+	if (mac_metadata_file_write(r, path, response) == FALSE)
 		return FALSE;
 
 	/* all OK */
@@ -533,27 +533,27 @@ static apr_byte_t oidc_metadata_retrieve_and_store(request_rec *r,
 /*
  * helper function to get the JWKs for the specified issuer
  */
-static apr_byte_t oidc_metadata_jwks_retrieve_and_store(request_rec *r,
-		oidc_cfg *cfg, oidc_provider_t *provider, apr_json_value_t **j_jwks) {
+static apr_byte_t mac_metadata_jwks_retrieve_and_store(request_rec *r,
+		mac_cfg *cfg, mac_provider_t *provider, apr_json_value_t **j_jwks) {
 
 	const char *response = NULL;
 
 	/* no valid provider metadata, get it at the specified URL with the specified parameters */
-	if (oidc_util_http_call(r, provider->jwks_uri, OIDC_HTTP_GET, NULL, NULL,
+	if (mac_util_http_call(r, provider->jwks_uri, MAC_HTTP_GET, NULL, NULL,
 			NULL, provider->ssl_validate_server, &response,
 			cfg->http_timeout_short) == FALSE)
 		return FALSE;
 
 	/* decode and see if it is not an error response somehow */
-	if (oidc_util_decode_json_and_check_error(r, response, j_jwks) == FALSE)
+	if (mac_util_decode_json_and_check_error(r, response, j_jwks) == FALSE)
 		return FALSE;
 
 	/* check to see if it is valid metadata */
-	if (oidc_metadata_jwks_is_valid(r, *j_jwks, provider->issuer) == FALSE)
+	if (mac_metadata_jwks_is_valid(r, *j_jwks, provider->issuer) == FALSE)
 		return FALSE;
 
 	/* store the JWKs in the cache */
-	cfg->cache->set(r, oidc_metadata_jwks_cache_key(r, provider->issuer),
+	cfg->cache->set(r, mac_metadata_jwks_cache_key(r, provider->issuer),
 			response,
 			apr_time_now() + apr_time_from_sec(provider->jwks_refresh_interval));
 
@@ -563,20 +563,20 @@ static apr_byte_t oidc_metadata_jwks_retrieve_and_store(request_rec *r,
 /*
  * return JWKs for the specified issuer
  */
-apr_byte_t oidc_metadata_jwks_get(request_rec *r, oidc_cfg *cfg,
-		oidc_provider_t *provider, apr_json_value_t **j_jwks,
+apr_byte_t mac_metadata_jwks_get(request_rec *r, mac_cfg *cfg,
+		mac_provider_t *provider, apr_json_value_t **j_jwks,
 		apr_byte_t *refresh) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_jwks_get: entering (issuer=%s, refresh=%d)",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_metadata_jwks_get: entering (issuer=%s, refresh=%d)",
 			provider->issuer, *refresh);
 
 	/* see if we need to do a forced refresh */
 	if (*refresh == TRUE) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_metadata_jwks_get: doing a forced refresh of the JWKs for issuer \"%s\"",
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_metadata_jwks_get: doing a forced refresh of the JWKs for issuer \"%s\"",
 				provider->issuer);
-		if (oidc_metadata_jwks_retrieve_and_store(r, cfg, provider,
+		if (mac_metadata_jwks_retrieve_and_store(r, cfg, provider,
 				j_jwks) == TRUE)
 			return TRUE;
 		// else: fallback on any cached JWKs
@@ -584,17 +584,17 @@ apr_byte_t oidc_metadata_jwks_get(request_rec *r, oidc_cfg *cfg,
 
 	/* see if the JWKs is cached */
 	const char *value = NULL;
-	cfg->cache->get(r, oidc_metadata_jwks_cache_key(r, provider->issuer),
+	cfg->cache->get(r, mac_metadata_jwks_cache_key(r, provider->issuer),
 			&value);
 
 	if (value == NULL) {
 		/* it is non-existing or expired: do a forced refresh */
 		*refresh = TRUE;
-		return oidc_metadata_jwks_retrieve_and_store(r, cfg, provider, j_jwks);
+		return mac_metadata_jwks_retrieve_and_store(r, cfg, provider, j_jwks);
 	}
 
 	/* decode and see if it is not an error response somehow */
-	if (oidc_util_decode_json_and_check_error(r, value, j_jwks) == FALSE)
+	if (mac_util_decode_json_and_check_error(r, value, j_jwks) == FALSE)
 		return FALSE;
 
 	return TRUE;
@@ -604,15 +604,15 @@ apr_byte_t oidc_metadata_jwks_get(request_rec *r, oidc_cfg *cfg,
  * see if we have provider metadata and check its validity
  * if not, use OpenID Connect Provider Issuer Discovery to get it, check it and store it
  */
-static apr_byte_t oidc_metadata_provider_get(request_rec *r, oidc_cfg *cfg,
+static apr_byte_t mac_metadata_provider_get(request_rec *r, mac_cfg *cfg,
 		const char *issuer, apr_json_value_t **j_provider) {
 
 	/* get the full file path to the provider metadata for this issuer */
-	const char *provider_path = oidc_metadata_provider_file_path(r, issuer);
+	const char *provider_path = mac_metadata_provider_file_path(r, issuer);
 
 	/* see if we have valid metadata already, if so, return it */
-	if (oidc_metadata_get_and_check(r, provider_path, issuer,
-			oidc_metadata_provider_is_valid, j_provider) == TRUE)
+	if (mac_metadata_get_and_check(r, provider_path, issuer,
+			mac_metadata_provider_is_valid, j_provider) == TRUE)
 		return TRUE;
 
 	// TODO: how to do validity/expiry checks on provider metadata
@@ -626,31 +626,31 @@ static apr_byte_t oidc_metadata_provider_get(request_rec *r, oidc_cfg *cfg,
 			url[strlen(url) - 1] != '/' ? "/" : "");
 
 	/* try and get it from there, checking it and storing it if successful */
-	return oidc_metadata_retrieve_and_store(r, cfg, url, OIDC_HTTP_GET, NULL,
+	return mac_metadata_retrieve_and_store(r, cfg, url, MAC_HTTP_GET, NULL,
 			cfg->provider.ssl_validate_server, issuer,
-			oidc_metadata_provider_is_valid, provider_path, j_provider);
+			mac_metadata_provider_is_valid, provider_path, j_provider);
 }
 
 /*
  * see if we have client metadata and check its validity
  * if not, use OpenID Connect Client Registration to get it, check it and store it
  */
-static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
+static apr_byte_t mac_metadata_client_get(request_rec *r, mac_cfg *cfg,
 		const char *issuer, const char *registration_url,
 		apr_json_value_t **j_client) {
 
 	/* get the full file path to the provider metadata for this issuer */
-	const char *client_path = oidc_metadata_client_file_path(r, issuer);
+	const char *client_path = mac_metadata_client_file_path(r, issuer);
 
 	/* see if we already have valid client metadata, if so, return TRUE */
-	if (oidc_metadata_get_and_check(r, client_path, issuer,
-			oidc_metadata_client_is_valid, j_client) == TRUE)
+	if (mac_metadata_get_and_check(r, client_path, issuer,
+			mac_metadata_client_is_valid, j_client) == TRUE)
 		return TRUE;
 
 	/* at this point we have no valid client metadata, see if there's a registration endpoint for this provider */
 	if (registration_url == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_client_get: no (valid) client metadata exists and provider JSON object did not contain a (valid) \"registration_endpoint\" string");
+				"mac_metadata_client_get: no (valid) client metadata exists and provider JSON object did not contain a (valid) \"registration_endpoint\" string");
 		return FALSE;
 	}
 
@@ -663,7 +663,7 @@ static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
 				cfg->id_token_alg);
 	}
 
-	int action = OIDC_HTTP_POST_JSON;
+	int action = MAC_HTTP_POST_JSON;
 
 	/* hack away for pre-standard PingFederate client registration... */
 	if (strstr(registration_url, "idp/client-registration.openid") != NULL) {
@@ -675,7 +675,7 @@ static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
 			apr_table_addn(params, "contacts", cfg->provider.client_contact);
 		}
 
-		action = OIDC_HTTP_POST_FORM;
+		action = MAC_HTTP_POST_FORM;
 
 	} else {
 
@@ -690,9 +690,9 @@ static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
 	}
 
 	/* try and get it from there, checking it and storing it if successful */
-	return oidc_metadata_retrieve_and_store(r, cfg, registration_url, action,
+	return mac_metadata_retrieve_and_store(r, cfg, registration_url, action,
 			params, cfg->provider.ssl_validate_server, issuer,
-			oidc_metadata_client_is_valid, client_path, j_client);
+			mac_metadata_client_is_valid, client_path, j_client);
 }
 
 /*
@@ -704,17 +704,17 @@ static apr_byte_t oidc_metadata_client_get(request_rec *r, oidc_cfg *cfg,
  *       at least it is not overkill for blacklisting providers that registration fails for
  *       but maybe we should just delete the provider data for those?
  */
-static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r,
-		oidc_cfg *cfg, const char *issuer, apr_json_value_t **j_provider,
+static apr_byte_t mac_metadata_get_provider_and_client(request_rec *r,
+		mac_cfg *cfg, const char *issuer, apr_json_value_t **j_provider,
 		apr_json_value_t **j_client) {
 
 	const char *registration_url = NULL;
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_metadata_get_provider_and_client: entering; issuer=\"%s\"",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_metadata_get_provider_and_client: entering; issuer=\"%s\"",
 			issuer);
 
 	/* see if we can get valid provider metadata (possibly bootstrapping with Discovery), if not, return FALSE */
-	if (oidc_metadata_provider_get(r, cfg, issuer, j_provider) == FALSE)
+	if (mac_metadata_provider_get(r, cfg, issuer, j_provider) == FALSE)
 		return FALSE;
 
 	/* get a reference to the registration endpoint, if it exists */
@@ -726,7 +726,7 @@ static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r,
 		registration_url = j_registration_endpoint->value.string.p;
 	}
 
-	if (oidc_metadata_client_get(r, cfg, issuer, registration_url,
+	if (mac_metadata_client_get(r, cfg, issuer, registration_url,
 			j_client) == FALSE)
 		return FALSE;
 
@@ -735,21 +735,21 @@ static apr_byte_t oidc_metadata_get_provider_and_client(request_rec *r,
 }
 
 /*
- * get a list of configured OIDC providers based on the entries in the provider metadata directory
+ * get a list of configured MAC providers based on the entries in the provider metadata directory
  */
-apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg,
+apr_byte_t mac_metadata_list(request_rec *r, mac_cfg *cfg,
 		apr_array_header_t **list) {
 	apr_status_t rc;
 	apr_dir_t *dir;
 	apr_finfo_t fi;
 	char s_err[128];
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_metadata_list: entering");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r, "mac_metadata_list: entering");
 
 	/* open the metadata directory */
 	if ((rc = apr_dir_open(&dir, cfg->metadata_dir, r->pool)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_metadata_list: error opening metadata directory '%s' (%s)",
+				"mac_metadata_list: error opening metadata directory '%s' (%s)",
 				cfg->metadata_dir, apr_strerror(rc, s_err, sizeof(s_err)));
 		return FALSE;
 	}
@@ -767,11 +767,11 @@ apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg,
 		/* skip other non-provider entries */
 		char *ext = strrchr(fi.name, '.');
 		if ((ext == NULL)
-				|| (strcmp(++ext, OIDC_METADATA_SUFFIX_PROVIDER) != 0))
+				|| (strcmp(++ext, MAC_METADATA_SUFFIX_PROVIDER) != 0))
 			continue;
 
 		/* get the issuer from the filename */
-		const char *issuer = oidc_metadata_filename_to_issuer(r, fi.name);
+		const char *issuer = mac_metadata_filename_to_issuer(r, fi.name);
 
 		/* pointer to the parsed JSON metadata for the provider */
 		apr_json_value_t *j_provider = NULL;
@@ -779,7 +779,7 @@ apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg,
 		apr_json_value_t *j_client = NULL;
 
 		/* get the provider and client metadata, do all checks and registration if possible */
-		if (oidc_metadata_get_provider_and_client(r, cfg, issuer, &j_provider,
+		if (mac_metadata_get_provider_and_client(r, cfg, issuer, &j_provider,
 				&j_client) == FALSE)
 			continue;
 
@@ -796,7 +796,7 @@ apr_byte_t oidc_metadata_list(request_rec *r, oidc_cfg *cfg,
 /*
  * find out what type of authentication we must provide to the token endpoint (we only support post or basic)
  */
-static const char * oidc_metadata_token_endpoint_auth(request_rec *r,
+static const char * mac_metadata_token_endpoint_auth(request_rec *r,
 		apr_json_value_t *j_client, apr_json_value_t *j_provider) {
 
 	const char *result = "client_secret_basic";
@@ -818,11 +818,11 @@ static const char * oidc_metadata_token_endpoint_auth(request_rec *r,
 				return result;
 			}
 			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-					"oidc_metadata_token_endpoint_auth: unsupported client auth method \"%s\" in client metadata for entry \"token_endpoint_auth_method\"",
+					"mac_metadata_token_endpoint_auth: unsupported client auth method \"%s\" in client metadata for entry \"token_endpoint_auth_method\"",
 					token_endpoint_auth_method->value.string.p);
 		} else {
 			ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-					"oidc_metadata_token_endpoint_auth: unexpected JSON object type [%d] (!= APR_JSON_STRING) in client metadata for entry \"token_endpoint_auth_method\"",
+					"mac_metadata_token_endpoint_auth: unexpected JSON object type [%d] (!= APR_JSON_STRING) in client metadata for entry \"token_endpoint_auth_method\"",
 					token_endpoint_auth_method->type);
 		}
 	}
@@ -843,7 +843,7 @@ static const char * oidc_metadata_token_endpoint_auth(request_rec *r,
 					apr_json_value_t *);
 			if (elem->type != APR_JSON_STRING) {
 				ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-						"oidc_metadata_token_endpoint_auth: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"",
+						"mac_metadata_token_endpoint_auth: unhandled in-array JSON object type [%d] in provider metadata for entry \"token_endpoint_auth_methods_supported\"",
 						elem->type);
 				continue;
 			}
@@ -864,11 +864,11 @@ static const char * oidc_metadata_token_endpoint_auth(request_rec *r,
 /*
  * get the metadata for a specified issuer
  *
- * this fill the oidc_op_meta_t struct based on the issuer filename by reading and merging
+ * this fill the mac_op_meta_t struct based on the issuer filename by reading and merging
  * contents from both provider metadata directory and client metadata directory
  */
-apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
-		oidc_provider_t **result) {
+apr_byte_t mac_metadata_get(request_rec *r, mac_cfg *cfg, const char *issuer,
+		mac_provider_t **result) {
 
 	/* pointer to the parsed JSON metadata for the provider */
 	apr_json_value_t *j_provider = NULL;
@@ -876,14 +876,14 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 	apr_json_value_t *j_client = NULL;
 
 	/* get the provider and client metadata */
-	if (oidc_metadata_get_provider_and_client(r, cfg, issuer, &j_provider,
+	if (mac_metadata_get_provider_and_client(r, cfg, issuer, &j_provider,
 			&j_client) == FALSE)
 		return FALSE;
 
 	/* allocate space for a parsed-and-merged metadata struct */
-	*result = apr_pcalloc(r->pool, sizeof(oidc_provider_t));
+	*result = apr_pcalloc(r->pool, sizeof(mac_provider_t));
 	/* provide easy pointer */
-	oidc_provider_t *provider = *result;
+	mac_provider_t *provider = *result;
 
 	// PROVIDER
 
@@ -931,7 +931,7 @@ apr_byte_t oidc_metadata_get(request_rec *r, oidc_cfg *cfg, const char *issuer,
 		provider->token_endpoint_url = apr_pstrdup(r->pool,
 				j_token_endpoint->value.string.p);
 	provider->token_endpoint_auth = apr_pstrdup(r->pool,
-			oidc_metadata_token_endpoint_auth(r, j_client, j_provider));
+			mac_metadata_token_endpoint_auth(r, j_client, j_provider));
 	if (j_userinfo_endpoint != NULL)
 		provider->userinfo_endpoint_url = apr_pstrdup(r->pool,
 				j_userinfo_endpoint->value.string.p);

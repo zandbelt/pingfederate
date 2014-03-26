@@ -1,17 +1,16 @@
-Source: libapache2-mod-oidc
+Source: libapache2-mod-auth-connect
 Priority: extra
 Maintainer: Hans Zandbelt <hans.zandbelt@gmail.com>
 Build-Depends: debhelper (>= 8.0.0), autotools-dev, dh-apache2, apache2-dev, libcurl3-dev
 Standards-Version: 3.9.4
 Section: web
-Homepage: https://code.google.com/p/pingfederate/source/browse/trunk/mod_oidc/README
-#Vcs-Git: git://git.debian.org/collab-maint/libapache2-mod-oidc.git
-#Vcs-Browser: http://git.debian.org/?p=collab-maint/libapache2-mod-oidc.git;a=summary
+Homepage: https://github.com/pingidentity/mod_auth_connect
+#Vcs-Git: https://github.com/pingidentity/mod_auth_connect.git
 
-Package: libapache2-mod-oidc
+Package: libapache2-mod-auth-connect
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: OpenID Connect authentication module for Apache
- mod-oidc is an Apache module which enables you to authenticate
- users of a web site against an OpenID Connect enabled OP. It can grant
+ mod_auth_connect is an Apache module that enables you to authenticate
+ users of a web site against an OpenID Connect Identity Provider. It can grant
  access to paths and provide attributes to other modules and applications.

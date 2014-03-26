@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>mod_oidc</name>
+	<name>mod_auth_connect</name>
 	<comment></comment>
 	<projects>
 	</projects>

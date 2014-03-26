@@ -46,7 +46,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
 #include <apr_strings.h>
@@ -61,20 +61,20 @@
 
 #include <curl/curl.h>
 
-#include "mod_oidc.h"
+#include "mod_auth_connect.h"
 
 /* hrm, should we get rid of this by adding parameters to the (3) functions? */
-extern module AP_MODULE_DECLARE_DATA oidc_module;
+extern module AP_MODULE_DECLARE_DATA auth_connect_module;
 
 /*
  * base64url encode a string
  */
-int oidc_base64url_encode(request_rec *r, char **dst, const char *src,
+int mac_base64url_encode(request_rec *r, char **dst, const char *src,
 		int src_len) {
 	// TODO: always padded now, do we need an option to remove the padding?
 	if ((src == NULL) || (src_len <= 0)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_base64url_encode: not encoding anything; src=NULL and/or src_len<1");
+				"mac_base64url_encode: not encoding anything; src=NULL and/or src_len<1");
 		return -1;
 	}
 	int enc_len = apr_base64_encode_len(src_len);
@@ -97,12 +97,12 @@ int oidc_base64url_encode(request_rec *r, char **dst, const char *src,
 /*
  * base64url decode a string
  */
-int oidc_base64url_decode(request_rec *r, char **dst, const char *src,
+int mac_base64url_decode(request_rec *r, char **dst, const char *src,
 		int padding) {
 	// TODO: check base64url decoding/encoding code and look for alternatives?
 	if (src == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_base64url_decode: not decoding anything; src=NULL");
+				"mac_base64url_decode: not decoding anything; src=NULL");
 		return -1;
 	}
 	char *dec = apr_pstrdup(r->pool, src);
@@ -138,38 +138,38 @@ int oidc_base64url_decode(request_rec *r, char **dst, const char *src,
 /*
  * encrypt and base64url encode a string
  */
-int oidc_encrypt_base64url_encode_string(request_rec *r, char **dst,
+int mac_encrypt_base64url_encode_string(request_rec *r, char **dst,
 		const char *src) {
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+	mac_cfg *c = ap_get_module_config(r->server->module_config, &auth_connect_module);
 	int crypted_len = strlen(src) + 1;
-	unsigned char *crypted = oidc_crypto_aes_encrypt(r, c,
+	unsigned char *crypted = mac_crypto_aes_encrypt(r, c,
 			(unsigned char *) src, &crypted_len);
 	if (crypted == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_encrypt_base64url_encode_string: oidc_crypto_aes_encrypt failed");
+				"mac_encrypt_base64url_encode_string: mac_crypto_aes_encrypt failed");
 		return -1;
 	}
-	return oidc_base64url_encode(r, dst, (const char *) crypted, crypted_len);
+	return mac_base64url_encode(r, dst, (const char *) crypted, crypted_len);
 }
 
 /*
  * decrypt and base64url decode a string
  */
-int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst,
+int mac_base64url_decode_decrypt_string(request_rec *r, char **dst,
 		const char *src) {
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+	mac_cfg *c = ap_get_module_config(r->server->module_config, &auth_connect_module);
 	char *decbuf = NULL;
-	int dec_len = oidc_base64url_decode(r, &decbuf, src, 0);
+	int dec_len = mac_base64url_decode(r, &decbuf, src, 0);
 	if (dec_len <= 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_base64url_decode_decrypt_string: oidc_base64url_decode failed");
+				"mac_base64url_decode_decrypt_string: mac_base64url_decode failed");
 		return -1;
 	}
-	*dst = (char *) oidc_crypto_aes_decrypt(r, c, (unsigned char *) decbuf,
+	*dst = (char *) mac_crypto_aes_decrypt(r, c, (unsigned char *) decbuf,
 			&dec_len);
 	if (*dst == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_base64url_decode_decrypt_string: oidc_crypto_aes_decrypt failed");
+				"mac_base64url_decode_decrypt_string: mac_crypto_aes_decrypt failed");
 		return -1;
 	}
 	return dec_len;
@@ -178,19 +178,19 @@ int oidc_base64url_decode_decrypt_string(request_rec *r, char **dst,
 /*
  * convert a character to an ENVIRONMENT-variable-safe variant
  */
-int oidc_char_to_env(int c) {
+int mac_char_to_env(int c) {
 	return apr_isalnum(c) ? apr_toupper(c) : '_';
 }
 
 /*
  * compare two strings based on how they would be converted to an
- * environment variable, as per oidc_char_to_env. If len is specified
+ * environment variable, as per mac_char_to_env. If len is specified
  * as less than zero, then the full strings will be compared. Returns
  * less than, equal to, or greater than zero based on whether the
  * first argument's conversion to an environment variable is less
  * than, equal to, or greater than the second.
  */
-int oidc_strnenvcmp(const char *a, const char *b, int len) {
+int mac_strnenvcmp(const char *a, const char *b, int len) {
 	int d, i = 0;
 	while (1) {
 		/* If len < 0 then we don't stop based on length */
@@ -211,7 +211,7 @@ int oidc_strnenvcmp(const char *a, const char *b, int len) {
 
 		/* Normalize the characters as for conversion to an
 		 * environment variable. */
-		d = oidc_char_to_env(*a) - oidc_char_to_env(*b);
+		d = mac_char_to_env(*a) - mac_char_to_env(*b);
 		if (d)
 			return d;
 
@@ -225,17 +225,17 @@ int oidc_strnenvcmp(const char *a, const char *b, int len) {
 /*
  * escape a string
  */
-char *oidc_util_escape_string(const request_rec *r, const char *str) {
+char *mac_util_escape_string(const request_rec *r, const char *str) {
 	CURL *curl = curl_easy_init();
 	if (curl == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_escape_string: curl_easy_init() error");
+				"mac_escape_string: curl_easy_init() error");
 		return NULL;
 	}
 	char *result = curl_easy_escape(curl, str, 0);
 	if (result == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_escape_string: curl_easy_escape() error");
+				"mac_escape_string: curl_easy_escape() error");
 		return NULL;
 	}
 	char *rv = apr_pstrdup(r->pool, result);
@@ -247,23 +247,23 @@ char *oidc_util_escape_string(const request_rec *r, const char *str) {
 /*
  * escape a string
  */
-char *oidc_util_unescape_string(const request_rec *r, const char *str) {
+char *mac_util_unescape_string(const request_rec *r, const char *str) {
 	CURL *curl = curl_easy_init();
 	if (curl == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_util_unescape_string: curl_easy_init() error");
+				"mac_util_unescape_string: curl_easy_init() error");
 		return NULL;
 	}
 	char *result = curl_easy_unescape(curl, str, 0, 0);
 	if (result == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_util_unescape_string: curl_easy_unescape() error");
+				"mac_util_unescape_string: curl_easy_unescape() error");
 		return NULL;
 	}
 	char *rv = apr_pstrdup(r->pool, result);
 	curl_free(result);
 	curl_easy_cleanup(curl);
-	//ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_util_unescape_string: input=\"%s\", output=\"%s\"", str, rv);
+	//ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r, "mac_util_unescape_string: input=\"%s\", output=\"%s\"", str, rv);
 	return rv;
 }
 
@@ -271,7 +271,7 @@ char *oidc_util_unescape_string(const request_rec *r, const char *str) {
  * get the URL that is currently being accessed
  * TODO: seems hard enough, maybe look for other existing code...?
  */
-char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c) {
+char *mac_get_current_url(const request_rec *r, const mac_cfg *c) {
 	const apr_port_t port = r->connection->local_addr->port;
 	char *scheme, *port_str = "", *url;
 	apr_byte_t print_port = TRUE;
@@ -289,27 +289,27 @@ char *oidc_get_current_url(const request_rec *r, const oidc_cfg *c) {
 	url = apr_pstrcat(r->pool, scheme, "://",
 			apr_table_get(r->headers_in, "Host"), port_str, r->uri,
 			(r->args != NULL && *r->args != '\0' ? "?" : ""), r->args, NULL);
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_get_current_url: current URL '%s'", url);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_get_current_url: current URL '%s'", url);
 	return url;
 }
 
 /* maximum size of any response returned in HTTP calls */
-#define OIDC_CURL_MAX_RESPONSE_SIZE 65536
+#define MAC_CURL_MAX_RESPONSE_SIZE 65536
 
 /* buffer to hold HTTP call responses */
-typedef struct oidc_curl_buffer {
-	char buf[OIDC_CURL_MAX_RESPONSE_SIZE];
+typedef struct mac_curl_buffer {
+	char buf[MAC_CURL_MAX_RESPONSE_SIZE];
 	size_t written;
-} oidc_curl_buffer;
+} mac_curl_buffer;
 
 /*
  * callback for CURL to write bytes that come back from an HTTP call
  */
-size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream) {
-	oidc_curl_buffer *curlBuffer = (oidc_curl_buffer *) stream;
+size_t mac_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream) {
+	mac_curl_buffer *curlBuffer = (mac_curl_buffer *) stream;
 
-	if ((nmemb * size) + curlBuffer->written >= OIDC_CURL_MAX_RESPONSE_SIZE)
+	if ((nmemb * size) + curlBuffer->written >= MAC_CURL_MAX_RESPONSE_SIZE)
 		return 0;
 
 	memcpy((curlBuffer->buf + curlBuffer->written), ptr, (nmemb*size));
@@ -319,37 +319,37 @@ size_t oidc_curl_write(const void *ptr, size_t size, size_t nmemb, void *stream)
 }
 
 /* context structure for encoding parameters */
-typedef struct oidc_http_encode_t {
+typedef struct mac_http_encode_t {
 	request_rec *r;
 	const char *encoded_params;
-} oidc_http_encode_t;
+} mac_http_encode_t;
 
 /*
  * add a url-form-encoded name/value pair
  */
-static int oidc_http_add_form_url_encoded_param(void* rec, const char* key,
+static int mac_http_add_form_url_encoded_param(void* rec, const char* key,
 		const char* value) {
 	// TODO: handle arrays of strings?
-	oidc_http_encode_t *ctx = (oidc_http_encode_t*) rec;
+	mac_http_encode_t *ctx = (mac_http_encode_t*) rec;
 	const char *sep = apr_strnatcmp(ctx->encoded_params, "") == 0 ? "" : "&";
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r,
-			"oidc_http_add_post_param: adding parameter: %s=%s to %s (sep=%s)",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, ctx->r,
+			"mac_http_add_post_param: adding parameter: %s=%s to %s (sep=%s)",
 			key, value, ctx->encoded_params, sep);
 	ctx->encoded_params = apr_psprintf(ctx->r->pool, "%s%s%s=%s",
-			ctx->encoded_params, sep, oidc_util_escape_string(ctx->r, key),
-			oidc_util_escape_string(ctx->r, value));
+			ctx->encoded_params, sep, mac_util_escape_string(ctx->r, key),
+			mac_util_escape_string(ctx->r, value));
 	return 1;
 }
 
 /*
  * add a JSON name/value pair
  */
-static int oidc_http_add_json_param(void* rec, const char* key,
+static int mac_http_add_json_param(void* rec, const char* key,
 		const char* value) {
-	oidc_http_encode_t *ctx = (oidc_http_encode_t*) rec;
+	mac_http_encode_t *ctx = (mac_http_encode_t*) rec;
 	const char *sep = apr_strnatcmp(ctx->encoded_params, "") == 0 ? "" : ",";
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, ctx->r,
-			"oidc_http_add_json_param: adding parameter: %s=%s to %s", key,
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, ctx->r,
+			"mac_http_add_json_param: adding parameter: %s=%s to %s", key,
 			value, ctx->encoded_params);
 	if (value[0] == '[') {
 		// TODO hacky hacky, we need an array so we already encoded it :-)
@@ -365,26 +365,26 @@ static int oidc_http_add_json_param(void* rec, const char* key,
 /*
  * execute a HTTP (GET or POST) request
  */
-apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
+apr_byte_t mac_util_http_call(request_rec *r, const char *url, int action,
 		const apr_table_t *params, const char *basic_auth,
 		const char *bearer_token, int ssl_validate_server,
 		const char **response, int timeout) {
 	char curlError[CURL_ERROR_SIZE];
-	oidc_curl_buffer curlBuffer;
+	mac_curl_buffer curlBuffer;
 	CURL *curl;
 	struct curl_slist *h_list = NULL;
 	int nr_of_params = (params != NULL) ? apr_table_elts(params)->nelts : 0;
 
 	/* do some logging about the inputs */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_util_http_call: entering, url=%s, action=%d, #params=%d, basic_auth=%s, bearer_token=%s, ssl_validate_server=%d",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_util_http_call: entering, url=%s, action=%d, #params=%d, basic_auth=%s, bearer_token=%s, ssl_validate_server=%d",
 			url, action, nr_of_params, basic_auth, bearer_token,
 			ssl_validate_server);
 
 	curl = curl_easy_init();
 	if (curl == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_util_http_call: curl_easy_init() error");
+				"mac_util_http_call: curl_easy_init() error");
 		return FALSE;
 	}
 
@@ -403,7 +403,7 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 	curlBuffer.written = 0;
 	memset(curlBuffer.buf, '\0', sizeof(curlBuffer.buf));
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &curlBuffer);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, oidc_curl_write);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, mac_curl_write);
 
 #ifndef LIBCURL_NO_CURLPROTO
 	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS,
@@ -418,7 +418,7 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 			(ssl_validate_server != FALSE ? 2L : 0L));
 
 	/* identify this HTTP client */
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod-oidc");
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "mod_auth_connect");
 
 	/* see if we need to add token in the Bearer Authorization header */
 	if (bearer_token != NULL) {
@@ -436,23 +436,23 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 	}
 
 	/* the POST contents */
-	oidc_http_encode_t data = { r, "" };
+	mac_http_encode_t data = { r, "" };
 
-	if (action == OIDC_HTTP_POST_JSON) {
+	if (action == MAC_HTTP_POST_JSON) {
 
 		/* POST JSON data */
 
 		if (nr_of_params > 0) {
 
 			/* add the parameters in JSON formatting */
-			apr_table_do(oidc_http_add_json_param, &data, params, NULL);
+			apr_table_do(mac_http_add_json_param, &data, params, NULL);
 			/* surround it by brackets to make it a valid JSON object */
 			data.encoded_params = apr_psprintf(r->pool, "{ %s }",
 					data.encoded_params);
 
 			/* set the data and log the event */
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_util_http_call: setting JSON parameters: %s",
+			ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+					"mac_util_http_call: setting JSON parameters: %s",
 					data.encoded_params);
 			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.encoded_params);
 		}
@@ -466,17 +466,17 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 		h_list = curl_slist_append(h_list,
 						"Content-type: application/json");
 
-	} else if (action == OIDC_HTTP_POST_FORM) {
+	} else if (action == MAC_HTTP_POST_FORM) {
 
 		/* POST url-form-encoded data */
 
 		if (nr_of_params > 0) {
 
-			apr_table_do(oidc_http_add_form_url_encoded_param, &data, params,
+			apr_table_do(mac_http_add_form_url_encoded_param, &data, params,
 					NULL);
 
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_util_http_call: setting post parameters: %s",
+			ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+					"mac_util_http_call: setting post parameters: %s",
 					data.encoded_params);
 			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, data.encoded_params);
 		} // else: probably should warn here...
@@ -488,13 +488,13 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 
 		/* HTTP GET with #params > 0 */
 
-		apr_table_do(oidc_http_add_form_url_encoded_param, &data, params, NULL);
+		apr_table_do(mac_http_add_form_url_encoded_param, &data, params, NULL);
 		const char *sep = strchr(url, '?') != NULL ? "&" : "?";
 		url = apr_psprintf(r->pool, "%s%s%s", url, sep, data.encoded_params);
 
 		/* log that the URL has changed now */
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_util_http_call: added query parameters to URL: %s", url);
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_util_http_call: added query parameters to URL: %s", url);
 	}
 
 	/* see if we need to add any custom headers */
@@ -508,7 +508,7 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 	int rv = TRUE;
 	if (curl_easy_perform(curl) != CURLE_OK) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_util_http_call: curl_easy_perform() failed on: %s (%s)",
+				"mac_util_http_call: curl_easy_perform() failed on: %s (%s)",
 				url, curlError);
 		rv = FALSE;
 		goto out;
@@ -517,8 +517,8 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 	*response = apr_pstrndup(r->pool, curlBuffer.buf, curlBuffer.written);
 
 	/* set and log the response */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_util_http_call: response=%s", *response);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_util_http_call: response=%s", *response);
 
 	out:
 
@@ -533,14 +533,14 @@ apr_byte_t oidc_util_http_call(request_rec *r, const char *url, int action,
 /*
  * set a cookie in the HTTP response headers
  */
-void oidc_set_cookie(request_rec *r, const char *cookieName, const char *cookieValue) {
+void mac_set_cookie(request_rec *r, const char *cookieName, const char *cookieValue) {
 
-	oidc_cfg *c = ap_get_module_config(r->server->module_config, &oidc_module);
+	mac_cfg *c = ap_get_module_config(r->server->module_config, &auth_connect_module);
 	char *headerString, *currentCookies;
 
 	/* construct the cookie value */
 	headerString = apr_psprintf(r->pool, "%s=%s;Secure;Path=%s%s", cookieName,
-			cookieValue, oidc_get_cookie_path(r),
+			cookieValue, mac_get_cookie_path(r),
 			c->cookie_domain != NULL ?
 					apr_psprintf(r->pool, ";Domain=%s", c->cookie_domain) : "");
 
@@ -561,15 +561,15 @@ void oidc_set_cookie(request_rec *r, const char *cookieName, const char *cookieV
 				(apr_pstrcat(r->pool, headerString, ";", currentCookies, NULL)));
 
 	/* do some logging */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_set_cookie: adding outgoing header: Set-Cookie: %s",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_set_cookie: adding outgoing header: Set-Cookie: %s",
 			headerString);
 }
 
 /*
  * get a cookie from the HTTP request
  */
-char *oidc_get_cookie(request_rec *r, char *cookieName) {
+char *mac_get_cookie(request_rec *r, char *cookieName) {
 	char *cookie, *tokenizerCtx, *rv = NULL;
 
 	/* get the Cookie value */
@@ -603,7 +603,7 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
 	}
 
 	/* log what we've found */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r, "oidc_get_cookie: returning %s",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r, "mac_get_cookie: returning %s",
 			rv);
 
 	return rv;
@@ -615,7 +615,7 @@ char *oidc_get_cookie(request_rec *r, char *cookieName) {
  * http://tools.ietf.org/html/rfc2616#section-2.2) are replaced with
  * a dash ('-') character.
  */
-char *oidc_normalize_header_name(const request_rec *r, const char *str) {
+char *mac_normalize_header_name(const request_rec *r, const char *str) {
 	/* token = 1*<any CHAR except CTLs or separators>
 	 * CTL = <any US-ASCII control character
 	 *          (octets 0 - 31) and DEL (127)>
@@ -639,13 +639,13 @@ char *oidc_normalize_header_name(const request_rec *r, const char *str) {
 /*
  * see if the currently accessed path matches a path from a defined URL
  */
-apr_byte_t oidc_util_request_matches_url(request_rec *r, const char *url) {
+apr_byte_t mac_util_request_matches_url(request_rec *r, const char *url) {
 	apr_uri_t uri;
 	apr_uri_parse(r->pool, url, &uri);
 	apr_byte_t rc =
 			(apr_strnatcmp(r->parsed_uri.path, uri.path) == 0) ? TRUE : FALSE;
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_request_matches_url: comparing \"%s\"==\"%s\" (%d)",
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_request_matches_url: comparing \"%s\"==\"%s\" (%d)",
 			r->parsed_uri.path, uri.path, rc);
 	return rc;
 }
@@ -653,7 +653,7 @@ apr_byte_t oidc_util_request_matches_url(request_rec *r, const char *url) {
 /*
  * see if the currently accessed path has a certain query parameter
  */
-apr_byte_t oidc_util_request_has_parameter(request_rec *r, const char* param) {
+apr_byte_t mac_util_request_has_parameter(request_rec *r, const char* param) {
 	if (r->args == NULL)
 		return FALSE;
 	const char *option1 = apr_psprintf(r->pool, "%s=", param);
@@ -665,7 +665,7 @@ apr_byte_t oidc_util_request_has_parameter(request_rec *r, const char* param) {
 /*
  * get a query parameter
  */
-apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name,
+apr_byte_t mac_util_get_request_parameter(request_rec *r, char *name,
 		char **value) {
 	// TODO: we should really check with ? and & and avoid any <bogus>code= stuff to trigger true
 	char *tokenizer_ctx, *p, *args;
@@ -684,7 +684,7 @@ apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name,
 	do {
 		if (p && strncmp(p, k_param, k_param_sz) == 0) {
 			*value = apr_pstrdup(r->pool, p + k_param_sz);
-			*value = oidc_util_unescape_string(r, *value);
+			*value = mac_util_unescape_string(r, *value);
 		}
 		p = apr_strtok(NULL, "&", &tokenizer_ctx);
 	} while (p);
@@ -695,7 +695,7 @@ apr_byte_t oidc_util_get_request_parameter(request_rec *r, char *name,
 /*
  * printout a JSON string value
  */
-static apr_byte_t oidc_util_json_string_print(request_rec *r,
+static apr_byte_t mac_util_json_string_print(request_rec *r,
 		apr_json_value_t *result, const char *key, const char *log) {
 	apr_json_value_t *value = apr_hash_get(result->value.object, key,
 			APR_HASH_KEY_STRING);
@@ -717,12 +717,12 @@ static apr_byte_t oidc_util_json_string_print(request_rec *r,
 /*
  * check a JSON object for "error" results and printout
  */
-static apr_byte_t oidc_util_check_json_error(request_rec *r,
+static apr_byte_t mac_util_check_json_error(request_rec *r,
 		apr_json_value_t *json) {
-	if (oidc_util_json_string_print(r, json, "error",
-			"oidc_util_check_json_error") == TRUE) {
-		oidc_util_json_string_print(r, json, "error_description",
-				"oidc_util_check_json_error");
+	if (mac_util_json_string_print(r, json, "error",
+			"mac_util_check_json_error") == TRUE) {
+		mac_util_json_string_print(r, json, "error_description",
+				"mac_util_check_json_error");
 		return TRUE;
 	}
 	return FALSE;
@@ -731,26 +731,26 @@ static apr_byte_t oidc_util_check_json_error(request_rec *r,
 /*
  * decode a JSON string, check for "error" results and printout
  */
-apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r,
+apr_byte_t mac_util_decode_json_and_check_error(request_rec *r,
 		const char *str, apr_json_value_t **json) {
 
 	/* decode the JSON contents of the buffer */
 	if (apr_json_decode(json, str, strlen(str), r->pool) != APR_SUCCESS) {
 		/* something went wrong */
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_util_check_json_error: JSON parsing returned an error");
+				"mac_util_check_json_error: JSON parsing returned an error");
 		return FALSE;
 	}
 
 	if ((*json == NULL) || ((*json)->type != APR_JSON_OBJECT)) {
 		/* oops, no JSON */
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_util_check_json_error: parsed JSON did not contain a JSON object");
+				"mac_util_check_json_error: parsed JSON did not contain a JSON object");
 		return FALSE;
 	}
 
 	// see if it is not an error response somehow
-	if (oidc_util_check_json_error(r, *json) == TRUE)
+	if (mac_util_check_json_error(r, *json) == TRUE)
 		return FALSE;
 
 	return TRUE;
@@ -759,7 +759,7 @@ apr_byte_t oidc_util_decode_json_and_check_error(request_rec *r,
 /*
  * sends HTML content to the user agent
  */
-int oidc_util_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
+int mac_util_http_sendstring(request_rec *r, const char *html, int success_rvalue) {
 	ap_set_content_type(r, "text/html");
 	apr_bucket_brigade *bb = apr_brigade_create(r->pool, r->connection->bucket_alloc);
 	apr_bucket *b = apr_bucket_transient_create(html, strlen(html), r->connection->bucket_alloc);
@@ -772,35 +772,35 @@ int oidc_util_http_sendstring(request_rec *r, const char *html, int success_rval
 	return success_rvalue;
 }
 
-int oidc_base64url_decode_rsa_verify(request_rec *r, const char *alg, const char *signature, const char *message, const char *modulus, const char *exponent) {
+int mac_base64url_decode_rsa_verify(request_rec *r, const char *alg, const char *signature, const char *message, const char *modulus, const char *exponent) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_base64url_decode_rsa_verify: alg = \"%s\"", alg);
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_base64url_decode_rsa_verify: signature = \"%s\"", signature);
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_base64url_decode_rsa_verify: message = \"%s\"", message);
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_base64url_decode_rsa_verify: modulus = \"%s\"", modulus);
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_base64url_decode_rsa_verify: exponent = \"%s\"", exponent);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_base64url_decode_rsa_verify: alg = \"%s\"", alg);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_base64url_decode_rsa_verify: signature = \"%s\"", signature);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_base64url_decode_rsa_verify: message = \"%s\"", message);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_base64url_decode_rsa_verify: modulus = \"%s\"", modulus);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_base64url_decode_rsa_verify: exponent = \"%s\"", exponent);
 
 	unsigned char *mod = NULL;
-	int mod_len = oidc_base64url_decode(r, (char **)&mod, modulus, 1);
+	int mod_len = mac_base64url_decode(r, (char **)&mod, modulus, 1);
 
 	unsigned char *exp = NULL;
-	int exp_len = oidc_base64url_decode(r, (char **)&exp, exponent, 1);
+	int exp_len = mac_base64url_decode(r, (char **)&exp, exponent, 1);
 
 	unsigned char *sig = NULL;
-	int sig_len = oidc_base64url_decode(r, (char **)&sig, signature, 1);
+	int sig_len = mac_base64url_decode(r, (char **)&sig, signature, 1);
 
-	return oidc_crypto_rsa_verify(r, alg, sig, sig_len, (unsigned char *)message, strlen(message), mod, mod_len, exp, exp_len);
+	return mac_crypto_rsa_verify(r, alg, sig, sig_len, (unsigned char *)message, strlen(message), mod, mod_len, exp, exp_len);
 }
 
 /*
  * read all bytes from the HTTP request
  */
-static apr_byte_t oidc_util_read(request_rec *r, const char **rbuf) {
+static apr_byte_t mac_util_read(request_rec *r, const char **rbuf) {
 
 	if (ap_setup_client_block(r, REQUEST_CHUNKED_ERROR) != OK)
 		return FALSE;
@@ -830,20 +830,20 @@ static apr_byte_t oidc_util_read(request_rec *r, const char **rbuf) {
 /*
  * read the POST parameters in to a table
  */
- apr_byte_t oidc_util_read_post(request_rec *r, apr_table_t *table) {
+ apr_byte_t mac_util_read_post(request_rec *r, apr_table_t *table) {
 	const char *data = NULL;
 	const char *key, *val;
 
 	if (r->method_number != M_POST)
 		return FALSE;
 
-	if (oidc_util_read(r, &data) != TRUE)
+	if (mac_util_read(r, &data) != TRUE)
 		return FALSE;
 
 	while (data && *data && (val = ap_getword(r->pool, &data, '&'))) {
 		key = ap_getword(r->pool, &val, '=');
-		key = oidc_util_unescape_string(r, key);
-		val = oidc_util_unescape_string(r, val);
+		key = mac_util_unescape_string(r, key);
+		val = mac_util_unescape_string(r, val);
 		//ap_unescape_url((char*) key);
 		//ap_unescape_url((char*) val);
 		apr_table_set(table, key, val);
@@ -853,7 +853,7 @@ static apr_byte_t oidc_util_read(request_rec *r, const char **rbuf) {
 }
 
  // TODO: check return values
- apr_byte_t oidc_util_generate_random_base64url_encoded_value(request_rec *r, int randomLen, char **randomB64) {
+ apr_byte_t mac_util_generate_random_base64url_encoded_value(request_rec *r, int randomLen, char **randomB64) {
 	unsigned char *brnd = apr_pcalloc(r->pool, randomLen);
 	apr_generate_random_bytes((unsigned char *) brnd, randomLen);
 	*randomB64 = apr_palloc(r->pool, apr_base64_encode_len(randomLen) + 1);
@@ -875,7 +875,7 @@ static apr_byte_t oidc_util_read(request_rec *r, const char **rbuf) {
 /*
  * read a file from a path on disk
  */
-apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
+apr_byte_t mac_util_file_read(request_rec *r, const char *path,
  		char **result) {
  	apr_file_t *fd = NULL;
  	apr_status_t rc = APR_SUCCESS;
@@ -886,7 +886,7 @@ apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
  	if ((rc = apr_file_open(&fd, path, APR_FOPEN_READ | APR_FOPEN_BUFFERED,
  			APR_OS_DEFAULT, r->pool)) != APR_SUCCESS) {
  		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
- 				"oidc_util_file_read: no file found at: \"%s\"",
+ 				"mac_util_file_read: no file found at: \"%s\"",
  				path);
  		return FALSE;
  	}
@@ -901,7 +901,7 @@ apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
  	/* get the file info so we know its size */
  	if ((rc = apr_file_info_get(&finfo, APR_FINFO_SIZE, fd)) != APR_SUCCESS) {
  		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
- 				"oidc_util_file_read: error calling apr_file_info_get on file: \"%s\" (%s)",
+ 				"mac_util_file_read: error calling apr_file_info_get on file: \"%s\" (%s)",
  				path, apr_strerror(rc, s_err, sizeof(s_err)));
  		goto error_close;
  	}
@@ -914,7 +914,7 @@ apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
  	if ((rc = apr_file_read_full(fd, *result, finfo.size, &bytes_read))
  			!= APR_SUCCESS) {
  		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
- 				"oidc_util_file_read: apr_file_read_full on (%s) returned an error: %s",
+ 				"mac_util_file_read: apr_file_read_full on (%s) returned an error: %s",
  				path, apr_strerror(rc, s_err, sizeof(s_err)));
  		goto error_close;
  	}
@@ -925,7 +925,7 @@ apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
  	/* check that we've got all of it */
  	if (bytes_read != finfo.size) {
  		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
- 				"oidc_util_file_read: apr_file_read_full on (%s) returned less bytes (%" APR_SIZE_T_FMT ") than expected: (%" APR_OFF_T_FMT ")",
+ 				"mac_util_file_read: apr_file_read_full on (%s) returned less bytes (%" APR_SIZE_T_FMT ") than expected: (%" APR_OFF_T_FMT ")",
  				path, bytes_read, finfo.size);
  		goto error_close;
  	}
@@ -935,8 +935,8 @@ apr_byte_t oidc_util_file_read(request_rec *r, const char *path,
  	apr_file_close(fd);
 
  	/* log successful content retrieval */
- 	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
- 			"oidc_util_file_read: file read successfully \"%s\"", path);
+ 	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+ 			"mac_util_file_read: file read successfully \"%s\"", path);
 
  	return TRUE;
 
@@ -946,7 +946,7 @@ error_close:
  	apr_file_close(fd);
 
  	ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
- 			"oidc_util_file_read: returning error");
+ 			"mac_util_file_read: returning error");
 
 	return FALSE;
 }
@@ -954,7 +954,7 @@ error_close:
 /*
  * see if two provided issuer identifiers match (cq. ignore trailing slash)
  */
-apr_byte_t oidc_util_issuer_match(const char *a, const char *b) {
+apr_byte_t mac_util_issuer_match(const char *a, const char *b) {
 
 	/* check the "issuer" value against the one configure for the provider we got this id_token from */
 	if (strcmp(a, b) != 0) {
@@ -975,7 +975,7 @@ apr_byte_t oidc_util_issuer_match(const char *a, const char *b) {
  * send a user-facing error to the browser
  * TODO: more templating
  */
-int oidc_util_html_send_error(request_rec *r, const char *error, const char *description, int status_code) {
+int mac_util_html_send_error(request_rec *r, const char *error, const char *description, int status_code) {
 	char *msg = "<p>the OpenID Connect Provider returned an error:</p><p>";
 
 	if (error != NULL) {
@@ -987,17 +987,17 @@ int oidc_util_html_send_error(request_rec *r, const char *error, const char *des
 				msg, description);
 	}
 
-	return oidc_util_http_sendstring(r, msg, status_code);
+	return mac_util_http_sendstring(r, msg, status_code);
 }
 
 /*
  * see if a certain string value is part of a JSON array with string elements
  */
-apr_byte_t oidc_util_json_array_has_value(request_rec *r,
+apr_byte_t mac_util_json_array_has_value(request_rec *r,
 		apr_json_value_t *haystack, const char *needle) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_util_json_array_has_value: entering (%s)", needle);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_util_json_array_has_value: entering (%s)", needle);
 
 	if ( (haystack == NULL) || (haystack->type != APR_JSON_ARRAY) ) return FALSE;
 
@@ -1007,7 +1007,7 @@ apr_byte_t oidc_util_json_array_has_value(request_rec *r,
 				apr_json_value_t *);
 		if (elem->type != APR_JSON_STRING) {
 			ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-					"oidc_util_json_array_has_value: unhandled in-array JSON non-string object type [%d]",
+					"mac_util_json_array_has_value: unhandled in-array JSON non-string object type [%d]",
 					elem->type);
 			continue;
 		}
@@ -1016,8 +1016,8 @@ apr_byte_t oidc_util_json_array_has_value(request_rec *r,
 		}
 	}
 
-//	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-//			"oidc_util_json_array_has_value: returning (%d=%d)", i,
+//	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+//			"mac_util_json_array_has_value: returning (%d=%d)", i,
 //			haystack->value.array->nelts);
 
 	return (i == haystack->value.array->nelts) ? FALSE : TRUE;
