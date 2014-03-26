@@ -49,7 +49,7 @@
  * caching using a shared memory backend, FIFO-style
  * based on mod_auth_mellon code
  *
- * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
 #include <unistd.h>
@@ -62,36 +62,36 @@
 #include "unixd.h"
 #endif
 
-#include "../mod_oidc.h"
+#include "../mod_auth_connect.h"
 
-extern module AP_MODULE_DECLARE_DATA oidc_module;
+extern module AP_MODULE_DECLARE_DATA auth_connect_module;
 
-typedef struct oidc_cache_cfg_shm_t {
+typedef struct mac_cache_cfg_shm_t {
 	char *mutex_filename;
 	apr_shm_t *shm;
 	apr_global_mutex_t *mutex;
-} oidc_cache_cfg_shm_t;
+} mac_cache_cfg_shm_t;
 
 /* size of key in cached key/value pairs */
-#define OIDC_CACHE_SHM_KEY_MAX 128
+#define MAC_CACHE_SHM_KEY_MAX 128
 /* max value size */
-#define OIDC_CACHE_SHM_VALUE_MAX 16384
+#define MAC_CACHE_SHM_VALUE_MAX 16384
 
 /* represents one (fixed size) cache entry, cq. name/value string pair */
-typedef struct oidc_cache_shm_entry_t {
+typedef struct mac_cache_shm_entry_t {
 	/* name of the cache entry */
-	char key[OIDC_CACHE_SHM_KEY_MAX];
+	char key[MAC_CACHE_SHM_KEY_MAX];
 	/* value of the cache entry */
-	char value[OIDC_CACHE_SHM_VALUE_MAX];
+	char value[MAC_CACHE_SHM_VALUE_MAX];
 	/* last (read) access timestamp */
 	apr_time_t access;
 	/* expiry timestamp */
 	apr_time_t expires;
-} oidc_cache_shm_entry_t;
+} mac_cache_shm_entry_t;
 
 /* create the cache context */
-static void *oidc_cache_shm_cfg_create(apr_pool_t *pool) {
-	oidc_cache_cfg_shm_t *context = apr_pcalloc(pool, sizeof(oidc_cache_cfg_shm_t));
+static void *mac_cache_shm_cfg_create(apr_pool_t *pool) {
+	mac_cache_cfg_shm_t *context = apr_pcalloc(pool, sizeof(mac_cache_cfg_shm_t));
 	context->mutex_filename = NULL;
 	context->shm = NULL;
 	context->mutex = NULL;
@@ -101,24 +101,24 @@ static void *oidc_cache_shm_cfg_create(apr_pool_t *pool) {
 /*
  * initialized the shared memory block in the parent process
  */
-int oidc_cache_shm_post_config(server_rec *s) {
-	oidc_cfg *cfg = (oidc_cfg *) ap_get_module_config(s->module_config,
-			&oidc_module);
-	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
+int mac_cache_shm_post_config(server_rec *s) {
+	mac_cfg *cfg = (mac_cfg *) ap_get_module_config(s->module_config,
+			&auth_connect_module);
+	mac_cache_cfg_shm_t *context = (mac_cache_cfg_shm_t *)cfg->cache_cfg;
 
 	/* create the shared memory segment */
 	apr_status_t rv = apr_shm_create(&context->shm,
-			sizeof(oidc_cache_shm_entry_t) * cfg->cache_shm_size_max,
+			sizeof(mac_cache_shm_entry_t) * cfg->cache_shm_size_max,
 			NULL, s->process->pool);
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
-				"oidc_cache_shm_post_config: apr_shm_create failed to create shared memory segment");
+				"mac_cache_shm_post_config: apr_shm_create failed to create shared memory segment");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 
 	/* initialize the whole segment to '/0' */
 	int i;
-	oidc_cache_shm_entry_t *table = apr_shm_baseaddr_get(context->shm);
+	mac_cache_shm_entry_t *table = apr_shm_baseaddr_get(context->shm);
 	for (i = 0; i < cfg->cache_shm_size_max; i++) {
 		table[i].key[0] = '\0';
 		table[i].access = 0;
@@ -136,7 +136,7 @@ int oidc_cache_shm_post_config(server_rec *s) {
 			s->process->pool);
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
-				"oidc_cache_shm_post_config: apr_global_mutex_create failed to create mutex on file %s",
+				"mac_cache_shm_post_config: apr_global_mutex_create failed to create mutex on file %s",
 				context->mutex_filename);
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
@@ -150,7 +150,7 @@ int oidc_cache_shm_post_config(server_rec *s) {
 #endif
 	if (rv != APR_SUCCESS) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, rv, s,
-				"oidc_cache_shm_post_config: unixd_set_global_mutex_perms failed; could not set permissions ");
+				"mac_cache_shm_post_config: unixd_set_global_mutex_perms failed; could not set permissions ");
 		return HTTP_INTERNAL_SERVER_ERROR;
 	}
 #endif
@@ -161,9 +161,9 @@ int oidc_cache_shm_post_config(server_rec *s) {
 /*
  * initialize the shared memory segment in a child process
  */
-int oidc_cache_shm_child_init(apr_pool_t *p, server_rec *s) {
-	oidc_cfg *cfg = ap_get_module_config(s->module_config, &oidc_module);
-	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
+int mac_cache_shm_child_init(apr_pool_t *p, server_rec *s) {
+	mac_cfg *cfg = ap_get_module_config(s->module_config, &auth_connect_module);
+	mac_cache_cfg_shm_t *context = (mac_cache_cfg_shm_t *)cfg->cache_cfg;
 
 	/* initialize the lock for the child process */
 	apr_status_t rv = apr_global_mutex_child_init(&context->mutex,
@@ -181,15 +181,15 @@ int oidc_cache_shm_child_init(apr_pool_t *p, server_rec *s) {
 /*
  * get a value from the shared memory cache
  */
-static apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
+static apr_byte_t mac_cache_shm_get(request_rec *r, const char *key,
 		const char **value) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_cache_shm_get: entering \"%s\"", key);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_cache_shm_get: entering \"%s\"", key);
 
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
-			&oidc_module);
-	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
+	mac_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&auth_connect_module);
+	mac_cache_cfg_shm_t *context = (mac_cache_cfg_shm_t *)cfg->cache_cfg;
 
 	apr_status_t rv;
 	int i;
@@ -198,12 +198,12 @@ static apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 	/* grab the global lock */
 	if ((rv = apr_global_mutex_lock(context->mutex)) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r,
-				"oidc_cache_shm_get: apr_global_mutex_lock() failed [%d]", rv);
+				"mac_cache_shm_get: apr_global_mutex_lock() failed [%d]", rv);
 		return FALSE;
 	}
 
 	/* get the pointer to the start of the shared memory block */
-	oidc_cache_shm_entry_t *table = apr_shm_baseaddr_get(context->shm);
+	mac_cache_shm_entry_t *table = apr_shm_baseaddr_get(context->shm);
 
 	/* loop over the block, looking for the key */
 	for (i = 0; i < cfg->cache_shm_size_max; i++) {
@@ -233,43 +233,43 @@ static apr_byte_t oidc_cache_shm_get(request_rec *r, const char *key,
 /*
  * store a value in the shared memory cache
  */
-static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
+static apr_byte_t mac_cache_shm_set(request_rec *r, const char *key,
 		const char *value, apr_time_t expiry) {
 
-	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
-			&oidc_module);
-	oidc_cache_cfg_shm_t *context = (oidc_cache_cfg_shm_t *)cfg->cache_cfg;
+	mac_cfg *cfg = ap_get_module_config(r->server->module_config,
+			&auth_connect_module);
+	mac_cache_cfg_shm_t *context = (mac_cache_cfg_shm_t *)cfg->cache_cfg;
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_cache_shm_set: entering \"%s\" (value size=(%zu)", key,
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_cache_shm_set: entering \"%s\" (value size=(%zu)", key,
 			value ? strlen(value) : 0);
 
-	oidc_cache_shm_entry_t *match, *free, *lru;
-	oidc_cache_shm_entry_t *table;
+	mac_cache_shm_entry_t *match, *free, *lru;
+	mac_cache_shm_entry_t *table;
 	apr_time_t current_time;
 	int i;
 	apr_time_t age;
 
 	/* check that the passed in key is valid */
-	if (key == NULL || strlen(key) > OIDC_CACHE_SHM_KEY_MAX) {
+	if (key == NULL || strlen(key) > MAC_CACHE_SHM_KEY_MAX) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_shm_set: could not set value since key is NULL or too long (%s)",
+				"mac_cache_shm_set: could not set value since key is NULL or too long (%s)",
 				key);
 		return FALSE;
 	}
 
 	/* check that the passed in value is valid */
-	if ( (value != NULL) && strlen(value) > OIDC_CACHE_SHM_VALUE_MAX) {
+	if ( (value != NULL) && strlen(value) > MAC_CACHE_SHM_VALUE_MAX) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_shm_set: could not set value since value is too long (%zu > %d)",
-				strlen(value), OIDC_CACHE_SHM_VALUE_MAX);
+				"mac_cache_shm_set: could not set value since value is too long (%zu > %d)",
+				strlen(value), MAC_CACHE_SHM_VALUE_MAX);
 		return FALSE;
 	}
 
 	/* grab the global lock */
 	if (apr_global_mutex_lock(context->mutex) != APR_SUCCESS) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_cache_shm_set: apr_global_mutex_lock() failed");
+				"mac_cache_shm_set: apr_global_mutex_lock() failed");
 		return FALSE;
 	}
 
@@ -315,12 +315,12 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 		age = (current_time - lru->access) / 1000000;
 		if (age < 3600) {
 			ap_log_rerror(APLOG_MARK, APLOG_NOTICE, 0, r,
-					"oidc_cache_shm_set: dropping LRU entry with age = %" APR_TIME_T_FMT "s, which is less than one hour; consider increasing the shared memory caching space (which is %d now) with the (global) OIDCCacheShmMax setting.",
+					"mac_cache_shm_set: dropping LRU entry with age = %" APR_TIME_T_FMT "s, which is less than one hour; consider increasing the shared memory caching space (which is %d now) with the (global) MACCacheShmMax setting.",
 					age, cfg->cache_shm_size_max);
 		}
 	}
 
-	oidc_cache_shm_entry_t *t = match ? match : (free ? free : lru);
+	mac_cache_shm_entry_t *t = match ? match : (free ? free : lru);
 
 	if (value != NULL) {
 
@@ -341,10 +341,10 @@ static apr_byte_t oidc_cache_shm_set(request_rec *r, const char *key,
 	return TRUE;
 }
 
-oidc_cache_t oidc_cache_shm = {
-		oidc_cache_shm_cfg_create,
-		oidc_cache_shm_post_config,
-		oidc_cache_shm_child_init,
-		oidc_cache_shm_get,
-		oidc_cache_shm_set
+mac_cache_t mac_cache_shm = {
+		mac_cache_shm_cfg_create,
+		mac_cache_shm_post_config,
+		mac_cache_shm_child_init,
+		mac_cache_shm_get,
+		mac_cache_shm_set
 };

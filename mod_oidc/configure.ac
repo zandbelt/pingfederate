@@ -1,4 +1,4 @@
-AC_INIT([mod_oidc],[2.2],[hans.zandbelt@gmail.com])
+AC_INIT([mod_auth_connect],[1.0],[hans.zandbelt@gmail.com])
 
 AC_SUBST(NAMEVER, AC_PACKAGE_TARNAME()-AC_PACKAGE_VERSION())
 
@@ -31,13 +31,13 @@ fi
 if test ! -x "$APXS2"; then
    # $APXS2 isn't a executable file.
    AC_MSG_ERROR([
-Could not find apxs2. Please spesify the path to apxs2
+Could not find apxs2. Please specify the path to apxs2
 using the --with-apxs2=/full/path/to/apxs2 option.
 The executable may also be named 'apxs'.
 ])
 fi
 
-# Replace any occurances of @APXS2@ with the value of $APXS2 in the Makefile.
+# Replace any occurrences of @APXS2@ with the value of $APXS2 in the Makefile.
 AC_SUBST(APXS2)
 
 # We need the curl library for HTTP callouts.
@@ -45,7 +45,7 @@ PKG_CHECK_MODULES(CURL, libcurl)
 AC_SUBST(CURL_CFLAGS)
 AC_SUBST(CURL_LIBS)
 
-# We need openssl for crypto and HTTPS callouts.
+# We need OpenSSL for crypto and HTTPS callouts.
 PKG_CHECK_MODULES(OPENSSL, openssl)
 AC_SUBST(OPENSSL_CFLAGS)
 AC_SUBST(OPENSSL_LIBS)

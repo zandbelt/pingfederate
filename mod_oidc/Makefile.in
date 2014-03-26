@@ -1,14 +1,14 @@
 
-# Source files. mod_auth_mellon.c must be the first file.
-SRC=src/mod_oidc.c \
-	src/oidc_oauth.c \
-	src/oidc_proto.c \
-	src/oidc_crypto.c \
-	src/oidc_config.c \
-	src/oidc_util.c \
-	src/oidc_authz.c \
-	src/oidc_session.c \
-	src/oidc_metadata.c \
+# Source files. mod_auth_connect.c must be the first file.
+SRC=src/mod_auth_connect.c \
+	src/mac_oauth.c \
+	src/mac_proto.c \
+	src/mac_crypto.c \
+	src/mac_config.c \
+	src/mac_util.c \
+	src/mac_authz.c \
+	src/mac_session.c \
+	src/mac_metadata.c \
 	src/apr_json_decode.c \
 	src/cache/file.c \
 	src/cache/memcache.c \
@@ -16,7 +16,7 @@ SRC=src/mod_oidc.c \
 
 # Files to include when making a .tar.gz-file for distribution
 DISTFILES=$(SRC) \
-	src/mod_oidc.h \
+	src/mod_auth_connect.h \
 	src/apr_json.h \
 	src/cache/cache.h \
 	configure \
@@ -28,9 +28,9 @@ DISTFILES=$(SRC) \
 	ChangeLog
 
 
-all: src/mod_oidc.la
+all: src/mod_auth_connect.la
 
-src/mod_oidc.la: $(SRC) src/mod_oidc.h src/apr_json.h
+src/mod_auth_connect.la: $(SRC) src/mod_auth_connect.h src/apr_json.h
 	@APXS2@ -Wc,"@OPENSSL_CFLAGS@ @CURL_CFLAGS@" -Wl,"@OPENSSL_LIBS@ @CURL_LIBS@" -Wc,-Wall -Wc,-g -c $(SRC)
 
 
@@ -43,15 +43,15 @@ configure:	configure.ac
 
 
 .PHONY:	install
-install: src/mod_oidc.la
-	@APXS2@ -i -n mod_oidc src/mod_oidc.la
+install: src/mod_auth_connect.la
+	@APXS2@ -i -n mod_auth_connect src/mod_auth_connect.la
 
 .PHONY: distfile
 distfile:	@NAMEVER@.tar.gz
 
 .PHONY:	clean
 clean:
-	rm -f src/mod_oidc.la
+	rm -f src/mod_auth_connect.la
 	rm -f $(SRC:%.c=%.lo)
 	rm -f $(SRC:%.c=%.slo)
 	rm -rf .libs/
@@ -60,7 +60,7 @@ clean:
 distclean:	clean
 	rm -f Makefile config.log config.status @NAMEVER@.tar.gz *~ \
 	build-stamp config.guess config.sub
-	rm -rf debian/mod-oidc
+	rm -rf debian/mod-auth_connect
 	rm -f debian/files
 
 .PHONY: fullclean

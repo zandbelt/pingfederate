@@ -48,22 +48,22 @@
  *
  * mostly copied from mod_auth_cas
  *
- * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
 #include <http_core.h>
 #include <http_log.h>
 #include <http_protocol.h>
 
-#include "mod_oidc.h"
+#include "mod_auth_connect.h"
 
 /* the name of the keyword that follows the Require primitive to indicate claims-based authorization */
-#define OIDC_REQUIRE_NAME "claim"
+#define MAC_REQUIRE_NAME "claim"
 
 /*
  * see if a the Require value matches with a set of provided claims
  */
-static apr_byte_t oidc_authz_match_claim(request_rec *r,
+static apr_byte_t mac_authz_match_claim(request_rec *r,
 		const char * const attr_spec, const apr_json_value_t * const claims) {
 
 	apr_hash_index_t *hi;
@@ -144,7 +144,7 @@ static apr_byte_t oidc_authz_match_claim(request_rec *r,
 					} else {
 
 						ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-								"oidc_authz_match_claim: unhandled in-array JSON object type [%d] for key \"%s\"",
+								"mac_authz_match_claim: unhandled in-array JSON object type [%d] for key \"%s\"",
 								elem->type, (const char *) key);
 						continue;
 					}
@@ -152,7 +152,7 @@ static apr_byte_t oidc_authz_match_claim(request_rec *r,
 
 			} else {
 				ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-						"oidc_authz_match_claim: unhandled JSON object type [%d] for key \"%s\"",
+						"mac_authz_match_claim: unhandled JSON object type [%d] for key \"%s\"",
 						val->type, (const char *) key);
 				continue;
 			}
@@ -167,7 +167,7 @@ static apr_byte_t oidc_authz_match_claim(request_rec *r,
 /*
  * Apache <2.4 authorizatio routine: match the claims from the authenticated user against the Require primitive
  */
-int oidc_authz_worker(request_rec *r, const apr_json_value_t * const claims,
+int mac_authz_worker(request_rec *r, const apr_json_value_t * const claims,
 		const require_line * const reqs, int nelts) {
 	const int m = r->method_number;
 	const char *token;
@@ -189,7 +189,7 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t * const claims,
 
 		token = ap_getword_white(r->pool, &requirement);
 
-		if (apr_strnatcasecmp(token, OIDC_REQUIRE_NAME) != 0) {
+		if (apr_strnatcasecmp(token, MAC_REQUIRE_NAME) != 0) {
 			continue;
 		}
 
@@ -213,15 +213,15 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t * const claims,
 			token = ap_getword_conf(r->pool, &requirement);
 			count_oauth_claims++;
 
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_authz_worker: evaluating claim specification: %s",
+			ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+					"mac_authz_worker: evaluating claim specification: %s",
 					token);
 
-			if (oidc_authz_match_claim(r, token, claims) == TRUE) {
+			if (mac_authz_match_claim(r, token, claims) == TRUE) {
 
 				/* if *any* claim matches, then authorization has succeeded and all of the others are ignored */
-				ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-						"oidc_authz_worker: require claim "
+				ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+						"mac_authz_worker: require claim "
 						"'%s' matched", token);
 				return OK;
 			}
@@ -230,20 +230,20 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t * const claims,
 
 	/* if there weren't any "Require claim" directives, we're irrelevant */
 	if (!have_oauthattr) {
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_authz_worker: no claim statements found, not performing authz");
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_authz_worker: no claim statements found, not performing authz");
 		return DECLINED;
 	}
 	/* if there was a "Require claim", but no actual claims, that's cause to warn the admin of an iffy configuration */
 	if (count_oauth_claims == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_authz_worker: 'require claim' missing specification(s) in configuration, declining");
+				"mac_authz_worker: 'require claim' missing specification(s) in configuration, declining");
 		return DECLINED;
 	}
 
 	/* log the event, also in Apache speak */
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_authz_worker: authorization denied for client session");
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_authz_worker: authorization denied for client session");
 	ap_note_auth_failure(r);
 
 	return HTTP_UNAUTHORIZED;
@@ -253,7 +253,7 @@ int oidc_authz_worker(request_rec *r, const apr_json_value_t * const claims,
 /*
  * Apache >=2.4 authorization routine: match the claims from the authenticated user against the Require primitive
  */
-authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const claims, const char *require_args) {
+authz_status mac_authz_worker24(request_rec *r, const apr_json_value_t * const claims, const char *require_args) {
 
 	int count_oauth_claims = 0;
 	const char *t, *w;
@@ -270,15 +270,15 @@ authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const 
 
 		count_oauth_claims++;
 
-		ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-				"oidc_authz_worker24: evaluating claim specification: %s",
+		ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+				"mac_authz_worker24: evaluating claim specification: %s",
 				w);
 
 		/* see if we can match any of out input claims against this Require'd value */
-		if (oidc_authz_match_claim(r, w, claims) == TRUE) {
+		if (mac_authz_match_claim(r, w, claims) == TRUE) {
 
-			ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-					"oidc_authz_worker24: require claim "
+			ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+					"mac_authz_worker24: require claim "
 					"'%s' matched", w);
 			return AUTHZ_GRANTED;
 		}
@@ -287,7 +287,7 @@ authz_status oidc_authz_worker24(request_rec *r, const apr_json_value_t * const 
 	/* if there wasn't anything after the Require claims directive... */
 	if (count_oauth_claims == 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
-				"oidc_authz_worker24: 'require claim' missing specification(s) in configuration, denying");
+				"mac_authz_worker24: 'require claim' missing specification(s) in configuration, denying");
 	}
 
 	return AUTHZ_DENIED;

@@ -498,7 +498,7 @@
         <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Set Malicious Header" enabled="true">
           <collectionProp name="HeaderManager.headers">
             <elementProp name="" elementType="Header">
-              <stringProp name="Header.name">OIDC_CLAIM_BOGUS</stringProp>
+              <stringProp name="Header.name">MAC_CLAIM_BOGUS</stringProp>
               <stringProp name="Header.value">bogus</stringProp>
             </elementProp>
           </collectionProp>
@@ -532,7 +532,7 @@
           <hashTree>
             <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert User Logged In" enabled="true">
               <collectionProp name="Asserion.test_strings">
-                <stringProp name="-1682027846">\[OIDC_CLAIM_sub\] =&gt; ${USERNAME}</stringProp>
+                <stringProp name="1813208642">\[MAC_CLAIM_sub\] =&gt; ${USERNAME}</stringProp>
               </collectionProp>
               <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
               <boolProp name="Assertion.assume_success">false</boolProp>
@@ -541,7 +541,7 @@
             <hashTree/>
             <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Assert Fake Header Removal" enabled="true">
               <collectionProp name="Asserion.test_strings">
-                <stringProp name="-2019701846">\[OIDC_CLAIM_BOGUS\] =&gt; bogus</stringProp>
+                <stringProp name="-900078798">\[MAC_CLAIM_BOGUS\] =&gt; bogus</stringProp>
               </collectionProp>
               <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
               <boolProp name="Assertion.assume_success">false</boolProp>

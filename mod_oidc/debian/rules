@@ -19,5 +19,5 @@ override_dh_auto_install:
 
 override_dh_fixperms:
 	dh_fixperms
-	chown -R www-data debian/libapache2-mod-oidc/var/cache/apache2/mod_oidc
-	chmod -R go= debian/libapache2-mod-oidc/var/cache/apache2/mod_oidc
+	chown -R www-data debian/libapache2-mod-auth-connect/var/cache/apache2/mod_auth_connect
+	chmod -R go= debian/libapache2-mod-auth-connect/var/cache/apache2/mod_auth_connect

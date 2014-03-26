@@ -48,7 +48,7 @@
  *
  * based on http://saju.net.in/code/misc/openssl_aes.c.txt
  *
- * @Author: Hans Zandbelt - hans.zandbelt@gmail.com
+ * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  */
 
 #include <httpd.h>
@@ -62,12 +62,12 @@
 #include <openssl/hmac.h>
 #include <openssl/err.h>
 
-#include "mod_oidc.h"
+#include "mod_auth_connect.h"
 
 /*
  * initialize the crypto context in the server configuration record; the passphrase is set already
  */
-static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
+static apr_byte_t mac_crypto_init(mac_cfg *cfg, server_rec *s) {
 
 	if (cfg->encrypt_ctx != NULL)
 		return TRUE;
@@ -90,7 +90,7 @@ static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 			key_data_len, nrounds, key, iv);
 	if (i != 32) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
-				"oidc_crypto_init: key size must be 256 bits!");
+				"mac_crypto_init: key size must be 256 bits!");
 		return FALSE;
 	}
 
@@ -102,7 +102,7 @@ static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 	if (!EVP_EncryptInit_ex(cfg->encrypt_ctx, EVP_aes_256_cbc(), NULL, key,
 			iv)) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
-				"oidc_crypto_init: EVP_EncryptInit_ex on the encrypt context failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_init: EVP_EncryptInit_ex on the encrypt context failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return FALSE;
 	}
 
@@ -111,7 +111,7 @@ static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 	if (!EVP_DecryptInit_ex(cfg->decrypt_ctx, EVP_aes_256_cbc(), NULL, key,
 			iv)) {
 		ap_log_error(APLOG_MARK, APLOG_ERR, 0, s,
-				"oidc_crypto_init: EVP_DecryptInit_ex on the decrypt context failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_init: EVP_DecryptInit_ex on the decrypt context failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return FALSE;
 	}
 
@@ -121,10 +121,10 @@ static apr_byte_t oidc_crypto_init(oidc_cfg *cfg, server_rec *s) {
 /*
  * AES encrypt plaintext
  */
-unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg,
+unsigned char *mac_crypto_aes_encrypt(request_rec *r, mac_cfg *cfg,
 		unsigned char *plaintext, int *len) {
 
-	if (oidc_crypto_init(cfg, r->server) == FALSE) return NULL;
+	if (mac_crypto_init(cfg, r->server) == FALSE) return NULL;
 
 	/* max ciphertext len for a n bytes of plaintext is n + AES_BLOCK_SIZE -1 bytes */
 	int c_len = *len + AES_BLOCK_SIZE, f_len = 0;
@@ -133,7 +133,7 @@ unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg,
 	/* allows reusing of 'e' for multiple encryption cycles */
 	if (!EVP_EncryptInit_ex(cfg->encrypt_ctx, NULL, NULL, NULL, NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_encrypt: EVP_EncryptInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_aes_encrypt: EVP_EncryptInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
@@ -141,14 +141,14 @@ unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg,
 	if (!EVP_EncryptUpdate(cfg->encrypt_ctx, ciphertext, &c_len, plaintext,
 			*len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_encrypt: EVP_EncryptUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_aes_encrypt: EVP_EncryptUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
 	/* update ciphertext with the final remaining bytes */
 	if (!EVP_EncryptFinal_ex(cfg->encrypt_ctx, ciphertext + c_len, &f_len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_encrypt: EVP_EncryptFinal_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_aes_encrypt: EVP_EncryptFinal_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
@@ -160,10 +160,10 @@ unsigned char *oidc_crypto_aes_encrypt(request_rec *r, oidc_cfg *cfg,
 /*
  * AES decrypt ciphertext
  */
-unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
+unsigned char *mac_crypto_aes_decrypt(request_rec *r, mac_cfg *cfg,
 		unsigned char *ciphertext, int *len) {
 
-	if (oidc_crypto_init(cfg, r->server) == FALSE) return NULL;
+	if (mac_crypto_init(cfg, r->server) == FALSE) return NULL;
 
 	/* because we have padding ON, we must allocate an extra cipher block size of memory */
 	int p_len = *len, f_len = 0;
@@ -172,7 +172,7 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
 	/* allows reusing of 'e' for multiple encryption cycles */
 	if (!EVP_DecryptInit_ex(cfg->decrypt_ctx, NULL, NULL, NULL, NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_decrypt: EVP_DecryptInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_aes_decrypt: EVP_DecryptInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
@@ -180,14 +180,14 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
 	if (!EVP_DecryptUpdate(cfg->decrypt_ctx, plaintext, &p_len, ciphertext,
 			*len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_decrypt: EVP_DecryptUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_aes_decrypt: EVP_DecryptUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
 	/* update plaintext with the final remaining bytes */
 	if (!EVP_DecryptFinal_ex(cfg->decrypt_ctx, plaintext + p_len, &f_len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_aes_decrypt: EVP_DecryptFinal_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_aes_decrypt: EVP_DecryptFinal_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
@@ -199,7 +199,7 @@ unsigned char *oidc_crypto_aes_decrypt(request_rec *r, oidc_cfg *cfg,
 /*
  * return OpenSSL digest for JWK algorithm
  */
-char *oidc_crypto_jwt_alg2digest(const char *alg) {
+char *mac_crypto_jwt_alg2digest(const char *alg) {
 	if ((strcmp(alg, "RS256") == 0) || (strcmp(alg, "PS256") == 0) || (strcmp(alg, "HS256") == 0)) {
 		return "sha256";
 	}
@@ -218,7 +218,7 @@ char *oidc_crypto_jwt_alg2digest(const char *alg) {
 /*
  * return OpenSSL padding type for JWK RSA algorithm
  */
-static int oidc_crypto_jwt_alg2rsa_padding(const char *alg) {
+static int mac_crypto_jwt_alg2rsa_padding(const char *alg) {
 	if ((strcmp(alg, "RS256") == 0) || (strcmp(alg, "RS384") == 0) || (strcmp(alg, "RS512") == 0)) {
 		return RSA_PKCS1_PADDING;
 	}
@@ -228,14 +228,14 @@ static int oidc_crypto_jwt_alg2rsa_padding(const char *alg) {
 	return -1;
 }
 
-static const EVP_MD *oidc_crypto_alg2evp(request_rec *r, const char *alg) {
+static const EVP_MD *mac_crypto_alg2evp(request_rec *r, const char *alg) {
 	const EVP_MD *result = NULL;
 
-	char *digest = oidc_crypto_jwt_alg2digest(alg);
+	char *digest = mac_crypto_jwt_alg2digest(alg);
 
 	if (digest == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-			"oidc_crypto_alg2evp: unsupported algorithm: %s", alg);
+			"mac_crypto_alg2evp: unsupported algorithm: %s", alg);
 		return NULL;
 	}
 
@@ -243,7 +243,7 @@ static const EVP_MD *oidc_crypto_alg2evp(request_rec *r, const char *alg) {
 
 	if (result == NULL) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_alg2evp: EVP_get_digestbyname failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_alg2evp: EVP_get_digestbyname failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return NULL;
 	}
 
@@ -253,14 +253,14 @@ static const EVP_MD *oidc_crypto_alg2evp(request_rec *r, const char *alg) {
 /*
  * verify RSA signature
  */
-apr_byte_t oidc_crypto_rsa_verify(request_rec *r, const char *alg, unsigned char* sig, int sig_len, unsigned char* msg,
+apr_byte_t mac_crypto_rsa_verify(request_rec *r, const char *alg, unsigned char* sig, int sig_len, unsigned char* msg,
 		int msg_len, unsigned char *mod, int mod_len, unsigned char *exp, int exp_len) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_crypto_rsa_verify: entering (%s)", alg);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_crypto_rsa_verify: entering (%s)", alg);
 
 	const EVP_MD *digest = NULL;
-	if ((digest = oidc_crypto_alg2evp(r, alg)) == NULL) return FALSE;
+	if ((digest = mac_crypto_alg2evp(r, alg)) == NULL) return FALSE;
 
 	apr_byte_t rc = FALSE;
 
@@ -281,7 +281,7 @@ apr_byte_t oidc_crypto_rsa_verify(request_rec *r, const char *alg, unsigned char
 	EVP_PKEY* pRsaKey = EVP_PKEY_new();
     if (!EVP_PKEY_assign_RSA(pRsaKey, pubkey)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_rsa_verify: EVP_PKEY_assign_RSA failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_rsa_verify: EVP_PKEY_assign_RSA failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		pRsaKey = NULL;
 		goto end;
     }
@@ -289,30 +289,30 @@ apr_byte_t oidc_crypto_rsa_verify(request_rec *r, const char *alg, unsigned char
     ctx.pctx = EVP_PKEY_CTX_new(pRsaKey, NULL);
     if (!EVP_PKEY_verify_init(ctx.pctx)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_rsa_verify: EVP_PKEY_verify_init failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_rsa_verify: EVP_PKEY_verify_init failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		goto end;
     }
-	if (!EVP_PKEY_CTX_set_rsa_padding(ctx.pctx, oidc_crypto_jwt_alg2rsa_padding(alg))) {
+	if (!EVP_PKEY_CTX_set_rsa_padding(ctx.pctx, mac_crypto_jwt_alg2rsa_padding(alg))) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_rsa_verify: EVP_PKEY_CTX_set_rsa_padding failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_rsa_verify: EVP_PKEY_CTX_set_rsa_padding failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		goto end;
 	}
 
 	if (!EVP_VerifyInit_ex(&ctx, digest, NULL)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_rsa_verify: EVP_VerifyInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_rsa_verify: EVP_VerifyInit_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		goto end;
 	}
 
 	if (!EVP_VerifyUpdate(&ctx, msg, msg_len)){
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_rsa_verify: EVP_VerifyUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_rsa_verify: EVP_VerifyUpdate failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		goto end;
 	}
 
 	if (!EVP_VerifyFinal(&ctx, sig, sig_len, pRsaKey)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_rsa_verify: EVP_VerifyFinal failed: %s", ERR_error_string(ERR_get_error(), NULL));
+				"mac_crypto_rsa_verify: EVP_VerifyFinal failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		goto end;
 	}
 
@@ -332,33 +332,33 @@ end:
 /*
  * verify HMAC signature
  */
-apr_byte_t oidc_crypto_hmac_verify(request_rec *r, const char *alg, unsigned char* sig, int sig_len, unsigned char* msg,
+apr_byte_t mac_crypto_hmac_verify(request_rec *r, const char *alg, unsigned char* sig, int sig_len, unsigned char* msg,
 		int msg_len, unsigned char *key, int key_len) {
 
-	ap_log_rerror(APLOG_MARK, OIDC_DEBUG, 0, r,
-			"oidc_crypto_hmac_verify: entering (%s)", alg);
+	ap_log_rerror(APLOG_MARK, MAC_DEBUG, 0, r,
+			"mac_crypto_hmac_verify: entering (%s)", alg);
 
 	const EVP_MD *digest = NULL;
-	if ((digest = oidc_crypto_alg2evp(r, alg)) == NULL) return FALSE;
+	if ((digest = mac_crypto_alg2evp(r, alg)) == NULL) return FALSE;
 
 	unsigned int  md_len = 0;
 	unsigned char md[EVP_MAX_MD_SIZE];
 
 	if (!HMAC(digest, key, key_len, msg, msg_len, md, &md_len)) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-			"oidc_crypto_hmac_verify: HMAC failed: %s", ERR_error_string(ERR_get_error(), NULL));
+			"mac_crypto_hmac_verify: HMAC failed: %s", ERR_error_string(ERR_get_error(), NULL));
 		return FALSE;
 	}
 
 	if (md_len != sig_len) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_hmac_verify: hash length does not match signature length");
+				"mac_crypto_hmac_verify: hash length does not match signature length");
 		return FALSE;
 	}
 
 	if (memcmp(md, sig, md_len) != 0) {
 		ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-				"oidc_crypto_hmac_verify: HMAC verification failed");
+				"mac_crypto_hmac_verify: HMAC verification failed");
 		return FALSE;
 	}
 
