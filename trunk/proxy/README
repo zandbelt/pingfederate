@@ -1,16 +1,19 @@
 Steps to produce a working setup:
 
- 1) download PingFederate 6.x or 7.x and deploy it together with a license file
+ 1) download PingFederate 7.x and deploy it together with a license file
 
- 2) install the Agentless Integration Kit 1.x
+ 2) install the Agentless Integration Kit 1.2
  
  3) copy the proxy.war directory in server/default/deploy (using cp -r)
 
  4) configure one IDP and one SP Reference ID adapter with the settings below
 
- 5) review proxy.war/proxy.properties and edit as needed; typically only the hostname
+ 5) enable target resource validation in the SP configuration application integration
+    settings and lock down the TargetResource to the PingFederate proxy hostname
+ 
+ 6) review proxy.war/proxy.properties and edit as needed; typically only the hostname
 
-For the Agentless Adapter 1.2 you can use either POST or Query as the Transport Mode
+For the Agentless Adapter 1.2 use the POST Transport Mode.
 
 SP Proxy Adapter Settings *)
 =========================
@@ -20,6 +23,7 @@ Instance Id	ProxySpAdapter
 User Name	ref
 Password ref1234
 Logout Service Endpoint	https://<hostname>:9031/proxy/?cmd=sp-slo
+Transport Mode	Form Post
 Require SSL/TLS	true
 Outgoing Attribute Format	JSON
 Incoming Attribute Format	JSON
@@ -36,10 +40,10 @@ Authentication Endpoint	https://<hostname>:9031/proxy/?cmd=idp-sso
 User Name	ref
 Password ref1234
 Logout Service Endpoint	https://<hostname>:9031/proxy/?cmd=idp-slo
+Transport Mode	Form Post
 Require SSL/TLS	true
 Outgoing Attribute Format	JSON
 Incoming Attribute Format	JSON
 Logout Mode	Front Channel
 Skip Host Name Validation	false
 <and an attribute contract for all attributes you want to pass over the bridge>
-
