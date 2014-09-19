@@ -19,6 +19,12 @@ Steps to produce a working setup:
     version 3.0 supports SSO sessions that are cached on the proxy for the duration
     of the session.timeout setting
 
+The proxy IDP adapter can be instantiated multiple times, inheriting from a single parent,
+to represent individual IDPs; the authentication service URL would then be extended with a
+PartnerIdpId. IDP selection can then be done by connecting a specific proxy IDP adapter
+instance to a connection, possibly using adapter selection for IDP groups, or in the
+adapter2adapter case by passing in the IdpAdapterId after creating corresponding mappings.
+
 For the Agentless Adapter 1.2 use the POST Transport Mode for best security.
 
 SP Proxy Adapter Settings *)
