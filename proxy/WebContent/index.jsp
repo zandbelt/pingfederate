@@ -28,7 +28,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * @Version: 2.0
+ * @Version: 3.0
  *
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  *
@@ -37,6 +37,7 @@
 <%@page import="java.io.BufferedWriter"%>
 <%@page import="java.util.HashMap"%>
 <%@page import="java.util.Map"%>
+<%@page import="java.util.Date"%>
 <%@page import="java.util.Properties"%>
 <%@page import="java.net.URLEncoder"%>
 <%@page import="java.io.OutputStreamWriter"%>
@@ -63,6 +64,26 @@
 <%@page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 
 <%!
+
+/**
+  * state (i.e. JSON identity attributes + timestamp that is stored in the session
+  */
+private static class ProxySSOSessionState {
+	private JSONObject jsonObject = null;
+	private Date timeStamp = null;
+	public ProxySSOSessionState(JSONObject json) {
+		this.jsonObject = json;
+		this.timeStamp = new Date();
+	}
+
+	public JSONObject getJSONObject() {
+		return this.jsonObject;
+	}
+
+	public Date getTimestamp() {
+		return this.timeStamp;
+	}
+}
 
 /**
  * Execute a REST call to the Reference ID adapter.
@@ -123,7 +144,7 @@ public JSONObject doREST(String url, Properties p, String type, JSONObject jsonR
 public JSONObject doPickup(Properties p, String role, HttpServletRequest request, HttpServletResponse response, SessionStateSupport sessionStateSupport) throws Exception {
 	String pickupUrl = p.getProperty("pf.base.url") + "/ext/ref/pickup?REF=" + URLEncoder.encode(request.getParameter("REF"), "UTF-8");
 	JSONObject jsonObject = doREST(pickupUrl, p, role, null);
-	sessionStateSupport.setAttribute("json", jsonObject, request, response, false);
+	sessionStateSupport.setAttribute("state", new ProxySSOSessionState(jsonObject), request, response, false);
 	return jsonObject;
 }
 
@@ -132,8 +153,8 @@ public JSONObject doPickup(Properties p, String role, HttpServletRequest request
  */ 
 public String doDropoff(Properties p, String role, HttpServletRequest request, HttpServletResponse response, SessionStateSupport sessionStateSupport)  throws Exception {
 	String dropoffUrl = p.getProperty("pf.base.url") + "/ext/ref/dropoff";	
-	JSONObject jsonObject = (JSONObject)sessionStateSupport.removeAttribute("json", request, response);
-	jsonObject = doREST(dropoffUrl, p, role, jsonObject);	
+	ProxySSOSessionState state = (ProxySSOSessionState)sessionStateSupport.getAttribute("state", request, response);
+	JSONObject jsonObject = doREST(dropoffUrl, p, role, state.getJSONObject());	
 	return (String)jsonObject.get("REF");
 }
 
@@ -156,7 +177,8 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 	InputStream stream = application.getResourceAsStream("/proxy.properties");
 	Properties p = new Properties();
 	p.load(stream);
-
+	long sessionTimeout = Long.valueOf(p.getProperty("session.timeout", "0"));
+	
 	if (cmdValue == null) {
 
 		// start IDP-initiated-SSO
@@ -171,7 +193,8 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 
 	} else if (cmdValue.equals("idp-sso")) {
 
-		if (sessionStateSupport.getAttribute("json", request, response) != null) {
+		ProxySSOSessionState state = (ProxySSOSessionState)sessionStateSupport.getAttribute("state", request, response);
+		if ( (state != null) && (new Date().before(new Date(state.getTimestamp().getTime() + sessionTimeout * 1000)))) {
 
 			// continue IDP initiated SSO
 			doResume(p, request.getParameter("resumePath"), response, doDropoff(p, "idp", request, response, sessionStateSupport));
@@ -251,7 +274,7 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 	} else if (cmdValue.equals("slo-resume")) {
 
 		// kill the session and send off the browser to the resumePath, ie. to the IDP/SP
-		sessionStateSupport.removeAttribute("json", request, response);
+		sessionStateSupport.removeAttribute("state", request, response);
 		doResume(p, request.getParameter("resumePath"), response, request.getParameter("REF"));
 
 	} else {
