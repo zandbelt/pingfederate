@@ -10,10 +10,16 @@ Steps to produce a working setup:
 
  5) enable target resource validation in the SP configuration application integration
     settings and lock down the TargetResource to the PingFederate proxy hostname
- 
- 6) review proxy.war/proxy.properties and edit as needed; typically only the hostname
 
-For the Agentless Adapter 1.2 use the POST Transport Mode.
+ 6) connect the defined Reference ID IDP and SP adapters to each of the SP and IDP
+    connections respectively that you want to bridge to/from
+
+ 7) review proxy.war/proxy.properties and edit as needed; typically only the hostname
+ 
+    version 3.0 supports SSO sessions that are cached on the proxy for the duration
+    of the session.timeout setting
+
+For the Agentless Adapter 1.2 use the POST Transport Mode for best security.
 
 SP Proxy Adapter Settings *)
 =========================
