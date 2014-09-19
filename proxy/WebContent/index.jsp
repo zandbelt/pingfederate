@@ -49,7 +49,6 @@
 <%@page import="javax.servlet.http.Cookie"%>
 <%@page import="org.json.simple.JSONObject" %>
 <%@page import="org.json.simple.parser.JSONParser" %>
-
 <%@page import="javax.net.ssl.X509TrustManager"%>
 <%@page import="java.security.cert.CertificateException"%>
 <%@page import="java.security.cert.X509Certificate"%>
@@ -58,11 +57,8 @@
 <%@page import="javax.net.ssl.SSLContext"%>
 <%@page import="javax.net.ssl.SSLSession"%>
 <%@page import="javax.net.ssl.HostnameVerifier"%>
-
 <%@page import="org.sourceid.saml20.adapter.state.SessionStateSupport"%> 
-
 <%@page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
-
 <%!
 
 /**
@@ -167,7 +163,6 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 }
 
 %>
-
 <%
 	String cmdValue = request.getParameter("cmd");
 
@@ -185,7 +180,8 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 		doPickup(p, "sp", request, response, sessionStateSupport);
 
 		String strReturnUrl = p.getProperty("pf.base.url");
-		strReturnUrl += "/idp/startSSO.ping?IdpAdapterId=" +  URLEncoder.encode(p.getProperty("idp.adapter.id"), "UTF-8");
+		String idpAdapterId = (request.getParameter("IdpAdapterId") != null) ? request.getParameter("IdpAdapterId") : p.getProperty("idp.adapter.id");
+		strReturnUrl += "/idp/startSSO.ping?IdpAdapterId=" +  URLEncoder.encode(idpAdapterId, "UTF-8");
 		if (request.getParameter("PartnerSpId") != null) strReturnUrl += "&PartnerSpId=" + URLEncoder.encode(request.getParameter("PartnerSpId"), "UTF-8");
 		if (request.getParameter("TargetResource") != null) strReturnUrl += "&TargetResource=" + URLEncoder.encode(request.getParameter("TargetResource"), "UTF-8");
 
@@ -204,9 +200,18 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 
 			// assemble the URL to CDC endpoint and send the browser off
 			String startSSOUrl = p.getProperty("pf.base.url");
-			startSSOUrl += p.getProperty("pf.start.sso.path", "/sp/cdcstartSSO.ping");
+
+			startSSOUrl += (request.getParameter("startsso") != null) ? request.getParameter("startsso") : p.getProperty("pf.start.sso.path", "/sp/cdcstartSSO.ping");
 			startSSOUrl += (startSSOUrl.indexOf("?") > -1) ? "&" : "?";
 			startSSOUrl += "SpSessionAuthnAdapterId=" +  URLEncoder.encode(p.getProperty("sp.adapter.id"), "UTF-8");
+			// kick off url: https://proxy:9031/pf/adapter2adapter.ping?SpSessionAuthnAdapterId=spadapter&IdpAdapterId=proxyidpadapter2
+			// proxyidpadapter2 adapter auth service url: https://proxy:9031/proxy/?cmd=idp-sso&startsso=%2Fpf%2Fadapter2adapter.ping&IdpAdapterId=facebook
+			if (request.getParameter("IdpAdapterId") != null) {
+				startSSOUrl += "&IdpAdapterId=" + URLEncoder.encode(request.getParameter("IdpAdapterId"), "UTF-8");
+			}
+			if (request.getParameter("PartnerIdpId") != null) {
+				startSSOUrl += "&PartnerIdpId=" + URLEncoder.encode(request.getParameter("PartnerIdpId"), "UTF-8");
+			}
 			String targetResource = p.getProperty("pf.base.url") + p.getProperty("proxy.path");
 			targetResource += "?cmd=idp-sso-resume&resumePath=" + URLEncoder.encode(request.getParameter("resumePath"), "UTF-8");
 			startSSOUrl += "&TargetResource=" + URLEncoder.encode(targetResource, "UTF-8");
