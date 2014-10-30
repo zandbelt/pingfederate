@@ -28,7 +28,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * @Version: 3.0
+ * @Version: 3.1
  *
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  *
@@ -184,6 +184,7 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 		strReturnUrl += "/idp/startSSO.ping?IdpAdapterId=" +  URLEncoder.encode(idpAdapterId, "UTF-8");
 		if (request.getParameter("PartnerSpId") != null) strReturnUrl += "&PartnerSpId=" + URLEncoder.encode(request.getParameter("PartnerSpId"), "UTF-8");
 		if (request.getParameter("TargetResource") != null) strReturnUrl += "&TargetResource=" + URLEncoder.encode(request.getParameter("TargetResource"), "UTF-8");
+		strReturnUrl += "&REF=" + URLEncoder.encode(doDropoff(p, "idp", request, response, sessionStateSupport), "UTF-8");
 
 		response.sendRedirect(strReturnUrl);
 
