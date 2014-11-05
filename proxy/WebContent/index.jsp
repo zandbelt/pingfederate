@@ -28,7 +28,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * @Version: 3.1
+ * @Version: 3.2
  *
  * @Author: Hans Zandbelt - hzandbelt@pingidentity.com
  *
@@ -60,6 +60,8 @@
 <%@page import="org.sourceid.saml20.adapter.state.SessionStateSupport"%> 
 <%@page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 <%!
+
+static final String proxyVersion = "3.2";
 
 /**
   * state (i.e. JSON identity attributes + timestamp that is stored in the session
@@ -175,6 +177,19 @@ public void doResume(Properties p, String resumePath, HttpServletResponse respon
 	long sessionTimeout = Long.valueOf(p.getProperty("session.timeout", "0"));
 	
 	if (cmdValue == null) {
+
+		if (request.getParameter("REF") == null) {
+			response.setStatus(HttpServletResponse.SC_OK);
+			response.getWriter().write("<html><body>");
+			response.getWriter().write("<title>Hans' Proxy JSP</title>");
+			response.getWriter().write("<h3>Hans' Proxy JSP version " + proxyVersion + "</h3>");
+			response.getWriter().write("<p><i><small>(loaded " + p.size() + " properties)</small></i></p>");
+			response.getWriter().write("<p>Nothing to see here, please move along...</p>");
+			response.getWriter().write("<p>Documentation can be found <a href=\"https://pingfederate.googlecode.com/svn/trunk/proxy/WebContent/proxy-3.0.pdf\">here</a>.</p>");
+			response.getWriter().write("</body><html>");
+			response.getWriter().flush();
+			return;
+		}
 
 		// start IDP-initiated-SSO
 		doPickup(p, "sp", request, response, sessionStateSupport);
