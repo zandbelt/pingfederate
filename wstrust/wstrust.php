@@ -23,12 +23,13 @@ class WSTRUST {
 
 	static $TOKENTYPE_SAML11 = 'http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLV1.1';
 	static $TOKENTYPE_SAML20 = 'http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLV2.0';
+	static $TOKENTYPE_STATUS = 'http://docs.oasis-open.org/ws-sx/ws-trust/200512/RSTR/Status';
 	
-	static function getRST($tokenType, $appliesTo) {
+	static function getRST($tokenType, $appliesTo, $action = 'Issue') {
 		return <<<XML
 <wst:RequestSecurityToken xmlns:wst="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
   <wst:TokenType>$tokenType</wst:TokenType>
-  <wst:RequestType>http://docs.oasis-open.org/ws-sx/ws-trust/200512/Issue</wst:RequestType>
+  <wst:RequestType>http://docs.oasis-open.org/ws-sx/ws-trust/200512/$action</wst:RequestType>
   <wsp:AppliesTo xmlns:wsp="http://schemas.xmlsoap.org/ws/2004/09/policy">
     <wsa:EndpointReference xmlns:wsa="http://www.w3.org/2005/08/addressing">
       <wsa:Address>$appliesTo</wsa:Address>
@@ -39,7 +40,7 @@ class WSTRUST {
 </wst:RequestSecurityToken>
 XML;
 	}
-
+	
 	static function parseRSTR($result) {
 		$dom = new DOMDocument();
 		$dom->loadXML($result);
